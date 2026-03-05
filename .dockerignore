@@ -1,0 +1,13 @@
+.git
+docs/
+tests/
+*.md
+!prompts/**/*.md
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.mypy_cache
+infra/
+.env
+*.egg-info
