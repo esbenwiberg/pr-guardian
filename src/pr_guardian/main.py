@@ -4,6 +4,7 @@ import structlog
 from fastapi import FastAPI
 
 from pr_guardian.api.health_api import router as health_router
+from pr_guardian.api.review import router as review_router
 from pr_guardian.api.webhooks import router as webhooks_router
 
 structlog.configure(
@@ -21,6 +22,7 @@ app = FastAPI(
 )
 
 app.include_router(health_router)
+app.include_router(review_router)
 app.include_router(webhooks_router)
 
 
