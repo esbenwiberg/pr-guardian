@@ -1,0 +1,57 @@
+llm:
+  default_provider: anthropic
+  providers:
+    anthropic:
+      type: anthropic
+      api_key_env: ANTHROPIC_API_KEY
+      default_model: claude-sonnet-4-6
+      models:
+        - claude-opus-4-6
+        - claude-sonnet-4-6
+        - claude-haiku-4-5
+  max_tokens: 4096
+  temperature: 0.1
+  timeout_seconds: 120
+
+repo_risk_class: standard
+
+human_review:
+  reviewer_group: Developers
+
+thresholds:
+  auto_approve_max_score: 4.0
+  human_review_min_score: 4.0
+  hard_block_score: 8.0
+
+weights:
+  security_privacy: 3.0
+  test_quality: 2.5
+  architecture_intent: 2.0
+  performance: 1.5
+  hotspot: 1.5
+  code_quality_observability: 1.0
+
+certainty_validation:
+  detected_min_signals: 2
+  suspected_min_signals: 1
+
+auto_approve:
+  enabled: true
+  allowed_target_branches:
+    - develop
+    - "feature/*"
+  blocked_target_branches:
+    - main
+    - master
+    - "release/*"
+  require_all_checks_pass: true
+
+agents:
+  max_context_tokens: 32000
+  timeout_seconds: 120
+
+feedback:
+  enabled: true
+  log_all_decisions: true
+  override_tracking: true
+  weekly_report: true
