@@ -132,3 +132,15 @@ class FindingRow(Base):
     cwe: Mapped[str | None] = mapped_column(String(32), nullable=True)
 
     agent_result: Mapped[AgentResultRow] = relationship(back_populates="findings")
+
+
+class PromptOverrideRow(Base):
+    """Runtime override for an agent's base prompt."""
+
+    __tablename__ = "prompt_overrides"
+
+    agent_name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    content: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

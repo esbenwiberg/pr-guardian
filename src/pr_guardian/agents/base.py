@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import structlog
 
@@ -9,6 +10,7 @@ from pr_guardian.agents.prompt_composer import build_agent_prompt
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.llm.factory import create_llm_client, resolve_model
 from pr_guardian.llm.protocol import LLMClient
+from pr_guardian.persistence import storage
 from pr_guardian.models.context import ReviewContext
 from pr_guardian.models.findings import (
     AgentResult,
@@ -22,7 +24,7 @@ from pr_guardian.models.findings import (
 log = structlog.get_logger()
 
 AGENT_OUTPUT_SCHEMA = """
-Respond with valid JSON matching this schema:
+Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching this schema:
 {
   "verdict": "pass | warn | flag_human",
   "languages_reviewed": ["python", "typescript"],
@@ -71,7 +73,8 @@ class BaseAgent:
     async def review(self, context: ReviewContext) -> AgentResult:
         """Run the agent review. Override for custom behavior."""
         languages = list(context.language_map.languages.keys())
-        system_prompt = build_agent_prompt(self.prompt_dir, languages)
+        override = await storage.get_prompt_override(self.agent_name)
+        system_prompt = build_agent_prompt(self.prompt_dir, languages, base_override=override)
         system_prompt += f"\n\n{AGENT_OUTPUT_SCHEMA}"
 
         user_message = build_agent_context(context, self.agent_name)
@@ -105,17 +108,132 @@ class BaseAgent:
                 extras={"model": model},
             )
 
+    @staticmethod
+    def _extract_json(raw: str) -> str:
+        """Extract JSON from potentially markdown-wrapped LLM response."""
+        stripped = raw.strip()
+        # Try raw string first
+        if stripped.startswith("{"):
+            return stripped
+        # Extract from ```json ... ``` or ``` ... ``` fences
+        match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", stripped, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        # Handle truncated response where closing fence is missing
+        match = re.search(r"```(?:json)?\s*\n?(.*)", stripped, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        # Try to find a JSON object anywhere in the text
+        match = re.search(r"\{.*", stripped, re.DOTALL)
+        if match:
+            return match.group(0).strip()
+        return stripped
+
+    @staticmethod
+    def _repair_truncated_json(text: str) -> str:
+        """Best-effort repair of truncated JSON by closing unclosed brackets."""
+        try:
+            json.loads(text)
+            return text
+        except json.JSONDecodeError:
+            pass
+
+        # Walk the string tracking brackets/braces and comma positions
+        in_string = False
+        escape_next = False
+        stack: list[str] = []
+        comma_positions: list[int] = []
+
+        for i, ch in enumerate(text):
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\" and in_string:
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == "{":
+                stack.append("}")
+            elif ch == "[":
+                stack.append("]")
+            elif ch in "}]" and stack:
+                stack.pop()
+            elif ch == ",":
+                comma_positions.append(i)
+
+        if not stack and not in_string:
+            return text  # Structurally complete; parse error is something else
+
+        # Strategy 1: close open string, strip trailing comma, close brackets
+        repaired = text
+        if in_string:
+            repaired += '"'
+        closers = "".join(reversed(stack))
+        candidate = repaired.rstrip().rstrip(",") + closers
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+        # Strategy 2: trim back to last few commas, re-close brackets
+        for pos in reversed(comma_positions[-5:]):
+            trimmed = text[:pos]
+            stk: list[str] = []
+            s, e = False, False
+            for ch in trimmed:
+                if e:
+                    e = False
+                    continue
+                if ch == "\\" and s:
+                    e = True
+                    continue
+                if ch == '"':
+                    s = not s
+                    continue
+                if s:
+                    continue
+                if ch == "{":
+                    stk.append("}")
+                elif ch == "[":
+                    stk.append("]")
+                elif ch in "}]" and stk:
+                    stk.pop()
+            candidate = trimmed + "".join(reversed(stk))
+            try:
+                json.loads(candidate)
+                return candidate
+            except json.JSONDecodeError:
+                continue
+
+        return text
+
     def _parse_response(self, raw: str, languages: list[str]) -> AgentResult:
         """Parse LLM JSON response into AgentResult."""
+        extracted = self._extract_json(raw)
         try:
-            data = json.loads(raw)
+            data = json.loads(extracted)
         except json.JSONDecodeError:
-            log.warning("agent_invalid_json", agent=self.agent_name)
-            return AgentResult(
-                agent_name=self.agent_name,
-                verdict=Verdict.FLAG_HUMAN,
-                error="Invalid JSON response from LLM",
-            )
+            # Attempt repair for truncated responses
+            repaired = self._repair_truncated_json(extracted)
+            try:
+                data = json.loads(repaired)
+                log.info("agent_json_repaired", agent=self.agent_name)
+            except json.JSONDecodeError:
+                log.warning(
+                    "agent_invalid_json",
+                    agent=self.agent_name,
+                    raw_preview=raw[:500],
+                )
+                return AgentResult(
+                    agent_name=self.agent_name,
+                    verdict=Verdict.FLAG_HUMAN,
+                    error="Invalid JSON response from LLM",
+                )
 
         verdict = Verdict(data.get("verdict", "flag_human"))
         findings = [self._parse_finding(f) for f in data.get("findings", [])]

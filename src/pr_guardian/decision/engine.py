@@ -182,6 +182,13 @@ def decide(
         decision = Decision.HUMAN_REVIEW
         override_reasons.append("Auto-approve is disabled")
 
+    # Reject: high-confidence, actionable findings — no human needed
+    if decision == Decision.HUMAN_REVIEW:
+        reject_reasons = _check_reject(agent_results, config)
+        if reject_reasons:
+            decision = Decision.REJECT
+            override_reasons.extend(reject_reasons)
+
     # Hard block threshold
     if score >= config.thresholds.hard_block_score:
         decision = Decision.HARD_BLOCK
@@ -206,6 +213,36 @@ def decide(
         overrides=len(override_reasons),
     )
     return result
+
+
+def _check_reject(
+    agent_results: list[AgentResult],
+    config: GuardianConfig,
+) -> list[str]:
+    """Check if findings are concrete enough to reject without human review.
+
+    Criteria: at least one finding that is validated as 'detected' certainty
+    with high or critical severity AND has a concrete suggestion.
+    """
+    reasons: list[str] = []
+    actionable_count = 0
+
+    for result in agent_results:
+        for finding in result.findings:
+            validated = validated_certainty(finding, config)
+            if (
+                validated == Certainty.DETECTED
+                and finding.severity in (Severity.HIGH, Severity.CRITICAL)
+                and finding.evidence_basis.suggestion_is_concrete
+            ):
+                actionable_count += 1
+
+    if actionable_count >= 1:
+        reasons.append(
+            f"{actionable_count} high-confidence actionable finding(s) — "
+            f"auto-rejected with fix suggestions"
+        )
+    return reasons
 
 
 def _apply_matrix(

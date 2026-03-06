@@ -17,6 +17,7 @@ from pr_guardian.persistence.models import (
     AgentResultRow,
     FindingRow,
     MechanicalResultRow,
+    PromptOverrideRow,
     ReviewRow,
 )
 
@@ -54,6 +55,21 @@ async def update_review_stage(review_id: uuid.UUID, stage: str, detail: str = ""
         if row:
             row.stage = stage
             row.stage_detail = detail
+            await session.commit()
+
+
+async def mark_review_failed(review_id: uuid.UUID, error: str) -> None:
+    """Mark a review as failed so it no longer appears as active."""
+    async with async_session() as session:
+        row = await session.get(ReviewRow, review_id)
+        if row:
+            now = datetime.now(timezone.utc)
+            row.stage = "error"
+            row.stage_detail = error[:500]
+            row.decision = "error"
+            row.finished_at = now
+            if row.started_at:
+                row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
             await session.commit()
 
 
@@ -172,7 +188,7 @@ async def get_stats() -> dict[str, Any]:
         total = await session.scalar(select(func.count(ReviewRow.id)))
 
         decision_counts: dict[str, int] = {}
-        for decision_val in ("auto_approve", "human_review", "hard_block"):
+        for decision_val in ("auto_approve", "human_review", "reject", "hard_block"):
             c = await session.scalar(
                 select(func.count(ReviewRow.id)).where(ReviewRow.decision == decision_val)
             )
@@ -231,6 +247,66 @@ async def get_stats() -> dict[str, Any]:
             "total_cost_usd": round(total_cost, 4) if total_cost else 0.0,
             "top_repos": [{"repo": r[0], "count": r[1]} for r in top_repos],
         }
+
+
+# ---------------------------------------------------------------------------
+# Prompt overrides
+# ---------------------------------------------------------------------------
+
+async def get_prompt_override(agent_name: str) -> str | None:
+    """Return the override content for an agent, or None if no override exists."""
+    async with async_session() as session:
+        row = await session.get(PromptOverrideRow, agent_name)
+        return row.content if row else None
+
+
+async def get_all_prompts() -> list[dict[str, Any]]:
+    """Return all agent prompts with override status and file defaults."""
+    from pr_guardian.agents.prompt_composer import PROMPTS_DIR, load_prompt
+
+    agents = sorted(p.parent.name for p in PROMPTS_DIR.glob("*/base.md"))
+
+    async with async_session() as session:
+        overrides = {
+            r.agent_name: r
+            for r in (await session.scalars(select(PromptOverrideRow))).all()
+        }
+
+    result = []
+    for name in agents:
+        default_content = load_prompt(f"{name}/base.md") or ""
+        ovr = overrides.get(name)
+        result.append({
+            "agent_name": name,
+            "content": ovr.content if ovr else default_content,
+            "default_content": default_content,
+            "is_override": ovr is not None,
+            "updated_at": ovr.updated_at.isoformat() if ovr else None,
+        })
+    return result
+
+
+async def set_prompt_override(agent_name: str, content: str) -> None:
+    """Create or update a prompt override for an agent."""
+    async with async_session() as session:
+        row = await session.get(PromptOverrideRow, agent_name)
+        if row:
+            row.content = content
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(PromptOverrideRow(agent_name=agent_name, content=content))
+        await session.commit()
+
+
+async def delete_prompt_override(agent_name: str) -> bool:
+    """Delete a prompt override, reverting to the file default. Returns True if deleted."""
+    async with async_session() as session:
+        row = await session.get(PromptOverrideRow, agent_name)
+        if not row:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
 
 
 # ---------------------------------------------------------------------------

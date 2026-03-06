@@ -5,7 +5,10 @@ import uuid
 
 from fastapi import APIRouter, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
+from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
+from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
 from pr_guardian.core.events import event_bus
 from pr_guardian.persistence import storage
 
@@ -44,6 +47,13 @@ async def dashboard_active():
     return await storage.get_active_reviews()
 
 
+@router.delete("/reviews/{review_id}")
+async def dashboard_cancel_review(review_id: uuid.UUID):
+    """Cancel/dismiss a stuck review, marking it as errored."""
+    await storage.mark_review_failed(review_id, "Cancelled by user")
+    return {"status": "cancelled"}
+
+
 @router.get("/events")
 async def dashboard_events():
     """SSE stream of real-time review progress events."""
@@ -54,3 +64,37 @@ async def dashboard_events():
             yield event.to_sse()
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+
+# ---------------------------------------------------------------------------
+# Prompt management
+# ---------------------------------------------------------------------------
+
+
+class PromptUpdate(BaseModel):
+    content: str
+
+
+@router.get("/prompts")
+async def list_prompts():
+    """All agent prompts with override status, plus shared system sections."""
+    agents = await storage.get_all_prompts()
+    return {
+        "agents": agents,
+        "output_schema": AGENT_OUTPUT_SCHEMA.strip(),
+        "cross_language_section": CROSS_LANGUAGE_SECTION.strip(),
+    }
+
+
+@router.put("/prompts/{agent_name}")
+async def update_prompt(agent_name: str, body: PromptUpdate):
+    """Create or update a prompt override for an agent."""
+    await storage.set_prompt_override(agent_name, body.content)
+    return {"status": "saved", "agent_name": agent_name}
+
+
+@router.delete("/prompts/{agent_name}")
+async def reset_prompt(agent_name: str):
+    """Delete a prompt override, reverting to the file default."""
+    deleted = await storage.delete_prompt_override(agent_name)
+    return {"status": "reset" if deleted else "no_override", "agent_name": agent_name}

@@ -42,12 +42,23 @@ a:hover { text-decoration: underline; }
 }
 .header h1 { font-size: 20px; font-weight: 600; }
 .header .logo { font-size: 24px; color: var(--accent-light); }
+.header .review-btn {
+  padding: 6px 14px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: auto;
+}
+.header .review-btn:hover { background: var(--accent-light); color: var(--bg); }
 .header .status-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
   background: var(--green);
   animation: pulse 2s infinite;
-  margin-left: auto;
 }
 .header .status-label { font-size: 12px; color: var(--text-dim); }
 
@@ -120,11 +131,14 @@ a:hover { text-decoration: underline; }
 .stage-decision { background: rgba(0,184,148,0.15); color: var(--green); }
 .stage-complete { background: rgba(0,184,148,0.2); color: var(--green); }
 .stage-queued { background: rgba(139,144,160,0.15); color: var(--text-dim); }
+.stage-error { background: rgba(214,48,49,0.15); color: var(--red); }
 
 .active-review .pr-info { flex: 1; }
 .active-review .pr-info .pr-title { font-weight: 500; font-size: 14px; }
 .active-review .pr-info .pr-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
 .active-review .elapsed { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.cancel-review-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; border-radius: 4px; font-size: 16px; line-height: 1; padding: 2px 6px; margin-left: 8px; transition: all 0.15s; }
+.cancel-review-btn:hover { color: var(--red); border-color: var(--red); }
 
 /* Pipeline progress bar */
 .pipeline {
@@ -141,6 +155,7 @@ a:hover { text-decoration: underline; }
 }
 .pipeline .step.done { background: var(--green); }
 .pipeline .step.active { background: var(--accent-light); animation: pulse 1.5s infinite; }
+.pipeline .step.error { background: var(--red); }
 
 /* Review table */
 .review-table { width: 100%; border-collapse: collapse; }
@@ -174,6 +189,7 @@ a:hover { text-decoration: underline; }
 .badge-human_review { background: rgba(253,203,110,0.15); color: var(--yellow); }
 .badge-hard_block { background: rgba(214,48,49,0.15); color: var(--red); }
 .badge-pending { background: rgba(139,144,160,0.15); color: var(--text-dim); }
+.badge-error { background: rgba(214,48,49,0.15); color: var(--red); }
 
 .badge-trivial { background: rgba(0,184,148,0.1); color: var(--green); }
 .badge-low { background: rgba(9,132,227,0.1); color: var(--blue); }
@@ -289,6 +305,7 @@ a:hover { text-decoration: underline; }
 .decision-banner.banner-human_review { background: rgba(253,203,110,0.08); border: 1px solid rgba(253,203,110,0.25); }
 .decision-banner.banner-hard_block { background: rgba(214,48,49,0.08); border: 1px solid rgba(214,48,49,0.25); }
 .decision-banner.banner-pending { background: var(--surface); border: 1px solid var(--border); }
+.decision-banner.banner-error { background: rgba(214,48,49,0.08); border: 1px solid rgba(214,48,49,0.25); }
 .decision-banner .banner-icon { font-size: 24px; }
 .decision-banner .banner-text { flex: 1; }
 .decision-banner .banner-label { font-size: 15px; font-weight: 600; }
@@ -324,6 +341,11 @@ a:hover { text-decoration: underline; }
   color: var(--accent-light);
   border-color: rgba(162,155,254,0.3);
   animation: pulse 1.5s infinite;
+}
+.modal-pipeline .pipe-step.error {
+  background: rgba(214,48,49,0.12);
+  color: var(--red);
+  border-color: rgba(214,48,49,0.2);
 }
 
 /* Stage detail bar */
@@ -543,11 +565,150 @@ a:hover { text-decoration: underline; }
   font-size: 14px;
 }
 
+/* Prompt editor */
+.prompt-modal { max-width: 1000px; display: flex; flex-direction: column; }
+.prompt-layout { display: flex; gap: 0; min-height: 500px; }
+.prompt-sidebar {
+  width: 220px;
+  flex-shrink: 0;
+  border-right: 1px solid var(--border);
+  padding: 12px 0;
+  overflow-y: auto;
+}
+.prompt-sidebar-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  border-left: 3px solid transparent;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.prompt-sidebar-item:hover { background: var(--surface); }
+.prompt-sidebar-item.active {
+  background: var(--surface);
+  border-left-color: var(--accent-light);
+  color: var(--accent-light);
+}
+.prompt-sidebar-item .override-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--yellow);
+  flex-shrink: 0;
+}
+.prompt-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 16px 20px;
+  min-width: 0;
+}
+.prompt-editor-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.prompt-editor-header h3 { font-size: 15px; font-weight: 600; }
+.prompt-editor-header .override-badge {
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: rgba(253,203,110,0.15);
+  color: var(--yellow);
+  font-weight: 600;
+}
+.prompt-textarea {
+  flex: 1;
+  width: 100%;
+  min-height: 320px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  padding: 14px;
+  resize: vertical;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.prompt-textarea:focus { border-color: var(--accent); }
+.prompt-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.prompt-actions .btn-save {
+  padding: 8px 20px;
+  background: var(--accent);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.prompt-actions .btn-save:hover { background: var(--accent-light); color: var(--bg); }
+.prompt-actions .btn-reset {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-dim);
+  font-size: 13px;
+  cursor: pointer;
+}
+.prompt-actions .btn-reset:hover { color: var(--text); border-color: var(--text-dim); }
+.prompt-actions .prompt-status {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.prompt-ref-section {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+.prompt-ref-toggle {
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: none;
+  border: none;
+  padding: 0;
+}
+.prompt-ref-toggle:hover { color: var(--text); }
+.prompt-ref-content {
+  display: none;
+  margin-top: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
 /* Responsive */
 @media (max-width: 768px) {
   .charts-row { grid-template-columns: 1fr; }
   .stats-grid { grid-template-columns: repeat(2, 1fr); }
   .container { padding: 16px; }
+  .prompt-layout { flex-direction: column; }
+  .prompt-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; overflow-x: auto; display: flex; }
 }
 </style>
 </head>
@@ -556,8 +717,34 @@ a:hover { text-decoration: underline; }
 <div class="header">
   <span class="logo">&#9781;</span>
   <h1>PR Guardian</h1>
+  <button class="review-btn" onclick="openPromptEditor()" style="background:var(--surface2);border:1px solid var(--border)">Prompts</button>
+  <button class="review-btn" onclick="openReviewModal()">+ Review PR</button>
   <div class="status-dot" id="status-dot"></div>
   <span class="status-label" id="status-label">Connecting...</span>
+</div>
+
+<div class="modal-overlay" id="review-modal-overlay">
+  <div class="modal" style="max-width:500px">
+    <button class="close-btn" onclick="closeReviewModal()">&#10005;</button>
+    <div class="modal-header"><h2>Trigger PR Review</h2></div>
+    <form id="review-form" onsubmit="submitReview(event)">
+      <div style="margin-bottom:14px">
+        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">PR URL</label>
+        <input type="url" id="review-pr-url" required placeholder="https://github.com/org/repo/pull/123"
+          style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;outline:none">
+      </div>
+      <div style="margin-bottom:14px;display:flex;gap:12px">
+        <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="review-post-comment"> Post comment on PR
+        </label>
+      </div>
+      <div style="display:flex;gap:10px;justify-content:flex-end">
+        <button type="button" onclick="closeReviewModal()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer">Cancel</button>
+        <button type="submit" id="review-submit-btn" style="padding:8px 20px;background:var(--accent);border:none;border-radius:6px;color:white;cursor:pointer;font-weight:600">Start Review</button>
+      </div>
+      <div id="review-status" style="margin-top:12px;font-size:13px;display:none"></div>
+    </form>
+  </div>
 </div>
 
 <div class="container">
@@ -646,6 +833,20 @@ a:hover { text-decoration: underline; }
   </div>
 </div>
 
+<!-- Prompt Editor Modal -->
+<div class="modal-overlay" id="prompt-modal-overlay">
+  <div class="modal prompt-modal">
+    <button class="close-btn" onclick="closePromptEditor()">&times;</button>
+    <div class="modal-header"><h2>Agent Prompts</h2></div>
+    <div class="prompt-layout">
+      <div class="prompt-sidebar" id="prompt-sidebar"></div>
+      <div class="prompt-editor" id="prompt-editor">
+        <div style="padding:40px;text-align:center;color:var(--text-dim)">Select an agent to edit its prompt</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Detail Modal -->
 <div class="modal-overlay" id="modal-overlay">
   <div class="modal" id="modal-content">
@@ -657,7 +858,8 @@ a:hover { text-decoration: underline; }
 <script>
 const API = '/api/dashboard';
 const STAGES = ['queued', 'discovery', 'mechanical', 'triage', 'agents', 'decision', 'complete'];
-const DECISION_COLORS = { auto_approve: '#00b894', human_review: '#fdcb6e', hard_block: '#d63031' };
+const TERMINAL_STAGES = ['complete', 'error'];
+const DECISION_COLORS = { auto_approve: '#00b894', human_review: '#fdcb6e', reject: '#e17055', hard_block: '#d63031' };
 const RISK_COLORS = { trivial: '#00b894', low: '#0984e3', medium: '#fdcb6e', high: '#d63031' };
 const SEV_COLORS = { low: '#0984e3', medium: '#fdcb6e', high: '#e17055', critical: '#d63031' };
 
@@ -700,7 +902,7 @@ async function loadStats() {
     document.getElementById('stat-total').textContent = stats.total_reviews;
     document.getElementById('stat-approved').textContent = stats.decision_counts.auto_approve || 0;
     document.getElementById('stat-human').textContent = stats.decision_counts.human_review || 0;
-    document.getElementById('stat-blocked').textContent = stats.decision_counts.hard_block || 0;
+    document.getElementById('stat-blocked').textContent = (stats.decision_counts.reject || 0) + (stats.decision_counts.hard_block || 0);
     document.getElementById('stat-avg-score').textContent = stats.avg_score.toFixed(1);
     document.getElementById('stat-avg-duration').textContent = formatDuration(stats.avg_duration_ms);
     document.getElementById('stat-avg-cost').textContent = formatCost(stats.avg_cost_usd);
@@ -730,6 +932,18 @@ async function loadActive() {
   }
 }
 
+async function cancelReview(id) {
+  if (!confirm('Cancel this review?')) return;
+  try {
+    await fetch(`${API}/reviews/${id}`, { method: 'DELETE' });
+    loadActive();
+    loadReviews();
+    loadStats();
+  } catch (e) {
+    console.error('Failed to cancel review', e);
+  }
+}
+
 async function loadReviews() {
   try {
     const params = new URLSearchParams();
@@ -749,11 +963,13 @@ async function loadReviews() {
 
 // ---- Renderers ----
 function renderActiveReview(r) {
+  const isError = r.stage === 'error';
   const stageIdx = STAGES.indexOf(r.stage);
   const steps = STAGES.slice(1, -1).map((s, i) => {
+    if (isError) return `<div class="step ${(i + 1) <= stageIdx ? 'done' : ''}"></div>`;
     const cls = (i + 1) < stageIdx ? 'done' : (i + 1) === stageIdx ? 'active' : '';
     return `<div class="step ${cls}"></div>`;
-  }).join('');
+  }).join('') + (isError ? '<div class="step error"></div>' : '');
   const elapsed = r.started_at ? formatElapsed(r.started_at) : '';
   return `
     <div class="active-review" onclick="openDetail('${r.id}')">
@@ -764,6 +980,7 @@ function renderActiveReview(r) {
         <div class="pipeline">${steps}</div>
       </div>
       <div class="elapsed">${elapsed}</div>
+      <button class="cancel-review-btn" title="Cancel review" onclick="event.stopPropagation();cancelReview('${r.id}')">&times;</button>
     </div>
   `;
 }
@@ -870,13 +1087,13 @@ async function openDetail(id) {
 
     // Auto-refresh for active reviews
     clearInterval(activeDetailInterval);
-    if (r.stage !== 'complete') {
+    if (!TERMINAL_STAGES.includes(r.stage)) {
       activeDetailInterval = setInterval(async () => {
         try {
           const updated = await fetch(`${API}/reviews/${id}`).then(res => res.json());
           if (updated.error) return;
           renderDetailModal(updated);
-          if (updated.stage === 'complete') clearInterval(activeDetailInterval);
+          if (TERMINAL_STAGES.includes(updated.stage)) clearInterval(activeDetailInterval);
         } catch (_) {}
       }, 2000);
     }
@@ -887,19 +1104,24 @@ async function openDetail(id) {
 
 function renderDetailModal(r) {
   const body = document.getElementById('modal-body');
-  const isActive = r.stage !== 'complete';
+  const isError = r.stage === 'error';
+  const isActive = !TERMINAL_STAGES.includes(r.stage);
   const stageIdx = STAGES.indexOf(r.stage);
 
   const pipelineSteps = STAGES.slice(1).map((s, i) => {
-    const cls = (i + 1) < stageIdx ? 'done' : (i + 1) === stageIdx ? 'active' : '';
+    let cls = '';
+    if (isError && (i + 1) <= stageIdx) cls = 'done';
+    else if (isError) cls = '';
+    else if ((i + 1) < stageIdx) cls = 'done';
+    else if ((i + 1) === stageIdx) cls = 'active';
     return `<div class="pipe-step ${cls}">${s}</div>`;
-  }).join('');
+  }).join('') + (isError ? '<div class="pipe-step error">ERROR</div>' : '');
 
   const timeInfo = isActive
     ? (r.started_at ? formatElapsed(r.started_at) : '...')
     : formatDuration(r.duration_ms);
 
-  const decisionIcons = { auto_approve: '&#10003;', human_review: '&#9998;', hard_block: '&#10007;', pending: '&#8987;' };
+  const decisionIcons = { auto_approve: '&#10003;', human_review: '&#9998;', reject: '&#10007;', hard_block: '&#9940;', pending: '&#8987;', error: '&#9888;' };
   const decisionIcon = decisionIcons[r.decision] || '&#8987;';
 
   const totalFindings = (r.agent_results || []).reduce((sum, a) => sum + (a.findings?.length || 0), 0);
@@ -919,14 +1141,19 @@ function renderDetailModal(r) {
       <span class="banner-icon">${decisionIcon}</span>
       <div class="banner-text">
         <div class="banner-label">${formatDecision(r.decision)}</div>
-        <div class="banner-sub">${isActive ? 'Review in progress...' : (r.risk_tier ? `Risk: ${r.risk_tier} &middot; Score: ${r.combined_score?.toFixed(2) ?? '—'}` : 'Completed')}</div>
+        <div class="banner-sub">${isError ? esc(r.stage_detail || 'Review failed') : isActive ? 'Review in progress...' : (r.risk_tier ? `Risk: ${r.risk_tier} &middot; Score: ${r.combined_score?.toFixed(2) ?? '—'}` : 'Completed')}</div>
       </div>
       ${r.risk_tier ? `<span class="badge badge-${r.risk_tier}" style="font-size:12px;padding:4px 12px">${r.risk_tier} risk</span>` : ''}
     </div>
 
     <div class="modal-pipeline">${pipelineSteps}</div>
 
-    ${isActive && r.stage_detail ? `
+    ${isError && r.stage_detail ? `
+      <div class="modal-stage-detail" style="background:rgba(214,48,49,0.08);border-color:rgba(214,48,49,0.2)">
+        <span class="stage-icon" style="color:var(--red)">&#9888;</span>
+        <span style="color:var(--red)">${esc(r.stage_detail)}</span>
+      </div>
+    ` : isActive && r.stage_detail ? `
       <div class="modal-stage-detail">
         <span class="stage-icon">&#9881;</span>
         <span>${esc(r.stage_detail)}</span>
@@ -1124,7 +1351,64 @@ function closeModal() {
 document.getElementById('modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('modal-overlay')) closeModal();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeModal(); closeReviewModal(); closePromptEditor(); }
+});
+
+// ---- Review Modal ----
+function openReviewModal() {
+  document.getElementById('review-modal-overlay').classList.add('open');
+  document.getElementById('review-pr-url').focus();
+}
+function closeReviewModal() {
+  document.getElementById('review-modal-overlay').classList.remove('open');
+  document.getElementById('review-status').style.display = 'none';
+  document.getElementById('review-submit-btn').disabled = false;
+  document.getElementById('review-submit-btn').textContent = 'Start Review';
+}
+document.getElementById('review-modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('review-modal-overlay')) closeReviewModal();
+});
+
+async function submitReview(e) {
+  e.preventDefault();
+  const url = document.getElementById('review-pr-url').value.trim();
+  const postComment = document.getElementById('review-post-comment').checked;
+  const btn = document.getElementById('review-submit-btn');
+  const status = document.getElementById('review-status');
+
+  btn.disabled = true;
+  btn.textContent = 'Reviewing...';
+  status.style.display = 'block';
+  status.style.color = 'var(--text-dim)';
+  status.textContent = 'Submitting review request...';
+
+  try {
+    const resp = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pr_url: url, post_comment: postComment }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      status.style.color = 'var(--red)';
+      status.textContent = data.detail || 'Request failed';
+      btn.disabled = false;
+      btn.textContent = 'Start Review';
+      return;
+    }
+    status.style.color = 'var(--green)';
+    status.textContent = `Done — ${data.decision || data.status} (score: ${data.score ?? '-'})`;
+    btn.textContent = 'Done';
+    loadReviews();
+    loadStats();
+  } catch (err) {
+    status.style.color = 'var(--red)';
+    status.textContent = `Error: ${err.message}`;
+    btn.disabled = false;
+    btn.textContent = 'Start Review';
+  }
+}
 
 // ---- Filters ----
 document.getElementById('filter-decision').addEventListener('change', (e) => {
@@ -1154,7 +1438,7 @@ function truncate(s, n) {
 }
 
 function formatDecision(d) {
-  const m = { auto_approve: 'Approved', human_review: 'Human Review', hard_block: 'Blocked', pending: 'Pending' };
+  const m = { auto_approve: 'Approved', human_review: 'Human Review', reject: 'Rejected', hard_block: 'Blocked', pending: 'Pending', error: 'Error' };
   return m[d] || d || '-';
 }
 
@@ -1188,6 +1472,137 @@ function formatElapsed(iso) {
   const d = new Date(iso);
   const ms = Date.now() - d.getTime();
   return formatDuration(Math.max(0, ms));
+}
+
+// ---- Prompt Editor ----
+let promptData = null;  // cached from API
+let activePromptAgent = null;
+
+function openPromptEditor() {
+  document.getElementById('prompt-modal-overlay').classList.add('open');
+  loadPrompts();
+}
+function closePromptEditor() {
+  document.getElementById('prompt-modal-overlay').classList.remove('open');
+}
+document.getElementById('prompt-modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('prompt-modal-overlay')) closePromptEditor();
+});
+
+async function loadPrompts() {
+  try {
+    promptData = await fetch(`${API}/prompts`).then(r => r.json());
+    renderPromptSidebar();
+    if (activePromptAgent) {
+      const agent = promptData.agents.find(a => a.agent_name === activePromptAgent);
+      if (agent) { renderPromptEditorFor(agent); return; }
+    }
+    if (promptData.agents.length) {
+      selectPromptAgent(promptData.agents[0].agent_name);
+    }
+  } catch (e) {
+    console.error('Failed to load prompts', e);
+  }
+}
+
+function renderPromptSidebar() {
+  const el = document.getElementById('prompt-sidebar');
+  el.innerHTML = promptData.agents.map(a => `
+    <div class="prompt-sidebar-item ${a.agent_name === activePromptAgent ? 'active' : ''}"
+         onclick="selectPromptAgent('${a.agent_name}')">
+      ${a.is_override ? '<span class="override-dot"></span>' : ''}
+      <span>${esc(a.agent_name)}</span>
+    </div>
+  `).join('');
+}
+
+function selectPromptAgent(name) {
+  activePromptAgent = name;
+  const agent = promptData.agents.find(a => a.agent_name === name);
+  if (!agent) return;
+  renderPromptSidebar();
+  renderPromptEditorFor(agent);
+}
+
+function renderPromptEditorFor(agent) {
+  const editor = document.getElementById('prompt-editor');
+  editor.innerHTML = `
+    <div class="prompt-editor-header">
+      <h3>${esc(agent.agent_name)}</h3>
+      ${agent.is_override ? '<span class="override-badge">CUSTOMIZED</span>' : ''}
+      ${agent.updated_at ? `<span style="font-size:11px;color:var(--text-dim)">Updated ${formatTime(agent.updated_at)}</span>` : ''}
+    </div>
+    <textarea class="prompt-textarea" id="prompt-content">${esc(agent.content)}</textarea>
+    <div class="prompt-actions">
+      <button class="btn-save" onclick="savePrompt('${agent.agent_name}')">Save</button>
+      ${agent.is_override ? `<button class="btn-reset" onclick="resetPrompt('${agent.agent_name}')">Reset to Default</button>` : ''}
+      <span class="prompt-status" id="prompt-status"></span>
+    </div>
+    <div class="prompt-ref-section">
+      <button class="prompt-ref-toggle" onclick="togglePromptRef('output-schema-ref')">
+        <span class="arrow" id="output-schema-ref-arrow">&#9656;</span>
+        Output Schema (appended to all agents)
+      </button>
+      <div class="prompt-ref-content" id="output-schema-ref">${esc(promptData.output_schema)}</div>
+    </div>
+    <div class="prompt-ref-section" style="margin-top:8px;border-top:none">
+      <button class="prompt-ref-toggle" onclick="togglePromptRef('cross-lang-ref')">
+        <span class="arrow" id="cross-lang-ref-arrow">&#9656;</span>
+        Cross-Language Section (added when 2+ languages)
+      </button>
+      <div class="prompt-ref-content" id="cross-lang-ref">${esc(promptData.cross_language_section)}</div>
+    </div>
+  `;
+}
+
+function togglePromptRef(id) {
+  const el = document.getElementById(id);
+  const arrow = document.getElementById(id + '-arrow');
+  if (!el) return;
+  if (el.style.display === 'none' || !el.style.display) {
+    el.style.display = 'block';
+    if (arrow) arrow.innerHTML = '&#9662;';
+  } else {
+    el.style.display = 'none';
+    if (arrow) arrow.innerHTML = '&#9656;';
+  }
+}
+
+async function savePrompt(agentName) {
+  const content = document.getElementById('prompt-content').value;
+  const status = document.getElementById('prompt-status');
+  status.textContent = 'Saving...';
+  status.style.color = 'var(--text-dim)';
+  try {
+    const resp = await fetch(`${API}/prompts/${agentName}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content }),
+    });
+    if (!resp.ok) throw new Error('Save failed');
+    status.textContent = 'Saved';
+    status.style.color = 'var(--green)';
+    await loadPrompts();
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+    status.style.color = 'var(--red)';
+  }
+}
+
+async function resetPrompt(agentName) {
+  const status = document.getElementById('prompt-status');
+  status.textContent = 'Resetting...';
+  status.style.color = 'var(--text-dim)';
+  try {
+    const resp = await fetch(`${API}/prompts/${agentName}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error('Reset failed');
+    status.textContent = 'Reset to default';
+    status.style.color = 'var(--green)';
+    await loadPrompts();
+  } catch (e) {
+    status.textContent = `Error: ${e.message}`;
+    status.style.color = 'var(--red)';
+  }
 }
 
 // ---- Init ----

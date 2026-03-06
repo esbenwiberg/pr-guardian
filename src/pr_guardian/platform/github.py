@@ -95,6 +95,14 @@ class GitHubAdapter:
         )
         resp.raise_for_status()
 
+    async def request_changes(self, pr: PlatformPR, body: str) -> None:
+        client = self._get_client()
+        resp = await client.post(
+            f"/repos/{pr.repo}/pulls/{pr.pr_id}/reviews",
+            json={"event": "REQUEST_CHANGES", "body": body},
+        )
+        resp.raise_for_status()
+
     async def add_label(self, pr: PlatformPR, label: str) -> None:
         client = self._get_client()
         resp = await client.post(

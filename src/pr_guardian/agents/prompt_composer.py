@@ -24,12 +24,17 @@ def load_prompt(relative_path: str) -> str | None:
     return None
 
 
-def build_agent_prompt(agent_type: str, languages: list[str]) -> str:
+def build_agent_prompt(
+    agent_type: str,
+    languages: list[str],
+    base_override: str | None = None,
+) -> str:
     """Compose system prompt from base + language-specific sections."""
     parts: list[str] = []
 
-    base = load_prompt(f"{agent_type}/base.md")
-    if base:
+    if base_override:
+        parts.append(base_override)
+    elif base := load_prompt(f"{agent_type}/base.md"):
         parts.append(base)
     else:
         parts.append(f"You are a {agent_type.replace('_', ' ')} review agent for PR Guardian.")

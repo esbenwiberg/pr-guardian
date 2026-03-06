@@ -74,6 +74,9 @@ module containerApp 'container-app.bicep' = {
     imageTag: imageTag
     databaseUrl: database.outputs.connectionString
     keyVaultName: keyvault.outputs.keyVaultName
+    anthropicApiKey: anthropicApiKey
+    githubToken: githubToken
+    githubWebhookSecret: githubWebhookSecret
   }
 }
 

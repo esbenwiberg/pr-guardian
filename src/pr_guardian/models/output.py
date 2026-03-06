@@ -10,6 +10,7 @@ from pr_guardian.models.findings import AgentResult
 class Decision(str, Enum):
     AUTO_APPROVE = "auto_approve"
     HUMAN_REVIEW = "human_review"
+    REJECT = "reject"
     HARD_BLOCK = "hard_block"
 
 

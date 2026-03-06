@@ -81,10 +81,11 @@ class ADOAdapter:
         diff_files: list[DiffFile] = []
         for change in resp.json().get("changeEntries", []):
             item = change.get("item", {})
-            change_type = change.get("changeType", "edit")
+            change_type = change.get("changeType") or "edit"
             status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
+            raw_path = item.get("path") or ""
             diff_files.append(DiffFile(
-                path=item.get("path", "").lstrip("/"),
+                path=raw_path.lstrip("/"),
                 status=status_map.get(change_type.lower(), "modified"),
                 old_path=change.get("sourceServerItem"),
                 additions=0,
@@ -117,6 +118,20 @@ class ADOAdapter:
         resp = await client.put(
             url,
             json={"vote": 10},
+            params={"api-version": "7.1"},
+        )
+        resp.raise_for_status()
+
+    async def request_changes(self, pr: PlatformPR, body: str) -> None:
+        client = self._get_client()
+        # Vote -5 = "Rejected" in ADO
+        url = (
+            f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+            f"/pullRequests/{pr.pr_id}/reviewers/me"
+        )
+        resp = await client.put(
+            url,
+            json={"vote": -5},
             params={"api-version": "7.1"},
         )
         resp.raise_for_status()

@@ -129,6 +129,31 @@ async def run_review(
     # Set pending status
     await adapter.set_status(pr, "pending", "PR Guardian review in progress")
 
+    try:
+        return await _run_pipeline(pr, adapter, service_config, storage, review_db_id, pipeline_log, _plog, _emit, _update_stage)
+    except Exception as exc:
+        if storage and review_db_id:
+            try:
+                await storage.mark_review_failed(review_db_id, str(exc))
+            except Exception as db_err:
+                log.warning("db_mark_failed_error", error=str(db_err))
+        _emit("error", str(exc))
+        raise
+
+
+async def _run_pipeline(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    service_config: GuardianConfig | None,
+    storage,
+    review_db_id: uuid.UUID | None,
+    pipeline_log: list[dict],
+    _plog,
+    _emit,
+    _update_stage,
+) -> ReviewResult:
+    """Inner pipeline logic, separated so run_review can handle errors."""
+
     # Fetch diff
     diff = await adapter.fetch_diff(pr)
     changed_files = diff.file_paths
@@ -354,6 +379,9 @@ async def _post_results(
         if result.decision == Decision.AUTO_APPROVE:
             await adapter.approve_pr(pr)
             await adapter.set_status(pr, "success", "PR Guardian: Auto-approved")
+        elif result.decision == Decision.REJECT:
+            await adapter.request_changes(pr, comment)
+            await adapter.set_status(pr, "failure", "PR Guardian: Changes requested")
         elif result.decision == Decision.HUMAN_REVIEW:
             await adapter.set_status(pr, "success", "PR Guardian: Human review required")
             await adapter.request_reviewers(pr, config.human_review.reviewer_group)

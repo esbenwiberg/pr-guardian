@@ -29,7 +29,13 @@ def _get_engine():
     global _engine
     if _engine is None:
         from sqlalchemy.ext.asyncio import create_async_engine
-        _engine = create_async_engine(_get_database_url(), echo=False, pool_size=5, max_overflow=10)
+        _engine = create_async_engine(
+            _get_database_url(),
+            echo=False,
+            pool_size=5,
+            max_overflow=10,
+            connect_args={"timeout": 10},
+        )
     return _engine
 
 

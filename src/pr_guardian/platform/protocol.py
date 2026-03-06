@@ -20,6 +20,10 @@ class PlatformAdapter(Protocol):
         """Vote approve on the PR."""
         ...
 
+    async def request_changes(self, pr: PlatformPR, body: str) -> None:
+        """Submit a 'request changes' review on the PR."""
+        ...
+
     async def add_label(self, pr: PlatformPR, label: str) -> None:
         """Add a label to the PR."""
         ...

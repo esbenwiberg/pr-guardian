@@ -31,15 +31,23 @@ class AnthropicClient:
         client = self._get_client()
         model = model or self._default_model
 
+        messages: list[dict] = [{"role": "user", "content": user}]
+
+        # Prefill assistant response with "{" to force raw JSON output
+        if response_format == "json":
+            messages.append({"role": "assistant", "content": "{"})
+
         message = await client.messages.create(
             model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system,
-            messages=[{"role": "user", "content": user}],
+            messages=messages,
         )
 
         content = message.content[0].text if message.content else ""
+        if response_format == "json":
+            content = "{" + content
         return LLMResponse(
             content=content,
             model=model,

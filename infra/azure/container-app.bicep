@@ -8,6 +8,15 @@ param imageTag string
 param databaseUrl string
 param keyVaultName string
 
+@secure()
+param anthropicApiKey string = ''
+
+@secure()
+param githubToken string = ''
+
+@secure()
+param githubWebhookSecret string = ''
+
 // Log Analytics workspace
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${prefix}-logs'
@@ -69,6 +78,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'database-url'
           value: databaseUrl
         }
+        {
+          name: 'anthropic-api-key'
+          value: anthropicApiKey
+        }
+        {
+          name: 'github-token'
+          value: githubToken
+        }
+        {
+          name: 'github-webhook-secret'
+          value: githubWebhookSecret
+        }
       ]
     }
     template: {
@@ -85,6 +106,18 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               name: 'DATABASE_URL'
               secretRef: 'database-url'
             }
+            {
+              name: 'ANTHROPIC_API_KEY'
+              secretRef: 'anthropic-api-key'
+            }
+            {
+              name: 'GITHUB_TOKEN'
+              secretRef: 'github-token'
+            }
+            {
+              name: 'GITHUB_WEBHOOK_SECRET'
+              secretRef: 'github-webhook-secret'
+            }
           ]
           probes: [
             {
@@ -93,7 +126,9 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
                 path: '/api/health'
                 port: 8000
               }
+              initialDelaySeconds: 15
               periodSeconds: 30
+              failureThreshold: 5
             }
             {
               type: 'Readiness'
@@ -101,14 +136,15 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
                 path: '/api/health'
                 port: 8000
               }
-              initialDelaySeconds: 5
+              initialDelaySeconds: 10
               periodSeconds: 10
+              failureThreshold: 5
             }
           ]
         }
       ]
       scale: {
-        minReplicas: 0
+        minReplicas: 1
         maxReplicas: 5
         rules: [
           {
