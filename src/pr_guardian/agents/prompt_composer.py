@@ -2,7 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
-PROMPTS_DIR = Path(__file__).parent.parent.parent.parent / "prompts"
+
+def _find_prompts_dir() -> Path:
+    """Resolve prompts directory — works both from source tree and pip-installed package."""
+    # Source tree: src/pr_guardian/agents/prompt_composer.py → ../../../../prompts
+    source_dir = Path(__file__).parent.parent.parent.parent / "prompts"
+    if source_dir.is_dir():
+        return source_dir
+    # Docker /app layout: prompts/ sits next to src/
+    app_dir = Path("/app/prompts")
+    if app_dir.is_dir():
+        return app_dir
+    # Last resort — return the source path (will just find nothing)
+    return source_dir
+
+
+PROMPTS_DIR = _find_prompts_dir()
 
 CROSS_LANGUAGE_SECTION = """
 ## CROSS-LANGUAGE CONCERNS

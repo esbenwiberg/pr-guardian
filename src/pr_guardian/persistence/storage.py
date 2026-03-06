@@ -255,22 +255,42 @@ async def get_stats() -> dict[str, Any]:
 
 async def get_prompt_override(agent_name: str) -> str | None:
     """Return the override content for an agent, or None if no override exists."""
-    async with async_session() as session:
-        row = await session.get(PromptOverrideRow, agent_name)
-        return row.content if row else None
+    try:
+        async with async_session() as session:
+            row = await session.get(PromptOverrideRow, agent_name)
+            return row.content if row else None
+    except Exception:
+        return None
+
+
+# Known agent names — used as fallback when prompts dir is missing (e.g. in Docker)
+_KNOWN_AGENTS = [
+    "architecture_intent",
+    "code_quality_observability",
+    "hotspot",
+    "performance",
+    "security_privacy",
+    "test_quality",
+]
 
 
 async def get_all_prompts() -> list[dict[str, Any]]:
     """Return all agent prompts with override status and file defaults."""
     from pr_guardian.agents.prompt_composer import PROMPTS_DIR, load_prompt
 
-    agents = sorted(p.parent.name for p in PROMPTS_DIR.glob("*/base.md"))
+    # Discover agents from prompt files, fall back to known list
+    discovered = sorted(p.parent.name for p in PROMPTS_DIR.glob("*/base.md"))
+    agents = discovered or _KNOWN_AGENTS
 
-    async with async_session() as session:
-        overrides = {
-            r.agent_name: r
-            for r in (await session.scalars(select(PromptOverrideRow))).all()
-        }
+    overrides: dict[str, PromptOverrideRow] = {}
+    try:
+        async with async_session() as session:
+            overrides = {
+                r.agent_name: r
+                for r in (await session.scalars(select(PromptOverrideRow))).all()
+            }
+    except Exception:
+        log.warning("prompt_overrides_table_missing")
 
     result = []
     for name in agents:
