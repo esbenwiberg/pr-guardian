@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import tempfile
+import uuid
 from pathlib import Path
 
 import structlog
@@ -14,6 +15,7 @@ from pr_guardian.agents.security_privacy import SecurityPrivacyAgent
 from pr_guardian.agents.test_quality import TestQualityAgent
 from pr_guardian.config.loader import load_repo_config
 from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import build_summary_comment, get_review_labels
 from pr_guardian.decision.engine import decide
 from pr_guardian.discovery.blast_radius import compute_blast_radius
@@ -31,6 +33,15 @@ from pr_guardian.triage.hotspots import load_hotspots
 from pr_guardian.triage.surface_map import build_security_surface
 
 log = structlog.get_logger()
+
+
+def _try_import_storage():
+    """Lazily import storage to avoid failures when DB is not configured."""
+    try:
+        from pr_guardian.persistence import storage
+        return storage
+    except Exception:
+        return None
 
 AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
@@ -50,6 +61,34 @@ async def run_review(
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
 
+    storage = _try_import_storage()
+    review_db_id: uuid.UUID | None = None
+
+    # Create DB record and emit event
+    if storage:
+        try:
+            review_db_id = await storage.create_review_record(pr)
+        except Exception as e:
+            log.warning("db_create_failed", error=str(e))
+
+    def _emit(stage: str, detail: str = "", **extra):
+        event_bus.publish(ReviewEvent(
+            review_id=str(review_db_id) if review_db_id else "",
+            pr_id=pr.pr_id,
+            repo=pr.repo,
+            stage=stage,
+            detail=detail,
+            extra=extra,
+        ))
+
+    async def _update_stage(stage: str, detail: str = ""):
+        _emit(stage, detail)
+        if storage and review_db_id:
+            try:
+                await storage.update_review_stage(review_db_id, stage, detail)
+            except Exception as e:
+                log.warning("db_stage_update_failed", stage=stage, error=str(e))
+
     # Set pending status
     await adapter.set_status(pr, "pending", "PR Guardian review in progress")
 
@@ -61,6 +100,7 @@ async def run_review(
     repo_path = Path(tempfile.mkdtemp(prefix=f"review-{pr.pr_id}-"))
 
     # Stage 0: Discovery
+    await _update_stage("discovery", "Parsing diff and building context")
     config = service_config or load_repo_config(repo_path)
 
     language_map = detect_languages(changed_files)
@@ -103,6 +143,7 @@ async def run_review(
     )
 
     # Stage 1: Mechanical Gates
+    await _update_stage("mechanical", "Running mechanical checks")
     mechanical_results = await run_mechanical_checks(
         repo_path, language_map, changed_files, config, pr.target_branch,
     )
@@ -123,13 +164,16 @@ async def run_review(
             summary="Mechanical checks failed — PR blocked.",
         )
         await _post_results(adapter, pr, result, config)
+        await _save_result(storage, review_db_id, result, _emit)
         return result
 
     # Stage 2: Triage
+    await _update_stage("triage", "Classifying risk and selecting agents")
     triage_result = classify(context, config)
     log.info("triage_complete", tier=triage_result.risk_tier.value, agents=sorted(triage_result.agent_set))
 
     # Stage 3: AI Agents (parallel)
+    await _update_stage("agents", f"Running {len(triage_result.agent_set)} AI agents")
     agent_results: list[AgentResult] = []
     if triage_result.agent_set:
         agent_tasks = []
@@ -143,12 +187,16 @@ async def run_review(
             agent_results = await asyncio.gather(*agent_tasks)
 
     # Stage 4: Decision
+    await _update_stage("decision", "Computing final verdict")
     result = decide(context, agent_results, triage_result.risk_tier, config)
     result.mechanical_results = [_convert_mechanical(r) for r in mechanical_results]
     result.mechanical_passed = True
 
     # Post results
     await _post_results(adapter, pr, result, config)
+
+    # Persist to DB
+    await _save_result(storage, review_db_id, result, _emit)
 
     log.info(
         "review_complete",
@@ -157,6 +205,16 @@ async def run_review(
         score=round(result.combined_score, 2),
     )
     return result
+
+
+async def _save_result(storage, review_db_id, result, _emit) -> None:
+    """Persist the review result and emit the 'complete' event."""
+    if storage and review_db_id:
+        try:
+            await storage.save_review_result(review_db_id, result)
+        except Exception as e:
+            log.error("db_save_failed", error=str(e))
+    _emit("complete", f"Decision: {result.decision.value}", score=result.combined_score)
 
 
 def _convert_mechanical(r) -> object:

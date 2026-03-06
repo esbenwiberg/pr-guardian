@@ -6,7 +6,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      - DATABASE_URL=postgresql://guardian:${DB_PASSWORD:-guardian}@db:5432/prguardian
+      - DATABASE_URL=postgresql+asyncpg://guardian:${DB_PASSWORD:-guardian}@db:5432/prguardian
       # LLM provider credentials — set in .env file
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT:-}
