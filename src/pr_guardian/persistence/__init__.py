@@ -1,1 +1,1 @@
-"""PR Guardian."""
+"""Persistence layer — async PostgreSQL via SQLAlchemy."""
