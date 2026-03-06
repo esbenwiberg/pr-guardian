@@ -134,7 +134,7 @@ async def run_review(
     except Exception as exc:
         if storage and review_db_id:
             try:
-                await storage.mark_review_failed(review_db_id, str(exc))
+                await storage.mark_review_failed(review_db_id, str(exc), pipeline_log=pipeline_log)
             except Exception as db_err:
                 log.warning("db_mark_failed_error", error=str(db_err))
         _emit("error", str(exc))

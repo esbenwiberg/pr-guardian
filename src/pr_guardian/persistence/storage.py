@@ -58,7 +58,11 @@ async def update_review_stage(review_id: uuid.UUID, stage: str, detail: str = ""
             await session.commit()
 
 
-async def mark_review_failed(review_id: uuid.UUID, error: str) -> None:
+async def mark_review_failed(
+    review_id: uuid.UUID,
+    error: str,
+    pipeline_log: list[dict] | None = None,
+) -> None:
     """Mark a review as failed so it no longer appears as active."""
     async with async_session() as session:
         row = await session.get(ReviewRow, review_id)
@@ -68,6 +72,8 @@ async def mark_review_failed(review_id: uuid.UUID, error: str) -> None:
             row.stage_detail = error[:500]
             row.decision = "error"
             row.finished_at = now
+            if pipeline_log is not None:
+                row.pipeline_log = pipeline_log
             if row.started_at:
                 row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
             await session.commit()
