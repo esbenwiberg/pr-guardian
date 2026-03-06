@@ -40,3 +40,8 @@ class ReviewResult:
 
     override_reasons: list[str] = field(default_factory=list)
     summary: str = ""
+    pipeline_log: list[dict] = field(default_factory=list)
+
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    cost_usd: float = 0.0

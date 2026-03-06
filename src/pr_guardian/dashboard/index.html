@@ -468,6 +468,64 @@ a:hover { text-decoration: underline; }
 .finding-card .finding-suggestion { font-size: 12px; color: var(--accent-light); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
 .finding-card .finding-cwe { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
 
+/* Pipeline log */
+.pipeline-log { max-height: 400px; overflow-y: auto; }
+.pipeline-log::-webkit-scrollbar { width: 5px; }
+.pipeline-log::-webkit-scrollbar-track { background: transparent; }
+.pipeline-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+.log-entry {
+  display: flex;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+  border-bottom: 1px solid rgba(46,51,69,0.5);
+  line-height: 1.5;
+}
+.log-entry:hover { background: rgba(255,255,255,0.02); }
+.log-ts { color: var(--text-dim); flex-shrink: 0; min-width: 70px; font-size: 10px; margin-top: 1px; }
+.log-badge {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  margin-top: 1px;
+  min-width: 38px;
+  text-align: center;
+}
+.log-badge-info { background: rgba(9,132,227,0.15); color: var(--blue); }
+.log-badge-warn { background: rgba(253,203,110,0.15); color: var(--yellow); }
+.log-badge-error { background: rgba(214,48,49,0.15); color: var(--red); }
+.log-badge-debug { background: rgba(139,144,160,0.1); color: var(--text-dim); }
+.log-stage {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--accent-light);
+  min-width: 70px;
+  margin-top: 1px;
+}
+.log-msg { color: var(--text); word-break: break-word; }
+.log-entry.log-level-debug .log-msg { color: var(--text-dim); }
+.log-toggle {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.log-toggle:hover { color: var(--text); border-color: var(--text-dim); }
+.log-toggle .arrow { transition: transform 0.2s; font-size: 10px; }
+.log-toggle .arrow.open { transform: rotate(90deg); }
+
 /* Summary */
 .modal-summary {
   font-size: 13px;
@@ -511,6 +569,7 @@ a:hover { text-decoration: underline; }
     <div class="stat-card"><div class="label">Blocked</div><div class="value" style="color:var(--red)" id="stat-blocked">-</div></div>
     <div class="stat-card"><div class="label">Avg Score</div><div class="value" id="stat-avg-score">-</div></div>
     <div class="stat-card"><div class="label">Avg Duration</div><div class="value" id="stat-avg-duration">-</div></div>
+    <div class="stat-card"><div class="label">Avg Cost</div><div class="value" style="color:var(--accent-light)" id="stat-avg-cost">-</div><div class="sub" id="stat-total-cost"></div></div>
   </div>
 
   <!-- Active Reviews -->
@@ -574,12 +633,13 @@ a:hover { text-decoration: underline; }
             <th>Risk</th>
             <th>Score</th>
             <th>Decision</th>
+            <th>Cost</th>
             <th>Duration</th>
             <th>Time</th>
           </tr>
         </thead>
         <tbody id="reviews-body">
-          <tr><td colspan="8" class="empty-state">Loading...</td></tr>
+          <tr><td colspan="9" class="empty-state">Loading...</td></tr>
         </tbody>
       </table>
     </div>
@@ -643,6 +703,8 @@ async function loadStats() {
     document.getElementById('stat-blocked').textContent = stats.decision_counts.hard_block || 0;
     document.getElementById('stat-avg-score').textContent = stats.avg_score.toFixed(1);
     document.getElementById('stat-avg-duration').textContent = formatDuration(stats.avg_duration_ms);
+    document.getElementById('stat-avg-cost').textContent = formatCost(stats.avg_cost_usd);
+    document.getElementById('stat-total-cost').textContent = stats.total_cost_usd ? `Total: ${formatCost(stats.total_cost_usd)}` : '';
     renderDecisionDonut(stats.decision_counts, stats.total_reviews);
     renderRiskBars(stats.risk_tier_counts);
     renderSeverityBars(stats.severity_counts);
@@ -676,7 +738,7 @@ async function loadReviews() {
     const reviews = await fetch(`${API}/reviews?${params}`).then(r => r.json());
     const el = document.getElementById('reviews-body');
     if (!reviews.length) {
-      el.innerHTML = '<tr><td colspan="8" class="empty-state">No reviews found</td></tr>';
+      el.innerHTML = '<tr><td colspan="9" class="empty-state">No reviews found</td></tr>';
       return;
     }
     el.innerHTML = reviews.map(r => renderReviewRow(r)).join('');
@@ -715,6 +777,7 @@ function renderReviewRow(r) {
       <td><span class="badge badge-${r.risk_tier}">${r.risk_tier || '-'}</span></td>
       <td>${r.combined_score?.toFixed(1) ?? '-'}</td>
       <td><span class="badge badge-${r.decision}">${formatDecision(r.decision)}</span></td>
+      <td style="font-size:12px;color:var(--accent-light)">${formatCost(r.cost_usd)}</td>
       <td>${formatDuration(r.duration_ms)}</td>
       <td style="font-size:12px;color:var(--text-dim)">${formatTime(r.started_at)}</td>
     </tr>
@@ -870,7 +933,7 @@ function renderDetailModal(r) {
       </div>
     ` : ''}
 
-    <div class="info-cards">
+    <div class="info-cards" style="grid-template-columns:repeat(5,1fr)">
       <div class="info-card">
         <div class="info-label">Platform</div>
         <div class="info-value">${esc(r.platform)}</div>
@@ -886,6 +949,11 @@ function renderDetailModal(r) {
       <div class="info-card">
         <div class="info-label">Findings</div>
         <div class="info-value">${totalFindings || '<span style="color:var(--text-dim)">—</span>'}</div>
+      </div>
+      <div class="info-card">
+        <div class="info-label">Cost</div>
+        <div class="info-value" style="color:var(--accent-light)">${r.cost_usd ? formatCost(r.cost_usd) : '<span style="color:var(--text-dim)">—</span>'}</div>
+        ${r.total_input_tokens ? '<div style="font-size:10px;color:var(--text-dim);margin-top:2px">' + r.total_input_tokens.toLocaleString() + ' + ' + r.total_output_tokens.toLocaleString() + ' tokens</div>' : ''}
       </div>
     </div>
 
@@ -979,6 +1047,30 @@ function renderDetailModal(r) {
       </div>
     ` : ''}
 
+    ${r.pipeline_log?.length ? `
+      <div class="modal-card">
+        <div class="modal-card-header" style="cursor:pointer" onclick="togglePipelineLog()">
+          <h3>Pipeline Log</h3>
+          <button class="log-toggle" id="log-toggle-btn">
+            <span class="arrow" id="log-toggle-arrow">&#9656;</span>
+            ${r.pipeline_log.length} entries
+          </button>
+        </div>
+        <div class="modal-card-body" id="pipeline-log-body" style="display:none;padding:0">
+          <div class="pipeline-log">
+            ${r.pipeline_log.map(e => `
+              <div class="log-entry log-level-${e.level}">
+                <span class="log-ts">${formatLogTime(e.ts)}</span>
+                <span class="log-badge log-badge-${e.level}">${e.level}</span>
+                <span class="log-stage">${esc(e.stage)}</span>
+                <span class="log-msg">${esc(e.msg)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    ` : ''}
+
     ${isActive && !r.mechanical_results?.length && !r.agent_results?.length ? `
       <div class="modal-card">
         <div class="modal-card-body" style="text-align:center;padding:32px;color:var(--text-dim)">
@@ -988,6 +1080,27 @@ function renderDetailModal(r) {
       </div>
     ` : ''}
   `;
+}
+
+function togglePipelineLog() {
+  const body = document.getElementById('pipeline-log-body');
+  const arrow = document.getElementById('log-toggle-arrow');
+  if (!body) return;
+  if (body.style.display === 'none') {
+    body.style.display = 'block';
+    if (arrow) arrow.classList.add('open');
+  } else {
+    body.style.display = 'none';
+    if (arrow) arrow.classList.remove('open');
+  }
+}
+
+function formatLogTime(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  } catch (_) { return ''; }
 }
 
 function toggleAgentFindings(header, idx) {
@@ -1043,6 +1156,13 @@ function truncate(s, n) {
 function formatDecision(d) {
   const m = { auto_approve: 'Approved', human_review: 'Human Review', hard_block: 'Blocked', pending: 'Pending' };
   return m[d] || d || '-';
+}
+
+function formatCost(usd) {
+  if (!usd) return '-';
+  if (usd < 0.01) return `$${usd.toFixed(4)}`;
+  if (usd < 1) return `$${usd.toFixed(3)}`;
+  return `$${usd.toFixed(2)}`;
 }
 
 function formatDuration(ms) {

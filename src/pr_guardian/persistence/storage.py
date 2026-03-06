@@ -73,6 +73,10 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.mechanical_passed = result.mechanical_passed
         row.override_reasons = result.override_reasons
         row.summary = result.summary
+        row.pipeline_log = result.pipeline_log
+        row.total_input_tokens = result.total_input_tokens
+        row.total_output_tokens = result.total_output_tokens
+        row.cost_usd = result.cost_usd
         row.stage = "complete"
         row.finished_at = now
         if row.started_at:
@@ -187,6 +191,12 @@ async def get_stats() -> dict[str, Any]:
         avg_duration = await session.scalar(
             select(func.avg(ReviewRow.duration_ms)).where(ReviewRow.duration_ms.isnot(None))
         )
+        avg_cost = await session.scalar(
+            select(func.avg(ReviewRow.cost_usd)).where(ReviewRow.decision != "pending")
+        )
+        total_cost = await session.scalar(
+            select(func.sum(ReviewRow.cost_usd)).where(ReviewRow.decision != "pending")
+        )
 
         # Top repos by review count
         top_repos_q = (
@@ -217,6 +227,8 @@ async def get_stats() -> dict[str, Any]:
             "severity_counts": severity_counts,
             "avg_score": round(avg_score, 2) if avg_score else 0.0,
             "avg_duration_ms": int(avg_duration) if avg_duration else 0,
+            "avg_cost_usd": round(avg_cost, 4) if avg_cost else 0.0,
+            "total_cost_usd": round(total_cost, 4) if total_cost else 0.0,
             "top_repos": [{"repo": r[0], "count": r[1]} for r in top_repos],
         }
 
@@ -245,6 +257,10 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "summary": row.summary,
         "stage": row.stage,
         "stage_detail": row.stage_detail,
+        "pipeline_log": row.pipeline_log or [],
+        "total_input_tokens": row.total_input_tokens,
+        "total_output_tokens": row.total_output_tokens,
+        "cost_usd": row.cost_usd,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,

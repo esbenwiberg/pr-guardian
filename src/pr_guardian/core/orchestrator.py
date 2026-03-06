@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import tempfile
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
@@ -33,6 +34,31 @@ from pr_guardian.triage.hotspots import load_hotspots
 from pr_guardian.triage.surface_map import build_security_surface
 
 log = structlog.get_logger()
+
+# Per-million-token pricing (input, output) — best-effort estimates.
+# Users can override via config in the future; this covers common models.
+_TOKEN_PRICES: dict[str, tuple[float, float]] = {
+    "claude-opus":      (15.0, 75.0),
+    "claude-sonnet":    (3.0, 15.0),
+    "claude-haiku":     (0.80, 4.0),
+    "gpt-4o":           (2.50, 10.0),
+    "gpt-4o-mini":      (0.15, 0.60),
+    "gpt-4-turbo":      (10.0, 30.0),
+    "gpt-4":            (30.0, 60.0),
+    "gpt-3.5":          (0.50, 1.50),
+}
+_DEFAULT_PRICE = (3.0, 15.0)  # fallback
+
+
+def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
+    """Estimate USD cost from token counts and model name (best-effort match)."""
+    model_lower = model.lower()
+    price = _DEFAULT_PRICE
+    for prefix, p in _TOKEN_PRICES.items():
+        if prefix in model_lower:
+            price = p
+            break
+    return (input_tokens * price[0] + output_tokens * price[1]) / 1_000_000
 
 
 def _try_import_storage():
@@ -70,6 +96,17 @@ async def run_review(
             review_db_id = await storage.create_review_record(pr)
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
+
+    pipeline_log: list[dict] = []
+
+    def _plog(level: str, stage: str, msg: str, **extra):
+        pipeline_log.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": level,
+            "stage": stage,
+            "msg": msg,
+            **{k: v for k, v in extra.items() if v is not None},
+        })
 
     def _emit(stage: str, detail: str = "", **extra):
         event_bus.publish(ReviewEvent(
@@ -135,9 +172,18 @@ async def run_review(
         change_profile=change_profile,
     )
 
+    langs = list(language_map.languages.keys())
+    _plog("info", "discovery",
+          f"Parsed {len(changed_files)} files across {len(langs)} language(s): {', '.join(langs)}. "
+          f"{diff.lines_changed} lines changed.")
+    if security_surface.has_hits():
+        surface_files = list(security_surface.classifications.keys())
+        _plog("info", "discovery",
+              f"Security surface files: {', '.join(surface_files[:10])}"
+              f"{f' (+{len(surface_files)-10} more)' if len(surface_files) > 10 else ''}")
     log.info(
         "discovery_complete",
-        languages=list(language_map.languages.keys()),
+        languages=langs,
         files=len(changed_files),
         lines=diff.lines_changed,
     )
@@ -148,9 +194,19 @@ async def run_review(
         repo_path, language_map, changed_files, config, pr.target_branch,
     )
 
+    passed_count = sum(1 for r in mechanical_results if r.passed)
+    total_count = len(mechanical_results)
+    _plog("info", "mechanical",
+          f"Mechanical checks: {passed_count}/{total_count} passed.")
+    for r in mechanical_results:
+        if not r.passed:
+            _plog("warn", "mechanical",
+                  f"{r.tool}: FAILED — {r.error or f'{len(r.findings)} finding(s)'}")
+
     if not all_checks_passed(mechanical_results):
         log.info("mechanical_gate_failed", pr_id=pr.pr_id)
         from pr_guardian.models.context import RiskTier
+        _plog("error", "mechanical", "Mechanical gate failed — PR blocked.")
         result = ReviewResult(
             pr_id=pr.pr_id,
             repo=pr.repo,
@@ -162,6 +218,7 @@ async def run_review(
             mechanical_passed=False,
             decision=Decision.HARD_BLOCK,
             summary="Mechanical checks failed — PR blocked.",
+            pipeline_log=pipeline_log,
         )
         await _post_results(adapter, pr, result, config)
         await _save_result(storage, review_db_id, result, _emit)
@@ -170,6 +227,11 @@ async def run_review(
     # Stage 2: Triage
     await _update_stage("triage", "Classifying risk and selecting agents")
     triage_result = classify(context, config)
+    _plog("info", "triage",
+          f"Risk tier: {triage_result.risk_tier.value}. "
+          f"Agents selected: {', '.join(sorted(triage_result.agent_set)) or 'none'}.")
+    for reason in triage_result.reasons:
+        _plog("info", "triage", f"Reason: {reason}")
     log.info("triage_complete", tier=triage_result.risk_tier.value, agents=sorted(triage_result.agent_set))
 
     # Stage 3: AI Agents (parallel)
@@ -186,11 +248,55 @@ async def run_review(
         if agent_tasks:
             agent_results = await asyncio.gather(*agent_tasks)
 
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost = 0.0
+
+    for ar in agent_results:
+        extras = ar.extras or {}
+        parts = [f"verdict={ar.verdict.value}", f"{len(ar.findings)} finding(s)"]
+        if extras.get("model"):
+            parts.append(f"model={extras['model']}")
+        if extras.get("response_length"):
+            parts.append(f"response={extras['response_length']} chars")
+        in_tok = extras.get("input_tokens", 0)
+        out_tok = extras.get("output_tokens", 0)
+        total_input_tokens += in_tok
+        total_output_tokens += out_tok
+        if in_tok or out_tok:
+            agent_cost = _estimate_cost(extras.get("model", ""), in_tok, out_tok)
+            total_cost += agent_cost
+            parts.append(f"tokens={in_tok}+{out_tok}")
+            parts.append(f"cost=${agent_cost:.4f}")
+        level = "warn" if ar.verdict.value == "flag_human" else "info"
+        _plog(level, "agents", f"Agent {ar.agent_name}: {', '.join(parts)}")
+        if ar.error:
+            _plog("error", "agents", f"Agent {ar.agent_name} error: {ar.error}")
+        if extras.get("raw_response_preview"):
+            _plog("debug", "agents",
+                  f"Agent {ar.agent_name} raw response: {extras['raw_response_preview']}",
+                  agent=ar.agent_name)
+
     # Stage 4: Decision
     await _update_stage("decision", "Computing final verdict")
     result = decide(context, agent_results, triage_result.risk_tier, config)
     result.mechanical_results = [_convert_mechanical(r) for r in mechanical_results]
     result.mechanical_passed = True
+
+    result.total_input_tokens = total_input_tokens
+    result.total_output_tokens = total_output_tokens
+    result.cost_usd = round(total_cost, 6)
+
+    _plog("info", "decision",
+          f"Decision: {result.decision.value}. Score: {result.combined_score:.2f}. "
+          f"Risk tier: {result.risk_tier.value}.")
+    if total_cost > 0:
+        _plog("info", "decision",
+              f"Total tokens: {total_input_tokens}+{total_output_tokens}. "
+              f"Estimated cost: ${total_cost:.4f}.")
+    for reason in result.override_reasons:
+        _plog("info", "decision", f"Override: {reason}")
+    result.pipeline_log = pipeline_log
 
     # Post results
     await _post_results(adapter, pr, result, config)

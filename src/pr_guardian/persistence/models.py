@@ -50,6 +50,11 @@ class ReviewRow(Base):
     # Pipeline stage tracking for live progress
     stage: Mapped[str] = mapped_column(String(32), default="queued")
     stage_detail: Mapped[str] = mapped_column(Text, default="")
+    pipeline_log: Mapped[list] = mapped_column(JSONB, default=list)
+
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

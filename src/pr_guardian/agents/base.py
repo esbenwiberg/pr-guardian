@@ -88,13 +88,21 @@ class BaseAgent:
                 temperature=self.config.llm.temperature,
                 response_format="json",
             )
-            return self._parse_response(response.content, languages)
+            result = self._parse_response(response.content, languages)
+            result.extras["model"] = model
+            result.extras["response_length"] = len(response.content)
+            result.extras["input_tokens"] = response.input_tokens
+            result.extras["output_tokens"] = response.output_tokens
+            if result.verdict == Verdict.FLAG_HUMAN and not result.findings:
+                result.extras["raw_response_preview"] = response.content[:1000]
+            return result
         except Exception as e:
             log.error("agent_failed", agent=self.agent_name, error=str(e))
             return AgentResult(
                 agent_name=self.agent_name,
                 verdict=Verdict.FLAG_HUMAN,
                 error=str(e),
+                extras={"model": model},
             )
 
     def _parse_response(self, raw: str, languages: list[str]) -> AgentResult:
