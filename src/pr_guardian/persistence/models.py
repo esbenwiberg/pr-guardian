@@ -37,6 +37,7 @@ class ReviewRow(Base):
     source_branch: Mapped[str] = mapped_column(String(256), default="")
     target_branch: Mapped[str] = mapped_column(String(256), default="")
     head_commit_sha: Mapped[str] = mapped_column(String(64), default="")
+    pr_url: Mapped[str] = mapped_column(Text, default="")
 
     risk_tier: Mapped[str] = mapped_column(String(16), default="")
     repo_risk_class: Mapped[str] = mapped_column(String(16), default="standard")

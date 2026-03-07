@@ -27,6 +27,15 @@ class PlatformPR:
     project: str = ""        # ADO project (empty for GitHub)
     install_id: int | None = None  # GitHub App installation ID
 
+    @property
+    def pr_url(self) -> str:
+        """Construct the web URL for this pull request."""
+        if self.platform == Platform.GITHUB:
+            return f"https://github.com/{self.repo}/pull/{self.pr_id}"
+        if self.platform == Platform.ADO:
+            return f"{self.repo_url}/pullrequest/{self.pr_id}"
+        return ""
+
 
 @dataclass
 class DiffFile:

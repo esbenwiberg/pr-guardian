@@ -1142,7 +1142,7 @@ function renderDetailModal(r) {
 
   body.innerHTML = `
     <div class="modal-header">
-      <h2>PR #${esc(r.pr_id)} — ${esc(r.title || 'Untitled')}</h2>
+      <h2>${r.pr_url ? `<a href="${esc(r.pr_url)}" target="_blank" rel="noopener">PR #${esc(r.pr_id)}</a>` : `PR #${esc(r.pr_id)}`} — ${esc(r.title || 'Untitled')}</h2>
       <div class="modal-meta">
         <span>${esc(r.repo)}</span> &middot;
         <span>${esc(r.author)}</span> &middot;
@@ -1387,6 +1387,7 @@ function generateMarkdownReport(r) {
   lines.push(`| Field | Value |`);
   lines.push(`|-------|-------|`);
   lines.push(`| Repository | ${r.repo} |`);
+  if (r.pr_url) lines.push(`| URL | ${r.pr_url} |`);
   lines.push(`| Author | ${r.author} |`);
   lines.push(`| Branch | ${r.source_branch} → ${r.target_branch} |`);
   if (r.head_commit_sha) lines.push(`| Commit | \`${r.head_commit_sha.slice(0, 8)}\` |`);

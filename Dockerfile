@@ -41,10 +41,16 @@ WORKDIR /app
 # Copy application code
 COPY src/ src/
 COPY prompts/ prompts/
+COPY alembic/ alembic/
+COPY alembic.ini .
 COPY pyproject.toml .
 
 # Install the app itself (editable not needed in prod)
 RUN pip install --no-cache-dir --no-deps .
+
+# Entrypoint script (runs migrations before starting the app)
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Non-root user
 RUN useradd --create-home --shell /bin/bash guardian
@@ -55,5 +61,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')" || exit 1
 
-ENTRYPOINT ["pr-guardian"]
-CMD ["serve", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["pr-guardian", "serve", "--host", "0.0.0.0", "--port", "8000"]

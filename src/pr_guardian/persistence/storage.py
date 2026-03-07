@@ -39,6 +39,7 @@ async def create_review_record(pr: PlatformPR) -> uuid.UUID:
         source_branch=pr.source_branch,
         target_branch=pr.target_branch,
         head_commit_sha=pr.head_commit_sha,
+        pr_url=pr.pr_url,
         stage="discovery",
     )
     async with async_session() as session:
@@ -350,6 +351,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "source_branch": row.source_branch,
         "target_branch": row.target_branch,
         "head_commit_sha": row.head_commit_sha,
+        "pr_url": row.pr_url,
         "risk_tier": row.risk_tier,
         "repo_risk_class": row.repo_risk_class,
         "combined_score": row.combined_score,

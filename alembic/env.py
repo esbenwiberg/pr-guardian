@@ -21,6 +21,10 @@ target_metadata = Base.metadata
 # Allow DATABASE_URL env var to override alembic.ini
 db_url = os.environ.get("DATABASE_URL")
 if db_url:
+    # Ensure the async driver is used regardless of how the URL was configured
+    if db_url.startswith("postgresql://"):
+        db_url = "postgresql+asyncpg://" + db_url[len("postgresql://"):]
+    db_url = db_url.replace("?sslmode=require", "?ssl=require").replace("&sslmode=require", "&ssl=require")
     config.set_main_option("sqlalchemy.url", db_url)
 
 
