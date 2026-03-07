@@ -154,5 +154,27 @@ async def _hydrate_pr(adapter, stub: PlatformPR, platform: str) -> PlatformPR:
             org=stub.org,
         )
 
-    # ADO: return stub as-is for now
+    if platform == "ado":
+        client = adapter._get_client()
+        resp = await client.get(
+            f"{adapter._org_url}/{stub.project}/_apis/git/repositories/{stub.repo}"
+            f"/pullRequests/{stub.pr_id}",
+            params={"api-version": "7.1"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        return PlatformPR(
+            platform=Platform.ADO,
+            pr_id=stub.pr_id,
+            repo=stub.repo,
+            repo_url=stub.repo_url,
+            source_branch=data.get("sourceRefName", "").replace("refs/heads/", ""),
+            target_branch=data.get("targetRefName", "").replace("refs/heads/", ""),
+            author=data.get("createdBy", {}).get("uniqueName", ""),
+            title=data.get("title", ""),
+            head_commit_sha=data.get("lastMergeSourceCommit", {}).get("commitId", ""),
+            org=stub.org,
+            project=stub.project,
+        )
+
     return stub

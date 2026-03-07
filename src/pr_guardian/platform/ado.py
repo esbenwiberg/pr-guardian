@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import difflib
+import json
 
 import httpx
 import structlog
@@ -101,7 +102,7 @@ class ADOAdapter:
                 if data.get("isBinary"):
                     return None
                 return data.get("content", "")
-            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+            except (httpx.HTTPStatusError, httpx.RequestError, json.JSONDecodeError) as exc:
                 log.debug("ado_file_fetch_failed", path=path, version=version, error=str(exc))
                 return None
 
@@ -113,7 +114,11 @@ class ADOAdapter:
         )
         resp = await client.get(url, params={"api-version": "7.1"})
         resp.raise_for_status()
-        iterations = resp.json().get("value", [])
+        try:
+            iterations = resp.json().get("value", [])
+        except json.JSONDecodeError:
+            log.error("ado_iterations_not_json", pr_id=pr.pr_id, body=resp.text[:200])
+            return Diff()
 
         if not iterations:
             return Diff()
@@ -126,8 +131,14 @@ class ADOAdapter:
         resp = await client.get(changes_url, params={"api-version": "7.1"})
         resp.raise_for_status()
 
+        try:
+            change_entries = resp.json().get("changeEntries", [])
+        except json.JSONDecodeError:
+            log.error("ado_changes_not_json", pr_id=pr.pr_id, body=resp.text[:200])
+            return Diff()
+
         diff_files: list[DiffFile] = []
-        for change in resp.json().get("changeEntries", []):
+        for change in change_entries:
             item = change.get("item", {})
             change_type = change.get("changeType") or "edit"
             status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
