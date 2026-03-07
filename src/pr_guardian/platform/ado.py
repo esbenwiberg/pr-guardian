@@ -82,8 +82,9 @@ class ADOAdapter:
         repo: str,
         path: str,
         version: str,
+        version_type: str = "branch",
     ) -> str | None:
-        """Fetch a single file's content at a branch version. Returns None on failure."""
+        """Fetch a single file's content at a given version. Returns None on failure."""
         async with sem:
             url = (
                 f"{self._org_url}/{project}/_apis/git/repositories/{repo}/items"
@@ -91,8 +92,8 @@ class ADOAdapter:
             params = {
                 "path": f"/{path}",
                 "versionDescriptor.version": version,
-                "versionDescriptor.versionType": "branch",
-                "$format": "text",
+                "versionDescriptor.versionType": version_type,
+                "includeContent": "true",
                 "api-version": "7.1",
             }
             try:
@@ -123,10 +124,30 @@ class ADOAdapter:
         if not iterations:
             return Diff()
 
-        last_iter = iterations[-1]["id"]
+        last_iter = iterations[-1]
+        last_iter_id = last_iter["id"]
+
+        # Use commit SHAs from the iteration — branches may be deleted after merge
+        source_sha = last_iter.get("sourceRefCommit", {}).get("commitId", "")
+        target_sha = last_iter.get("targetRefCommit", {}).get("commitId", "")
+        # Fall back to PR-level commit SHAs, then branch names
+        source_version = source_sha or pr.head_commit_sha or pr.source_branch
+        target_version = target_sha or pr.target_branch
+        source_version_type = "commit" if (source_sha or pr.head_commit_sha) else "branch"
+        target_version_type = "commit" if target_sha else "branch"
+
+        log.debug(
+            "ado_diff_versions",
+            pr_id=pr.pr_id,
+            source=source_version[:12],
+            source_type=source_version_type,
+            target=target_version[:12],
+            target_type=target_version_type,
+        )
+
         changes_url = (
             f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
-            f"/pullRequests/{pr.pr_id}/iterations/{last_iter}/changes"
+            f"/pullRequests/{pr.pr_id}/iterations/{last_iter_id}/changes"
         )
         resp = await client.get(changes_url, params={"api-version": "7.1"})
         resp.raise_for_status()
@@ -151,13 +172,14 @@ class ADOAdapter:
                 deletions=0,
             ))
 
-        # Fetch file contents and compute patches
+        # Fetch file contents and compute patches using commit SHAs
         sem = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
 
         async def _enrich(df: DiffFile) -> None:
             if df.status == "added":
                 content = await self._fetch_file_content(
-                    client, sem, pr.project, pr.repo, df.path, pr.source_branch,
+                    client, sem, pr.project, pr.repo, df.path,
+                    source_version, source_version_type,
                 )
                 if content is not None:
                     lines = content.splitlines(keepends=True)
@@ -165,7 +187,8 @@ class ADOAdapter:
                     df.additions = len(lines)
             elif df.status == "deleted":
                 content = await self._fetch_file_content(
-                    client, sem, pr.project, pr.repo, df.path, pr.target_branch,
+                    client, sem, pr.project, pr.repo, df.path,
+                    target_version, target_version_type,
                 )
                 if content is not None:
                     lines = content.splitlines(keepends=True)
@@ -175,10 +198,12 @@ class ADOAdapter:
                 old_path = df.old_path.lstrip("/") if df.old_path else df.path
                 old_content, new_content = await asyncio.gather(
                     self._fetch_file_content(
-                        client, sem, pr.project, pr.repo, old_path, pr.target_branch,
+                        client, sem, pr.project, pr.repo, old_path,
+                        target_version, target_version_type,
                     ),
                     self._fetch_file_content(
-                        client, sem, pr.project, pr.repo, df.path, pr.source_branch,
+                        client, sem, pr.project, pr.repo, df.path,
+                        source_version, source_version_type,
                     ),
                 )
                 if old_content is not None and new_content is not None:
