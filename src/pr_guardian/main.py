@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import os
 from contextlib import asynccontextmanager
 
@@ -31,14 +30,8 @@ async def lifespan(app: FastAPI):
     if os.environ.get("DATABASE_URL") or os.environ.get("GUARDIAN_DB_ENABLED", "").lower() in (
         "1", "true", "yes",
     ):
-        from pr_guardian.persistence.database import close_db, init_db
-        log.info("db_init_start")
-        try:
-            await asyncio.wait_for(init_db(), timeout=30)
-        except TimeoutError:
-            log.error("db_init_timeout", hint="Database connection timed out after 30s")
-            raise
-        log.info("db_init_done")
+        from pr_guardian.persistence.database import close_db
+        log.info("db_ready")
         yield
         await close_db()
     else:
