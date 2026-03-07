@@ -70,7 +70,7 @@ class AutoApproveConfig(BaseModel):
 
 
 class AgentsConfig(BaseModel):
-    max_context_tokens: int = 32000
+    max_context_tokens: int = 120_000
     timeout_seconds: int = 120
 
 

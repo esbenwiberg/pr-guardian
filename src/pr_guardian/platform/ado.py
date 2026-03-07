@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import base64
+import difflib
 
 import httpx
 import structlog
@@ -9,6 +11,20 @@ from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
 from pr_guardian.platform.models import WebhookPayload
 
 log = structlog.get_logger()
+
+_MAX_CONCURRENT_FETCHES = 10
+
+
+def _unified_diff(old: str, new: str, path: str) -> str:
+    """Compute a unified diff between two file contents."""
+    old_lines = old.splitlines(keepends=True)
+    new_lines = new.splitlines(keepends=True)
+    return "".join(
+        difflib.unified_diff(
+            old_lines, new_lines,
+            fromfile=f"a/{path}", tofile=f"b/{path}",
+        )
+    )
 
 
 class ADOAdapter:
@@ -57,6 +73,38 @@ class ADOAdapter:
             project=project.get("name", ""),
         )
 
+    async def _fetch_file_content(
+        self,
+        client: httpx.AsyncClient,
+        sem: asyncio.Semaphore,
+        project: str,
+        repo: str,
+        path: str,
+        version: str,
+    ) -> str | None:
+        """Fetch a single file's content at a branch version. Returns None on failure."""
+        async with sem:
+            url = (
+                f"{self._org_url}/{project}/_apis/git/repositories/{repo}/items"
+            )
+            params = {
+                "path": f"/{path}",
+                "versionDescriptor.version": version,
+                "versionDescriptor.versionType": "branch",
+                "includeContent": "true",
+                "api-version": "7.1",
+            }
+            try:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                data = resp.json()
+                if data.get("isBinary"):
+                    return None
+                return data.get("content", "")
+            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
+                log.debug("ado_file_fetch_failed", path=path, version=version, error=str(exc))
+                return None
+
     async def fetch_diff(self, pr: PlatformPR) -> Diff:
         client = self._get_client()
         url = (
@@ -91,6 +139,53 @@ class ADOAdapter:
                 additions=0,
                 deletions=0,
             ))
+
+        # Fetch file contents and compute patches
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
+
+        async def _enrich(df: DiffFile) -> None:
+            if df.status == "added":
+                content = await self._fetch_file_content(
+                    client, sem, pr.project, pr.repo, df.path, pr.source_branch,
+                )
+                if content is not None:
+                    lines = content.splitlines(keepends=True)
+                    df.patch = "".join(f"+{line}" for line in lines)
+                    df.additions = len(lines)
+            elif df.status == "deleted":
+                content = await self._fetch_file_content(
+                    client, sem, pr.project, pr.repo, df.path, pr.target_branch,
+                )
+                if content is not None:
+                    lines = content.splitlines(keepends=True)
+                    df.patch = "".join(f"-{line}" for line in lines)
+                    df.deletions = len(lines)
+            else:
+                old_path = df.old_path.lstrip("/") if df.old_path else df.path
+                old_content, new_content = await asyncio.gather(
+                    self._fetch_file_content(
+                        client, sem, pr.project, pr.repo, old_path, pr.target_branch,
+                    ),
+                    self._fetch_file_content(
+                        client, sem, pr.project, pr.repo, df.path, pr.source_branch,
+                    ),
+                )
+                if old_content is not None and new_content is not None:
+                    df.patch = _unified_diff(old_content, new_content, df.path)
+                    for line in df.patch.splitlines():
+                        if line.startswith("+") and not line.startswith("+++"):
+                            df.additions += 1
+                        elif line.startswith("-") and not line.startswith("---"):
+                            df.deletions += 1
+
+        await asyncio.gather(*[_enrich(df) for df in diff_files])
+
+        log.info(
+            "ado_diff_fetched",
+            pr_id=pr.pr_id,
+            files=len(diff_files),
+            files_with_patch=sum(1 for f in diff_files if f.patch),
+        )
         return Diff(files=diff_files)
 
     async def post_comment(self, pr: PlatformPR, body: str) -> None:

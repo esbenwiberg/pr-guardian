@@ -47,7 +47,7 @@ auto_approve:
   require_all_checks_pass: true
 
 agents:
-  max_context_tokens: 32000
+  max_context_tokens: 120000
   timeout_seconds: 120
 
 feedback:

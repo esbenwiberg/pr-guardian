@@ -24,6 +24,12 @@ from pr_guardian.models.findings import (
 log = structlog.get_logger()
 
 AGENT_OUTPUT_SCHEMA = """
+IMPORTANT — EVIDENCE RULES:
+- Only report findings based on code you can actually see in the diff below.
+- If a file is marked "[diff content not available]" or "[diff truncated]", do NOT guess what the unseen code contains.
+- Never infer file contents from filenames or common patterns. If you cannot cite a specific line or pattern from the visible diff, do not report a finding.
+- Findings that speculate about code you have not seen will be discarded.
+
 Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching this schema:
 {
   "verdict": "pass | warn | flag_human",
@@ -77,7 +83,10 @@ class BaseAgent:
         system_prompt = build_agent_prompt(self.prompt_dir, languages, base_override=override)
         system_prompt += f"\n\n{AGENT_OUTPUT_SCHEMA}"
 
-        user_message = build_agent_context(context, self.agent_name)
+        user_message = build_agent_context(
+            context, self.agent_name,
+            max_context_tokens=self.config.agents.max_context_tokens,
+        )
 
         model = resolve_model(self.config, self.agent_name)
         llm = self._get_llm()

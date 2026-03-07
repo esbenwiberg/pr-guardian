@@ -1,9 +1,110 @@
 from __future__ import annotations
 
 from pr_guardian.models.context import ReviewContext
+from pr_guardian.models.pr import DiffFile
 
 
-def build_agent_context(context: ReviewContext, agent_name: str) -> str:
+def _estimate_tokens(text: str) -> int:
+    """Rough token estimate: ~4 chars per token for code."""
+    return len(text) // 4
+
+
+def _prioritize_files(context: ReviewContext) -> list[DiffFile]:
+    """Return diff files sorted by review priority (highest first).
+
+    Priority: security surface > blast radius > hotspots > rest.
+    Within each tier, smaller patches come first so more files fit in the budget.
+    """
+    security_files = set(context.security_surface.classifications.keys())
+    blast_files = set(context.blast_radius.propagated_surface.keys())
+    hotspot_files = context.hotspots or set()
+
+    def _sort_key(df: DiffFile) -> tuple[int, int]:
+        if df.path in security_files:
+            tier = 0
+        elif df.path in blast_files:
+            tier = 1
+        elif df.path in hotspot_files:
+            tier = 2
+        else:
+            tier = 3
+        return (tier, len(df.patch))
+
+    return sorted(context.diff.files, key=_sort_key)
+
+
+def _build_diff_section(
+    prioritized: list[DiffFile],
+    budget_tokens: int,
+) -> list[str]:
+    """Build diff sections within a token budget.
+
+    Returns text parts for the diff section, with truncation/omission markers
+    so the LLM knows when content is missing.
+    """
+    parts: list[str] = []
+    remaining = budget_tokens
+    per_file_cap = max(budget_tokens * 30 // 100, 500)
+    omitted: list[str] = []
+
+    for df in prioritized:
+        header = f"### {df.path} ({df.status})"
+        header_tokens = _estimate_tokens(header) + 10  # fencing overhead
+
+        if not df.patch:
+            marker = f"{header}\n*[diff content not available — do not speculate about this file]*"
+            cost = _estimate_tokens(marker)
+            if cost <= remaining:
+                parts.append(marker)
+                remaining -= cost
+            else:
+                omitted.append(df.path)
+            continue
+
+        patch_tokens = _estimate_tokens(df.patch)
+
+        if header_tokens > remaining:
+            omitted.append(df.path)
+            continue
+
+        available = min(per_file_cap, remaining - header_tokens)
+
+        if patch_tokens <= available:
+            parts.append(f"{header}\n```\n{df.patch}\n```")
+            remaining -= header_tokens + patch_tokens
+        elif available >= 200:
+            # Truncate to fit — cut at a line boundary
+            char_limit = available * 4
+            truncated = df.patch[:char_limit]
+            last_nl = truncated.rfind("\n")
+            if last_nl > 0:
+                truncated = truncated[:last_nl]
+            total_lines = df.patch.count("\n")
+            shown_lines = truncated.count("\n")
+            omitted_lines = total_lines - shown_lines
+            parts.append(
+                f"{header}\n```\n{truncated}\n```\n"
+                f"*[diff truncated — {omitted_lines} lines omitted]*"
+            )
+            remaining -= header_tokens + _estimate_tokens(truncated) + 15
+        else:
+            omitted.append(df.path)
+
+    if omitted:
+        listing = ", ".join(omitted)
+        parts.append(
+            f"\n*[{len(omitted)} file(s) omitted due to context budget: {listing} "
+            f"— do not speculate about omitted files]*"
+        )
+
+    return parts
+
+
+def build_agent_context(
+    context: ReviewContext,
+    agent_name: str,
+    max_context_tokens: int = 120_000,
+) -> str:
     """Build the user message (diff + context) sent to an agent."""
     parts: list[str] = []
 
@@ -34,11 +135,16 @@ def build_agent_context(context: ReviewContext, agent_name: str) -> str:
         if hotspot_hits:
             parts.append(f"\n## Hotspot Files: {', '.join(hotspot_hits)}")
 
-    # Diff
+    # Calculate token budget remaining for diff
+    metadata_text = "\n".join(parts)
+    metadata_tokens = _estimate_tokens(metadata_text)
+    diff_budget = max(max_context_tokens - metadata_tokens, 1000)
+
+    # Prioritize files and build diff within budget
+    prioritized = _prioritize_files(context)
+    diff_parts = _build_diff_section(prioritized, diff_budget)
+
     parts.append("\n## Diff\n")
-    for diff_file in context.diff.files:
-        parts.append(f"### {diff_file.path} ({diff_file.status})")
-        if diff_file.patch:
-            parts.append(f"```\n{diff_file.patch}\n```")
+    parts.extend(diff_parts)
 
     return "\n".join(parts)
