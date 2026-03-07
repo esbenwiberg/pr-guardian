@@ -92,17 +92,17 @@ class ADOAdapter:
                 "path": f"/{path}",
                 "versionDescriptor.version": version,
                 "versionDescriptor.versionType": "branch",
-                "includeContent": "true",
+                "$format": "text",
                 "api-version": "7.1",
             }
             try:
                 resp = await client.get(url, params=params)
                 resp.raise_for_status()
-                data = resp.json()
-                if data.get("isBinary"):
-                    return None
-                return data.get("content", "")
-            except (httpx.HTTPStatusError, httpx.RequestError, json.JSONDecodeError) as exc:
+                content_type = resp.headers.get("content-type", "")
+                if "octet-stream" in content_type:
+                    return None  # binary file
+                return resp.text
+            except (httpx.HTTPStatusError, httpx.RequestError) as exc:
                 log.debug("ado_file_fetch_failed", path=path, version=version, error=str(exc))
                 return None
 

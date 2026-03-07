@@ -157,6 +157,12 @@ async def _run_pipeline(
     # Fetch diff
     diff = await adapter.fetch_diff(pr)
     changed_files = diff.file_paths
+    files_with_patch = sum(1 for f in diff.files if f.patch)
+    _plog("info", "discovery",
+          f"Fetched diff: {len(changed_files)} files, {files_with_patch} with patch content.")
+    if changed_files and files_with_patch == 0:
+        _plog("warn", "discovery",
+              "No patch content retrieved — agents will have no code to review.")
 
     # Use temp dir as repo_path (in production, would be a shallow clone)
     repo_path = Path(tempfile.mkdtemp(prefix=f"review-{pr.pr_id}-"))
