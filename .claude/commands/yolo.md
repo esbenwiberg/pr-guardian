@@ -52,21 +52,24 @@ Run via Bash:
 
 ```bash
 YOLO_CTX="/tmp/yolo-ctx-$(date +%s).md"
+YOLO_OUT="/tmp/yolo-out-$(date +%s).txt"
 # (write context file first, then:)
 cat "$YOLO_CTX" | env -u CLAUDECODE claude -p \
   --dangerously-skip-permissions \
   --no-session-persistence \
   --append-system-prompt "After completing all tasks, you MUST write a final text response summarizing what you did: files changed, commands run, outcomes, and any errors. Without this text response your output is invisible." \
-  2>&1
+  > "$YOLO_OUT" 2>&1
 rm -f "$YOLO_CTX"
+cat "$YOLO_OUT"
+rm -f "$YOLO_OUT"
 ```
 
 Important:
-- Pipe via stdin to avoid shell escaping issues
+- Pipe context via stdin to avoid shell escaping issues
+- Redirect output to a temp file then read it back — the parent session's Bash tool swallows direct stdout from nested `claude -p` processes
 - Add `--no-session-persistence` since this is disposable
 - Unset CLAUDECODE env var to allow nested execution
-- Capture stderr too (`2>&1`) so errors are visible
-- Clean up the temp file after
+- Clean up both temp files after
 
 ### 4. Report
 
