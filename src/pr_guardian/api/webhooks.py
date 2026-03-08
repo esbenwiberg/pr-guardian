@@ -59,7 +59,8 @@ async def github_webhook(
         return {"status": "duplicate", "pr_id": pr.pr_id}
 
     adapter = create_adapter("github")
-    await review_queue.enqueue(pr, run_review(pr, adapter))
+    base_url = str(request.base_url).rstrip("/")
+    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url))
 
     log.info("webhook_accepted", platform="github", pr_id=pr.pr_id)
     return {"status": "queued", "pr_id": pr.pr_id}
@@ -84,7 +85,8 @@ async def ado_webhook(request: Request):
         return {"status": "duplicate", "pr_id": pr.pr_id}
 
     adapter = create_adapter("ado")
-    await review_queue.enqueue(pr, run_review(pr, adapter))
+    base_url = str(request.base_url).rstrip("/")
+    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url))
 
     log.info("webhook_accepted", platform="ado", pr_id=pr.pr_id)
     return {"status": "queued", "pr_id": pr.pr_id}

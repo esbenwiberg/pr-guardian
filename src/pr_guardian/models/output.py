@@ -32,6 +32,8 @@ class ReviewResult:
     risk_tier: RiskTier
     repo_risk_class: RepoRiskClass
 
+    review_id: str = ""  # DB UUID, set by orchestrator when persistence is active
+
     mechanical_results: list[MechanicalResult] = field(default_factory=list)
     mechanical_passed: bool = True
 

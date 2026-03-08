@@ -3,11 +3,10 @@ from __future__ import annotations
 import re
 
 import structlog
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from pr_guardian.core.orchestrator import run_review
-from pr_guardian.decision.actions import build_summary_comment
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.factory import create_adapter
 
@@ -40,7 +39,7 @@ class ReviewResponse(BaseModel):
 
 
 @router.post("/review", response_model=ReviewResponse)
-async def manual_review(req: ReviewRequest):
+async def manual_review(req: ReviewRequest, request: Request):
     """Manually trigger a review for a PR by URL.
 
     Runs the full review pipeline synchronously and returns the result.
@@ -64,19 +63,12 @@ async def manual_review(req: ReviewRequest):
     log.info("manual_review_started", platform=platform_name, pr_id=pr.pr_id, repo=pr.repo)
 
     try:
-        result = await run_review(pr, adapter)
+        base_url = str(request.base_url).rstrip("/")
+        result = await run_review(pr, adapter, post_comment=req.post_comment, base_url=base_url)
     except Exception as e:
         log.error("manual_review_failed", pr_id=pr.pr_id, error=str(e))
         raise HTTPException(status_code=500, detail=f"Review failed: {e}")
 
-
-    if req.post_comment:
-        try:
-            comment = build_summary_comment(result)
-            await adapter.post_comment(pr, comment)
-            log.info("manual_review_comment_posted", pr_id=pr.pr_id)
-        except Exception as e:
-            log.error("manual_review_comment_failed", pr_id=pr.pr_id, error=str(e))
     return ReviewResponse(
         status="completed",
         pr_id=pr.pr_id,

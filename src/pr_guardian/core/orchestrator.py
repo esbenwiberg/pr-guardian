@@ -83,6 +83,9 @@ async def run_review(
     pr: PlatformPR,
     adapter: PlatformAdapter,
     service_config: GuardianConfig | None = None,
+    *,
+    post_comment: bool = True,
+    base_url: str = "",
 ) -> ReviewResult:
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
@@ -130,7 +133,7 @@ async def run_review(
     await adapter.set_status(pr, "pending", "PR Guardian review in progress")
 
     try:
-        return await _run_pipeline(pr, adapter, service_config, storage, review_db_id, pipeline_log, _plog, _emit, _update_stage)
+        return await _run_pipeline(pr, adapter, service_config, storage, review_db_id, pipeline_log, _plog, _emit, _update_stage, post_comment=post_comment, base_url=base_url)
     except Exception as exc:
         if storage and review_db_id:
             try:
@@ -151,6 +154,9 @@ async def _run_pipeline(
     _plog,
     _emit,
     _update_stage,
+    *,
+    post_comment: bool = True,
+    base_url: str = "",
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
@@ -243,6 +249,7 @@ async def _run_pipeline(
             repo=pr.repo,
             risk_tier=RiskTier.HIGH,
             repo_risk_class=context.repo_risk_class,
+            review_id=str(review_db_id) if review_db_id else "",
             mechanical_results=[
                 _convert_mechanical(r) for r in mechanical_results
             ],
@@ -251,7 +258,8 @@ async def _run_pipeline(
             summary="Mechanical checks failed — PR blocked.",
             pipeline_log=pipeline_log,
         )
-        await _post_results(adapter, pr, result, config)
+        if post_comment:
+            await _post_results(adapter, pr, result, config, base_url=base_url)
         await _save_result(storage, review_db_id, result, _emit)
         return result
 
@@ -311,6 +319,7 @@ async def _run_pipeline(
     # Stage 4: Decision
     await _update_stage("decision", "Computing final verdict")
     result = decide(context, agent_results, triage_result.risk_tier, config)
+    result.review_id = str(review_db_id) if review_db_id else ""
     result.mechanical_results = [_convert_mechanical(r) for r in mechanical_results]
     result.mechanical_passed = True
 
@@ -330,7 +339,8 @@ async def _run_pipeline(
     result.pipeline_log = pipeline_log
 
     # Post results
-    await _post_results(adapter, pr, result, config)
+    if post_comment:
+        await _post_results(adapter, pr, result, config)
 
     # Persist to DB
     await _save_result(storage, review_db_id, result, _emit)
@@ -372,9 +382,11 @@ async def _post_results(
     pr: PlatformPR,
     result: ReviewResult,
     config: GuardianConfig,
+    *,
+    base_url: str = "",
 ) -> None:
     """Post review results back to the platform."""
-    comment = build_summary_comment(result)
+    comment = build_summary_comment(result, base_url=base_url)
     labels = get_review_labels(result)
 
     try:
