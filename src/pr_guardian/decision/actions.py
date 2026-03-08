@@ -30,34 +30,26 @@ def _detail_url(review_id: str, base_url: str = "") -> str | None:
 
 
 def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
-    """Build a slim PR comment with per-area summaries and a link to full details.
+    """Build a slim PR comment with per-area verdicts/summaries and a detail link.
 
     Designed for dual consumption:
-    - Humans see a compact overview with high/medium finding counts per area.
+    - Humans see a scannable overview with plain-English finding summaries.
     - Agents/tools parse the embedded JSON metadata block for structured data.
     """
     lines: list[str] = []
 
-    # Header
-    emoji = {
-        "auto_approve": "\u2705",
-        "human_review": "\U0001f440",
-        "reject": "\u274c",
-        "hard_block": "\U0001f6ab",
+    # ── Header ──────────────────────────────────────────────────────
+    decision_display = {
+        "auto_approve": ("\u2705", "Auto-Approved"),
+        "human_review": ("\U0001f440", "Human Review Required"),
+        "reject": ("\u274c", "Changes Requested"),
+        "hard_block": ("\U0001f6ab", "Blocked"),
     }
-    decision_label = {
-        "auto_approve": "Auto-Approved",
-        "human_review": "Human Review Required",
-        "reject": "Changes Requested",
-        "hard_block": "Blocked",
-    }
-    lines.append(
-        f"## PR Guardian {emoji.get(result.decision.value, '\u2753')} "
-        f"{decision_label.get(result.decision.value, 'Unknown')}"
-    )
+    emoji, label = decision_display.get(result.decision.value, ("\u2753", "Unknown"))
+    lines.append(f"## PR Guardian {emoji} {label}")
     lines.append("")
 
-    # Compact metrics row
+    # ── Metrics ─────────────────────────────────────────────────────
     lines.append(
         f"**Risk** {result.risk_tier.value.upper()} "
         f"\u00b7 **Score** {result.combined_score:.1f}/10 "
@@ -65,79 +57,69 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     )
     lines.append("")
 
-    # Per-agent area summaries (only when agents ran)
+    # ── Per-area verdicts with plain-English summaries ──────────────
     if result.agent_results:
-        verdict_emoji = {"pass": "\u2705", "warn": "\u26a0\ufe0f", "flag_human": "\U0001f50d"}
-        sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        verdict_tag = {
+            "pass": "\u2705 Pass",
+            "warn": "\u26a0\ufe0f Warn",
+            "flag_human": "\U0001f50d Review",
+        }
+        sev_rank = {"critical": 0, "high": 1, "medium": 2}
 
         for agent in result.agent_results:
-            label = _AGENT_LABELS.get(agent.agent_name, agent.agent_name)
-            icon = verdict_emoji.get(agent.verdict.value, "\u2753")
+            area = _AGENT_LABELS.get(agent.agent_name, agent.agent_name)
+            tag = verdict_tag.get(agent.verdict.value, "\u2753")
 
-            # Count high/medium+ findings
-            counts: dict[str, int] = {}
-            for f in agent.findings:
-                sev = f.severity.value
-                if sev in ("critical", "high", "medium"):
-                    counts[sev] = counts.get(sev, 0) + 1
+            # Collect notable findings (medium+) sorted by severity
+            notable = [
+                f for f in agent.findings
+                if f.severity.value in sev_rank
+            ]
+            notable.sort(key=lambda f: sev_rank[f.severity.value])
 
-            if counts:
-                parts = []
-                for sev in sorted(counts, key=lambda s: sev_order.get(s, 99)):
-                    parts.append(f"{counts[sev]} {sev}")
-                summary = " \u00b7 ".join(parts)
-                lines.append(f"- {icon} **{label}** \u2014 {summary}")
+            if not notable:
+                lines.append(f"- **{area}** \u2014 {tag}")
             else:
-                lines.append(f"- {icon} **{label}** \u2014 no issues")
+                # Build plain-English summary from finding descriptions
+                descs: list[str] = []
+                for f in notable[:3]:
+                    desc = f.description
+                    if len(desc) > 80:
+                        desc = desc[:77] + "..."
+                    descs.append(desc)
+                summary = "; ".join(descs)
+                if len(notable) > 3:
+                    summary += f" (+{len(notable) - 3} more)"
+                lines.append(f"- **{area}** \u2014 {tag}")
+                lines.append(f"  {summary}")
+
         lines.append("")
 
-    # Top findings for reject/hard_block (keep actionable items visible)
-    if result.decision in (Decision.REJECT, Decision.HARD_BLOCK):
-        high_findings = []
-        for agent in result.agent_results:
-            for f in agent.findings:
-                if f.severity.value in ("critical", "high"):
-                    high_findings.append((agent.agent_name, f))
-
-        if high_findings:
-            lines.append("### Top Issues")
-            lines.append("")
-            sev_emoji = {"high": "\U0001f536", "critical": "\U0001f534"}
-            for agent_name, finding in high_findings[:5]:
-                location = f"`{finding.file}"
-                if finding.line:
-                    location += f":{finding.line}"
-                location += "`"
-                lines.append(
-                    f"- {sev_emoji.get(finding.severity.value, '\u26a0\ufe0f')} "
-                    f"**[{finding.severity.value.upper()}]** "
-                    f"{location} \u2014 {finding.description}"
-                )
-            if len(high_findings) > 5:
-                lines.append(f"- *...and {len(high_findings) - 5} more*")
-            lines.append("")
-
-    # Escalation reasons
+    # ── Escalation reasons ──────────────────────────────────────────
     if result.override_reasons:
-        lines.append("### Escalation Reasons")
-        for reason in result.override_reasons:
-            lines.append(f"- {reason}")
+        lines.append(
+            "**Escalated:** "
+            + " \u00b7 ".join(result.override_reasons)
+        )
         lines.append("")
 
-    # Link to detail page
+    # ── Detail page link ────────────────────────────────────────────
     detail_url = _detail_url(result.review_id, base_url)
     if detail_url:
-        lines.append(f"[\U0001f50e View full findings & export for fix \u2192]({detail_url})")
+        lines.append(
+            f"[\U0001f50e Full findings & export for fix \u2192]({detail_url})"
+        )
         lines.append("")
 
     lines.append("---")
     lines.append("*PR Guardian \u2014 automated review*")
 
-    # Machine-readable metadata for downstream agents/tools
-    all_findings = []
-    for agent in result.agent_results:
-        for finding in agent.findings:
-            all_findings.append((agent.agent_name, finding))
+    # ── Machine-readable metadata for downstream agents/tools ──────
+    all_findings = [
+        (agent.agent_name, finding)
+        for agent in result.agent_results
+        for finding in agent.findings
+    ]
     metadata = _build_metadata(result, all_findings, base_url)
     lines.append("")
     lines.append(f"<!-- pr-guardian-metadata: {json.dumps(metadata, separators=(',', ':'))} -->")
