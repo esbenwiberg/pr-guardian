@@ -48,35 +48,54 @@ Keep it focused. The subprocess is a capable Claude instance — it can read fil
 
 ### 3. Execute
 
-Run via Bash:
+Run the subprocess via a runner script. First create the runner at `/tmp/yolo-run.sh` (if it doesn't already exist), then invoke it.
+
+**Runner script** (`/tmp/yolo-run.sh`):
 
 ```bash
-YOLO_CTX="/tmp/yolo-ctx-$(date +%s).md"
-YOLO_OUT="/tmp/yolo-out-$(date +%s).txt"
-# (write context file first, then:)
+#!/bin/bash
+YOLO_CTX="$1"
+YOLO_OUT="$2"
+
 cat "$YOLO_CTX" | env -u CLAUDECODE claude -p \
   --dangerously-skip-permissions \
   --no-session-persistence \
   --append-system-prompt "After completing all tasks, you MUST write a final text response summarizing what you did: files changed, commands run, outcomes, and any errors. Without this text response your output is invisible." \
   > "$YOLO_OUT" 2>&1
+
 rm -f "$YOLO_CTX"
-cat "$YOLO_OUT"
-rm -f "$YOLO_OUT"
 ```
 
-Important:
-- Pipe context via stdin to avoid shell escaping issues
-- Redirect output to a temp file then read it back — the parent session's Bash tool swallows direct stdout from nested `claude -p` processes
-- Add `--no-session-persistence` since this is disposable
-- Unset CLAUDECODE env var to allow nested execution
-- Clean up both temp files after
+**Invocation** (two sequential Bash calls):
+
+1. First Bash call — write the runner script (if needed) and execute:
+```bash
+# write runner if missing
+[ -f /tmp/yolo-run.sh ] || cat > /tmp/yolo-run.sh << 'RUNNER'
+#!/bin/bash
+cat "$1" | env -u CLAUDECODE claude -p \
+  --dangerously-skip-permissions \
+  --no-session-persistence \
+  --append-system-prompt "After completing all tasks, you MUST write a final text response summarizing what you did: files changed, commands run, outcomes, and any errors. Without this text response your output is invisible." \
+  > "$2" 2>&1
+rm -f "$1"
+RUNNER
+chmod +x /tmp/yolo-run.sh
+
+# run it
+bash /tmp/yolo-run.sh "$YOLO_CTX" "/tmp/yolo-out.txt"
+```
+
+2. Second step — use the **Read** tool (NOT Bash cat) to read `/tmp/yolo-out.txt`. The parent session's Bash tool swallows stdout from nested `claude -p` processes, so you MUST use the Read tool to retrieve the output.
+
+3. Clean up: `rm -f /tmp/yolo-out.txt`
 
 ### 4. Report
 
-Show the user a concise summary of what the subprocess did. Include:
+Read the subprocess output from the file using the Read tool, then show the user a concise summary:
 - What actions were taken
 - What files were changed (if any)
-- Any errors or warnings from the subprocess
+- Any errors or warnings
 - The subprocess's own summary if useful
 
-Do NOT just dump the raw output — summarize it.
+Do NOT just dump the raw output — summarize it. Clean up `/tmp/yolo-out.txt` after reading.
