@@ -53,7 +53,11 @@ Run via Bash:
 ```bash
 YOLO_CTX="/tmp/yolo-ctx-$(date +%s).md"
 # (write context file first, then:)
-cat "$YOLO_CTX" | env -u CLAUDECODE claude -p --dangerously-skip-permissions --no-session-persistence 2>&1
+cat "$YOLO_CTX" | env -u CLAUDECODE claude -p \
+  --dangerously-skip-permissions \
+  --no-session-persistence \
+  --append-system-prompt "After completing all tasks, you MUST write a final text response summarizing what you did: files changed, commands run, outcomes, and any errors. Without this text response your output is invisible." \
+  2>&1
 rm -f "$YOLO_CTX"
 ```
 
