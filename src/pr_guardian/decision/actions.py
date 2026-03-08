@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import json
 import os
 
-from pr_guardian.models.findings import AgentResult, Verdict
+from pr_guardian.models.findings import Verdict
 from pr_guardian.models.output import Decision, ReviewResult
 
 # Agent display names for the PR comment
@@ -32,9 +31,9 @@ def _detail_url(review_id: str, base_url: str = "") -> str | None:
 def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     """Build a slim PR comment with per-area verdicts/summaries and a detail link.
 
-    Designed for dual consumption:
-    - Humans see a scannable overview with plain-English finding summaries.
-    - Agents/tools parse the embedded JSON metadata block for structured data.
+    The comment is for humans — short category labels per area so a dev can
+    scan in seconds.  Structured data lives on the detail-page API; we only
+    embed a tiny metadata tag (decision + detail URL) for downstream tooling.
     """
     lines: list[str] = []
 
@@ -57,7 +56,7 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     )
     lines.append("")
 
-    # ── Per-area verdicts with plain-English summaries ──────────────
+    # ── Per-area verdicts with short category summaries ─────────────
     if result.agent_results:
         verdict_tag = {
             "pass": "\u2705 Pass",
@@ -80,16 +79,11 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
             if not notable:
                 lines.append(f"- **{area}** \u2014 {tag}")
             else:
-                # Build plain-English summary from finding descriptions
-                descs: list[str] = []
-                for f in notable[:3]:
-                    desc = f.description
-                    if len(desc) > 80:
-                        desc = desc[:77] + "..."
-                    descs.append(desc)
-                summary = "; ".join(descs)
-                if len(notable) > 3:
-                    summary += f" (+{len(notable) - 3} more)"
+                # Use category labels (short) — deduplicate to avoid repetition
+                categories = list(dict.fromkeys(f.category for f in notable))
+                summary = "; ".join(categories[:3])
+                if len(categories) > 3:
+                    summary += f" (+{len(categories) - 3} more)"
                 lines.append(f"- **{area}** \u2014 {tag}")
                 lines.append(f"  {summary}")
 
@@ -114,60 +108,8 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     lines.append("---")
     lines.append("*PR Guardian \u2014 automated review*")
 
-    # ── Machine-readable metadata for downstream agents/tools ──────
-    all_findings = [
-        (agent.agent_name, finding)
-        for agent in result.agent_results
-        for finding in agent.findings
-    ]
-    metadata = _build_metadata(result, all_findings, base_url)
-    lines.append("")
-    lines.append(f"<!-- pr-guardian-metadata: {json.dumps(metadata, separators=(',', ':'))} -->")
-
     return "\n".join(lines)
 
-
-def _build_metadata(
-    result: ReviewResult,
-    all_findings: list[tuple[str, object]],
-    base_url: str = "",
-) -> dict:
-    """Build structured JSON metadata for agent consumption."""
-    meta: dict = {
-        "version": "1",
-        "decision": result.decision.value,
-        "risk_tier": result.risk_tier.value,
-        "repo_risk_class": result.repo_risk_class.value,
-        "combined_score": round(result.combined_score, 2),
-        "mechanical_passed": result.mechanical_passed,
-        "agents": {
-            agent.agent_name: {
-                "verdict": agent.verdict.value,
-                "finding_count": len(agent.findings),
-                "error": agent.error,
-            }
-            for agent in result.agent_results
-        },
-        "findings": [
-            {
-                "agent": agent_name,
-                "severity": f.severity.value,
-                "certainty": f.certainty.value,
-                "file": f.file,
-                "line": f.line,
-                "category": f.category,
-                "cwe": f.cwe,
-            }
-            for agent_name, f in all_findings
-        ],
-        "override_reasons": result.override_reasons,
-        "cost_usd": result.cost_usd,
-    }
-    if result.review_id:
-        detail_url = _detail_url(result.review_id, base_url)
-        if detail_url:
-            meta["detail_url"] = detail_url
-    return meta
 
 
 def get_review_labels(result: ReviewResult) -> list[str]:

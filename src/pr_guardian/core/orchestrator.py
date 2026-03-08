@@ -340,7 +340,7 @@ async def _run_pipeline(
 
     # Post results
     if post_comment:
-        await _post_results(adapter, pr, result, config)
+        await _post_results(adapter, pr, result, config, base_url=base_url)
 
     # Persist to DB
     await _save_result(storage, review_db_id, result, _emit)
