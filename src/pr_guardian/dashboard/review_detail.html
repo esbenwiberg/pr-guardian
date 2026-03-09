@@ -223,15 +223,25 @@ a:hover { text-decoration: underline; }
 
 /* Mechanical section */
 .mech-section {
+  margin-bottom: 16px;
+}
+.mech-section h3 { font-size: 15px; margin-bottom: 10px; }
+.mech-list {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.mech-card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  margin-bottom: 16px;
-  padding: 14px 18px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
 }
-.mech-section h3 { font-size: 15px; margin-bottom: 10px; }
-.mech-item { display: flex; gap: 8px; font-size: 13px; padding: 4px 0; }
-.mech-item .status { font-size: 14px; }
+.mech-card .status { font-size: 14px; }
 
 /* Export modal */
 .modal-overlay {
@@ -371,7 +381,7 @@ a:hover { text-decoration: underline; }
     <!-- Mechanical checks -->
     <div id="mech-section" class="mech-section" style="display:none">
       <h3>Mechanical Checks</h3>
-      <div id="mech-list"></div>
+      <div id="mech-list" class="mech-list"></div>
     </div>
 
     <!-- Toolbar -->
@@ -481,7 +491,7 @@ function render(d) {
     document.getElementById('mech-section').style.display = '';
     const list = document.getElementById('mech-list');
     list.innerHTML = d.mechanical_results.map(m =>
-      `<div class="mech-item"><span class="status">${m.passed ? '\u2705' : '\u274c'}</span><strong>${esc(m.tool)}</strong>${m.error ? ` — <span style="color:var(--orange)">${esc(m.error)}</span>` : ''}</div>`
+      `<div class="mech-card"><span class="status">${m.passed ? '\u2705' : '\u274c'}</span><strong>${esc(m.tool)}</strong>${m.error ? ` <span style="color:var(--orange)">${esc(m.error)}</span>` : ''}</div>`
     ).join('');
   }
 
@@ -497,13 +507,13 @@ function render(d) {
       return `
         <div class="agent-group" data-agent-idx="${ai}">
           <div class="agent-header" onclick="toggleAgent(${ai})">
-            <span class="toggle ${hasFindings ? 'open' : ''}" id="toggle-${ai}">\u25b6</span>
+            <span class="toggle" id="toggle-${ai}">\u25b6</span>
             <span class="agent-name">${esc(label)}</span>
             <span class="verdict-badge verdict-${agent.verdict}">${agent.verdict}</span>
             <span class="finding-count">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
             ${hasFindings ? `<input type="checkbox" class="group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
-          <div class="findings-list ${hasFindings ? '' : 'collapsed'}" id="findings-${ai}">
+          <div class="findings-list collapsed" id="findings-${ai}">
             ${findings.map((f, fi) => renderFinding(ai, fi, f)).join('')}
           </div>
         </div>`;
