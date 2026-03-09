@@ -256,6 +256,136 @@ a:hover { text-decoration: underline; }
 
 .loading { text-align: center; padding: 60px; color: var(--text-dim); font-size: 14px; }
 .empty { text-align: center; padding: 40px; color: var(--text-dim); font-size: 14px; }
+
+/* New Scan button */
+.btn-new-scan {
+  padding: 8px 18px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background .15s;
+}
+.btn-new-scan:hover { background: #5b4bd5; }
+
+/* Modal overlay */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  z-index: 100;
+  align-items: center;
+  justify-content: center;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 28px 32px;
+  width: 480px;
+  max-width: 90vw;
+}
+.modal h3 { font-size: 17px; margin-bottom: 20px; }
+.modal label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  margin-bottom: 6px;
+  margin-top: 16px;
+}
+.modal label:first-of-type { margin-top: 0; }
+.modal input, .modal select {
+  width: 100%;
+  padding: 9px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+}
+.modal input:focus, .modal select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.modal input::placeholder { color: var(--text-dim); }
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 24px;
+  justify-content: flex-end;
+}
+.modal-actions button {
+  padding: 9px 20px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  border: 1px solid var(--border);
+}
+.btn-cancel { background: var(--surface2); color: var(--text); }
+.btn-cancel:hover { border-color: var(--text-dim); }
+.btn-start-recent { background: var(--blue); border-color: var(--blue); color: #fff; }
+.btn-start-recent:hover { background: #0773c5; }
+.btn-start-maintenance { background: #e3a008; border-color: #e3a008; color: #000; }
+.btn-start-maintenance:hover { background: #c98e07; }
+.btn-start-recent:disabled, .btn-start-maintenance:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+}
+/* Scan type tabs inside modal */
+.scan-type-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 20px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.scan-type-tab {
+  flex: 1;
+  padding: 10px 0;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  background: var(--surface2);
+  color: var(--text-dim);
+  border: none;
+  font-family: inherit;
+  transition: all .15s;
+}
+.scan-type-tab:not(:last-child) { border-right: 1px solid var(--border); }
+.scan-type-tab.active-recent { background: rgba(9,132,227,.2); color: var(--blue); }
+.scan-type-tab.active-maintenance { background: rgba(253,203,110,.2); color: var(--yellow); }
+.modal-section { display: none; }
+.modal-section.visible { display: block; }
+.toast {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #fff;
+  z-index: 200;
+  opacity: 0;
+  transform: translateY(10px);
+  transition: all .3s;
+}
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast-success { background: var(--green); }
+.toast-error { background: var(--red); }
 </style>
 </head>
 <body>
@@ -280,6 +410,7 @@ a:hover { text-decoration: underline; }
         <option value="recent_changes">Recent Changes</option>
         <option value="maintenance">Maintenance</option>
       </select>
+      <button class="btn-new-scan" onclick="openModal()">+ New Scan</button>
     </div>
 
     <div id="scan-list-loading" class="loading">Loading scans...</div>
@@ -297,7 +428,7 @@ a:hover { text-decoration: underline; }
       </thead>
       <tbody id="scan-tbody"></tbody>
     </table>
-    <div id="scan-empty" class="empty" style="display:none">No scans found.</div>
+    <div id="scan-empty" class="empty" style="display:none">No scans yet. Start one with the button above.</div>
   </div>
 
   <!-- Detail view -->
@@ -312,6 +443,48 @@ a:hover { text-decoration: underline; }
     <div id="detail-agents"></div>
   </div>
 </div>
+
+<!-- New Scan modal -->
+<div class="modal-overlay" id="scan-modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <h3>Start New Scan</h3>
+
+    <div class="scan-type-tabs">
+      <button class="scan-type-tab active-recent" id="tab-recent" onclick="switchTab('recent')">Recent Changes</button>
+      <button class="scan-type-tab" id="tab-maintenance" onclick="switchTab('maintenance')">Maintenance</button>
+    </div>
+
+    <label for="scan-repo">Repository</label>
+    <input id="scan-repo" type="text" placeholder="owner/repo" spellcheck="false">
+
+    <label for="scan-platform">Platform</label>
+    <select id="scan-platform">
+      <option value="github">GitHub</option>
+      <option value="ado">Azure DevOps</option>
+    </select>
+
+    <!-- Recent Changes options -->
+    <div class="modal-section visible" id="section-recent">
+      <label for="scan-days">Time Window (days)</label>
+      <input id="scan-days" type="number" value="7" min="1" max="90">
+    </div>
+
+    <!-- Maintenance options -->
+    <div class="modal-section" id="section-maintenance">
+      <label for="scan-staleness">Staleness Threshold (months)</label>
+      <input id="scan-staleness" type="number" value="6" min="1" max="36">
+      <label for="scan-max-files">Max Files</label>
+      <input id="scan-max-files" type="number" value="50" min="1" max="200">
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
+      <button class="btn-start-recent" id="btn-start" onclick="startScan()">Start Scan</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const SCAN_ID = location.pathname.match(/\/scans\/([0-9a-f-]+)/)?.[1] || '';
@@ -354,7 +527,7 @@ async function loadScans() {
     const scans = await resp.json();
     document.getElementById('scan-list-loading').style.display = 'none';
 
-    if (!scans.length) {
+    if (!Array.isArray(scans) || !scans.length) {
       document.getElementById('scan-empty').style.display = '';
       document.getElementById('scan-table').style.display = 'none';
       return;
@@ -374,7 +547,9 @@ async function loadScans() {
       </tr>
     `).join('');
   } catch (e) {
-    document.getElementById('scan-list-loading').textContent = 'Failed to load scans.';
+    document.getElementById('scan-list-loading').style.display = 'none';
+    document.getElementById('scan-empty').style.display = '';
+    document.getElementById('scan-empty').textContent = 'No scans yet. Start one with the button above.';
     console.error(e);
   }
 }
@@ -475,6 +650,100 @@ function showList() {
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.remove('visible');
   history.pushState(null, '', '/scans');
+}
+
+// --- Modal ---
+let currentTab = 'recent';
+
+function openModal() {
+  document.getElementById('scan-modal').classList.add('open');
+  document.getElementById('scan-repo').focus();
+}
+
+function closeModal() {
+  document.getElementById('scan-modal').classList.remove('open');
+}
+
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('tab-recent').className = 'scan-type-tab' + (tab === 'recent' ? ' active-recent' : '');
+  document.getElementById('tab-maintenance').className = 'scan-type-tab' + (tab === 'maintenance' ? ' active-maintenance' : '');
+  document.getElementById('section-recent').classList.toggle('visible', tab === 'recent');
+  document.getElementById('section-maintenance').classList.toggle('visible', tab === 'maintenance');
+  const btn = document.getElementById('btn-start');
+  if (tab === 'recent') {
+    btn.className = 'btn-start-recent';
+    btn.textContent = 'Start Recent Changes Scan';
+  } else {
+    btn.className = 'btn-start-maintenance';
+    btn.textContent = 'Start Maintenance Scan';
+  }
+}
+// init button label
+switchTab('recent');
+
+async function startScan() {
+  const repo = document.getElementById('scan-repo').value.trim();
+  if (!repo) {
+    document.getElementById('scan-repo').focus();
+    return;
+  }
+
+  const platform = document.getElementById('scan-platform').value;
+  const btn = document.getElementById('btn-start');
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+
+  try {
+    let url, body;
+    if (currentTab === 'recent') {
+      url = '/api/scan/recent';
+      body = {
+        repo,
+        platform,
+        time_window_days: parseInt(document.getElementById('scan-days').value) || 7,
+      };
+    } else {
+      url = '/api/scan/maintenance';
+      body = {
+        repo,
+        platform,
+        staleness_months: parseInt(document.getElementById('scan-staleness').value) || 6,
+        max_files: parseInt(document.getElementById('scan-max-files').value) || 50,
+      };
+    }
+
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+    if (!resp.ok) {
+      const errData = await resp.json().catch(() => ({}));
+      throw new Error(errData.detail || `HTTP ${resp.status}`);
+    }
+
+    closeModal();
+    showToast(`Scan started for ${repo}`, 'success');
+    // Refresh list after a short delay to let the scan record appear
+    setTimeout(loadScans, 2000);
+  } catch (e) {
+    showToast('Failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    switchTab(currentTab); // restore button text
+  }
+}
+
+// Close modal on Escape
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+function showToast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `toast toast-${type} show`;
+  setTimeout(() => el.classList.remove('show'), 4000);
 }
 
 // Init

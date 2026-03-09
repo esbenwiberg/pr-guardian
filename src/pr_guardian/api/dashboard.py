@@ -79,13 +79,19 @@ async def dashboard_scans(
     scan_type: str | None = Query(None),
 ):
     """Paginated list of scans."""
-    return await storage.list_scans(limit=limit, offset=offset, repo=repo, scan_type=scan_type)
+    try:
+        return await storage.list_scans(limit=limit, offset=offset, repo=repo, scan_type=scan_type)
+    except Exception:
+        return []
 
 
 @router.get("/scans/{scan_id}")
 async def dashboard_scan_detail(scan_id: uuid.UUID):
     """Full detail for a single scan."""
-    row = await storage.get_scan(scan_id)
+    try:
+        row = await storage.get_scan(scan_id)
+    except Exception:
+        return {"error": "not found"}
     if not row:
         return {"error": "not found"}
     return row
@@ -94,7 +100,10 @@ async def dashboard_scan_detail(scan_id: uuid.UUID):
 @router.get("/scan-stats")
 async def dashboard_scan_stats():
     """Aggregate scan statistics."""
-    return await storage.get_scan_stats()
+    try:
+        return await storage.get_scan_stats()
+    except Exception:
+        return {"total_scans": 0, "type_counts": {}, "severity_counts": {}, "total_cost_usd": 0, "avg_cost_usd": 0}
 
 
 # ---------------------------------------------------------------------------
