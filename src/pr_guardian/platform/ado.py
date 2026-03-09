@@ -305,6 +305,28 @@ class ADOAdapter:
         # ADO uses reviewer IDs — would need group resolution via API
         # For now, log the intent
 
+    # --- Scan-mode methods (stubs — ADO implementation pending) ---
+
+    async def fetch_recent_commits(
+        self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
+    ) -> list[dict]:
+        raise NotImplementedError("ADO fetch_recent_commits not yet implemented")
+
+    async def fetch_merged_prs(
+        self, repo: str, since: str, base: str = "main",
+    ) -> list[dict]:
+        raise NotImplementedError("ADO fetch_merged_prs not yet implemented")
+
+    async def fetch_file_content(
+        self, repo: str, path: str, ref: str = "HEAD",
+    ) -> str:
+        raise NotImplementedError("ADO fetch_file_content not yet implemented")
+
+    async def list_repo_files(
+        self, repo: str, ref: str = "HEAD", path: str = "",
+    ) -> list[str]:
+        raise NotImplementedError("ADO list_repo_files not yet implemented")
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

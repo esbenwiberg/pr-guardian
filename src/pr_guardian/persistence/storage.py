@@ -19,6 +19,9 @@ from pr_guardian.persistence.models import (
     MechanicalResultRow,
     PromptOverrideRow,
     ReviewRow,
+    ScanAgentResultRow,
+    ScanFindingRow,
+    ScanRow,
 )
 
 log = structlog.get_logger()
@@ -334,6 +337,229 @@ async def delete_prompt_override(agent_name: str) -> bool:
         await session.delete(row)
         await session.commit()
         return True
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Scan operations
+# ---------------------------------------------------------------------------
+
+
+async def create_scan_record(
+    scan_type: str,
+    repo: str,
+    platform: str,
+    time_window_days: int = 7,
+    staleness_months: int = 6,
+) -> uuid.UUID:
+    """Insert a pending scan row when a scan starts."""
+    row = ScanRow(
+        scan_type=scan_type,
+        repo=repo,
+        platform=platform,
+        time_window_days=time_window_days,
+        staleness_months=staleness_months,
+        stage="discovery",
+    )
+    async with async_session() as session:
+        session.add(row)
+        await session.commit()
+        log.debug("scan_record_created", scan_id=str(row.id), scan_type=scan_type)
+        return row.id
+
+
+async def update_scan_stage(scan_id: uuid.UUID, stage: str, detail: str = "") -> None:
+    """Update the pipeline stage for live-progress tracking."""
+    async with async_session() as session:
+        row = await session.get(ScanRow, scan_id)
+        if row:
+            row.stage = stage
+            row.stage_detail = detail
+            await session.commit()
+
+
+async def mark_scan_failed(
+    scan_id: uuid.UUID,
+    error: str,
+    pipeline_log: list[dict] | None = None,
+) -> None:
+    """Mark a scan as failed."""
+    async with async_session() as session:
+        row = await session.get(ScanRow, scan_id)
+        if row:
+            now = datetime.now(timezone.utc)
+            row.stage = "error"
+            row.stage_detail = error[:500]
+            row.finished_at = now
+            if pipeline_log is not None:
+                row.pipeline_log = pipeline_log
+            if row.started_at:
+                row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
+            await session.commit()
+
+
+async def save_scan_result(scan_id: uuid.UUID, result) -> None:
+    """Persist the full scan result once the pipeline finishes.
+
+    Accepts a ScanResult dataclass from models.scan.
+    """
+    async with async_session() as session:
+        row = await session.get(ScanRow, scan_id)
+        if not row:
+            log.warning("scan_row_not_found", scan_id=str(scan_id))
+            return
+
+        now = datetime.now(timezone.utc)
+        row.total_findings = result.total_findings
+        row.summary = result.summary
+        row.pipeline_log = result.pipeline_log
+        row.total_input_tokens = result.total_input_tokens
+        row.total_output_tokens = result.total_output_tokens
+        row.cost_usd = result.cost_usd
+        row.stage = "complete"
+        row.finished_at = now
+        if row.started_at:
+            row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
+
+        for ar in result.agent_results:
+            ar_row = ScanAgentResultRow(
+                scan_id=scan_id,
+                agent_name=ar.agent_name,
+                verdict=ar.verdict.value,
+                summary=ar.summary,
+                error=ar.error,
+            )
+            session.add(ar_row)
+            await session.flush()
+
+            for f in ar.findings:
+                session.add(ScanFindingRow(
+                    agent_result_id=ar_row.id,
+                    severity=f.severity.value,
+                    certainty=f.certainty.value,
+                    category=f.category,
+                    file=f.file,
+                    line=f.line,
+                    description=f.description,
+                    suggestion=f.suggestion,
+                    priority=f.priority,
+                    last_modified=f.last_modified,
+                    effort_estimate=f.effort_estimate,
+                ))
+
+        await session.commit()
+        log.info("scan_result_saved", scan_id=str(scan_id), scan_type=result.scan_type.value)
+
+
+async def get_scan(scan_id: uuid.UUID) -> dict[str, Any] | None:
+    """Fetch a single scan with all nested data."""
+    async with async_session() as session:
+        row = await session.get(ScanRow, scan_id)
+        if not row:
+            return None
+        return _scan_to_dict(row)
+
+
+async def list_scans(
+    limit: int = 50,
+    offset: int = 0,
+    repo: str | None = None,
+    scan_type: str | None = None,
+) -> list[dict[str, Any]]:
+    """List scans with optional filters, newest first."""
+    async with async_session() as session:
+        q = select(ScanRow).order_by(ScanRow.started_at.desc())
+        if repo:
+            q = q.where(ScanRow.repo == repo)
+        if scan_type:
+            q = q.where(ScanRow.scan_type == scan_type)
+        q = q.offset(offset).limit(limit)
+        rows = (await session.scalars(q)).all()
+        return [_scan_to_dict(r) for r in rows]
+
+
+async def get_scan_stats() -> dict[str, Any]:
+    """Aggregate stats for scans."""
+    async with async_session() as session:
+        total = await session.scalar(select(func.count(ScanRow.id))) or 0
+
+        type_counts: dict[str, int] = {}
+        for st in ("recent_changes", "maintenance"):
+            c = await session.scalar(
+                select(func.count(ScanRow.id)).where(ScanRow.scan_type == st)
+            )
+            type_counts[st] = c or 0
+
+        total_cost = await session.scalar(
+            select(func.sum(ScanRow.cost_usd)).where(ScanRow.stage == "complete")
+        )
+        avg_cost = await session.scalar(
+            select(func.avg(ScanRow.cost_usd)).where(ScanRow.stage == "complete")
+        )
+
+        severity_counts: dict[str, int] = {}
+        for sev in ("low", "medium", "high", "critical"):
+            c = await session.scalar(
+                select(func.count(ScanFindingRow.id)).where(ScanFindingRow.severity == sev)
+            )
+            severity_counts[sev] = c or 0
+
+        return {
+            "total_scans": total,
+            "type_counts": type_counts,
+            "severity_counts": severity_counts,
+            "total_cost_usd": round(total_cost, 4) if total_cost else 0.0,
+            "avg_cost_usd": round(avg_cost, 4) if avg_cost else 0.0,
+        }
+
+
+def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "scan_type": row.scan_type,
+        "repo": row.repo,
+        "platform": row.platform,
+        "time_window_days": row.time_window_days,
+        "staleness_months": row.staleness_months,
+        "total_findings": row.total_findings,
+        "summary": row.summary,
+        "stage": row.stage,
+        "stage_detail": row.stage_detail,
+        "pipeline_log": row.pipeline_log or [],
+        "total_input_tokens": row.total_input_tokens,
+        "total_output_tokens": row.total_output_tokens,
+        "cost_usd": row.cost_usd,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+        "duration_ms": row.duration_ms,
+        "agent_results": [
+            {
+                "agent_name": a.agent_name,
+                "verdict": a.verdict,
+                "summary": a.summary,
+                "error": a.error,
+                "findings": [
+                    {
+                        "severity": f.severity,
+                        "certainty": f.certainty,
+                        "category": f.category,
+                        "file": f.file,
+                        "line": f.line,
+                        "description": f.description,
+                        "suggestion": f.suggestion,
+                        "priority": f.priority,
+                        "last_modified": f.last_modified,
+                        "effort_estimate": f.effort_estimate,
+                    }
+                    for f in a.findings
+                ],
+            }
+            for a in row.agent_results
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------

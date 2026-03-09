@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+
 import httpx
 import structlog
 
@@ -133,6 +135,85 @@ class GitHubAdapter:
             json={"team_reviewers": [group]},
         )
         resp.raise_for_status()
+
+    # --- Scan-mode methods ---
+
+    async def fetch_recent_commits(
+        self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
+    ) -> list[dict]:
+        """Fetch commits on branch since a date (ISO 8601)."""
+        client = self._get_client()
+        params: dict = {"sha": branch, "since": since, "per_page": per_page}
+        if until:
+            params["until"] = until
+
+        all_commits: list[dict] = []
+        page = 1
+        while True:
+            params["page"] = page
+            resp = await client.get(f"/repos/{repo}/commits", params=params)
+            resp.raise_for_status()
+            batch = resp.json()
+            if not batch:
+                break
+            all_commits.extend(batch)
+            if len(batch) < per_page:
+                break
+            page += 1
+        return all_commits
+
+    async def fetch_merged_prs(
+        self, repo: str, since: str, base: str = "main",
+    ) -> list[dict]:
+        """Fetch recently merged PRs (closed + merged_at >= since)."""
+        client = self._get_client()
+        params: dict = {
+            "state": "closed",
+            "base": base,
+            "sort": "updated",
+            "direction": "desc",
+            "per_page": 100,
+        }
+        resp = await client.get(f"/repos/{repo}/pulls", params=params)
+        resp.raise_for_status()
+        all_prs = resp.json()
+
+        # Filter to actually merged PRs with merged_at >= since
+        merged = []
+        for pr in all_prs:
+            merged_at = pr.get("merged_at")
+            if merged_at and merged_at >= since:
+                merged.append(pr)
+        return merged
+
+    async def fetch_file_content(
+        self, repo: str, path: str, ref: str = "HEAD",
+    ) -> str:
+        """Fetch file content from the repo."""
+        client = self._get_client()
+        resp = await client.get(
+            f"/repos/{repo}/contents/{path}",
+            params={"ref": ref},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("encoding") == "base64" and data.get("content"):
+            return base64.b64decode(data["content"]).decode("utf-8", errors="replace")
+        return data.get("content", "")
+
+    async def list_repo_files(
+        self, repo: str, ref: str = "HEAD", path: str = "",
+    ) -> list[str]:
+        """List files in repo (recursive tree)."""
+        client = self._get_client()
+        resp = await client.get(
+            f"/repos/{repo}/git/trees/{ref}",
+            params={"recursive": "1"},
+        )
+        resp.raise_for_status()
+        tree = resp.json().get("tree", [])
+        return [item["path"] for item in tree if item.get("type") == "blob"]
 
     async def close(self) -> None:
         if self._client:

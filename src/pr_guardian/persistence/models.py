@@ -145,3 +145,90 @@ class PromptOverrideRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+# ---------------------------------------------------------------------------
+# Scan tables (recent changes + maintenance scans)
+# ---------------------------------------------------------------------------
+
+
+class ScanRow(Base):
+    """A completed (or in-progress) scan."""
+
+    __tablename__ = "scans"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_type: Mapped[str] = mapped_column(String(32), index=True)
+    repo: Mapped[str] = mapped_column(String(256), index=True)
+    platform: Mapped[str] = mapped_column(String(16))
+
+    time_window_days: Mapped[int] = mapped_column(Integer, default=7)
+    staleness_months: Mapped[int] = mapped_column(Integer, default=6)
+
+    total_findings: Mapped[int] = mapped_column(Integer, default=0)
+    summary: Mapped[str] = mapped_column(Text, default="")
+
+    stage: Mapped[str] = mapped_column(String(32), default="queued")
+    stage_detail: Mapped[str] = mapped_column(Text, default="")
+    pipeline_log: Mapped[list] = mapped_column(JSONB, default=list)
+
+    total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    finished_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    agent_results: Mapped[list[ScanAgentResultRow]] = relationship(
+        back_populates="scan", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class ScanAgentResultRow(Base):
+    __tablename__ = "scan_agent_results"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE")
+    )
+    agent_name: Mapped[str] = mapped_column(String(64), index=True)
+    verdict: Mapped[str] = mapped_column(String(16))
+    summary: Mapped[str] = mapped_column(Text, default="")
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    scan: Mapped[ScanRow] = relationship(back_populates="agent_results")
+    findings: Mapped[list[ScanFindingRow]] = relationship(
+        back_populates="agent_result", cascade="all, delete-orphan", lazy="selectin"
+    )
+
+
+class ScanFindingRow(Base):
+    __tablename__ = "scan_findings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    agent_result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scan_agent_results.id", ondelete="CASCADE")
+    )
+    severity: Mapped[str] = mapped_column(String(16))
+    certainty: Mapped[str] = mapped_column(String(16))
+    category: Mapped[str] = mapped_column(String(64))
+    file: Mapped[str] = mapped_column(Text)
+    line: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    description: Mapped[str] = mapped_column(Text)
+    suggestion: Mapped[str] = mapped_column(Text, default="")
+    priority: Mapped[float] = mapped_column(Float, default=0.0)
+    last_modified: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    effort_estimate: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+    agent_result: Mapped[ScanAgentResultRow] = relationship(back_populates="findings")

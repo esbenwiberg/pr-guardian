@@ -147,5 +147,81 @@ def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
         click.echo(f"  - {r}")
 
 
+@main.command("scan-recent")
+@click.option("--repo", required=True, help="Repository (owner/repo)")
+@click.option("--platform", default="github", help="Platform (github, ado)")
+@click.option("--days", default=7, type=int, help="Time window in days")
+@click.option("--since", default=None, help="ISO date override for start of window")
+def scan_recent(repo: str, platform: str, days: int, since: str | None):
+    """Run a recent changes scan on merged code."""
+    from pr_guardian.config.schema import GuardianConfig
+    from pr_guardian.core.recent_changes import run_recent_changes_scan
+    from pr_guardian.platform.factory import create_adapter
+
+    adapter = create_adapter(platform)
+    config = GuardianConfig()
+
+    async def _run():
+        try:
+            result = await run_recent_changes_scan(
+                repo=repo,
+                platform=platform,
+                adapter=adapter,
+                config=config,
+                time_window_days=days,
+                since=since,
+            )
+            click.echo(f"\nScan complete: {result.scan_type.value}")
+            click.echo(f"  Findings: {result.total_findings}")
+            click.echo(f"  Cost: ${result.cost_usd:.4f}")
+            if result.summary:
+                click.echo(f"  Summary: {result.summary}")
+            for ar in result.agent_results:
+                click.echo(f"  Agent {ar.agent_name}: {ar.verdict.value}, {len(ar.findings)} finding(s)")
+        finally:
+            if hasattr(adapter, "close"):
+                await adapter.close()
+
+    asyncio.run(_run())
+
+
+@main.command("scan-maintenance")
+@click.option("--repo", required=True, help="Repository (owner/repo)")
+@click.option("--platform", default="github", help="Platform (github, ado)")
+@click.option("--staleness", default=6, type=int, help="Months since last modification")
+@click.option("--max-files", default=50, type=int, help="Max stale files to analyze")
+def scan_maintenance(repo: str, platform: str, staleness: int, max_files: int):
+    """Run a maintenance scan to find stale files needing attention."""
+    from pr_guardian.config.schema import GuardianConfig
+    from pr_guardian.core.maintenance import run_maintenance_scan
+    from pr_guardian.platform.factory import create_adapter
+
+    adapter = create_adapter(platform)
+    config = GuardianConfig()
+
+    async def _run():
+        try:
+            result = await run_maintenance_scan(
+                repo=repo,
+                platform=platform,
+                adapter=adapter,
+                config=config,
+                staleness_months=staleness,
+                max_files=max_files,
+            )
+            click.echo(f"\nScan complete: {result.scan_type.value}")
+            click.echo(f"  Findings: {result.total_findings}")
+            click.echo(f"  Cost: ${result.cost_usd:.4f}")
+            if result.summary:
+                click.echo(f"  Summary: {result.summary}")
+            for ar in result.agent_results:
+                click.echo(f"  Agent {ar.agent_name}: {ar.verdict.value}, {len(ar.findings)} finding(s)")
+        finally:
+            if hasattr(adapter, "close"):
+                await adapter.close()
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     main()

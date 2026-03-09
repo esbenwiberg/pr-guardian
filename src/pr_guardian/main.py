@@ -11,6 +11,7 @@ from pr_guardian.api.dashboard import router as dashboard_api_router
 from pr_guardian.api.dashboard_page import router as dashboard_page_router
 from pr_guardian.api.health_api import router as health_router
 from pr_guardian.api.review import router as review_router
+from pr_guardian.api.scans import router as scans_router
 from pr_guardian.api.webhooks import router as webhooks_router
 
 structlog.configure(
@@ -49,6 +50,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(review_router)
 app.include_router(webhooks_router)
+app.include_router(scans_router)
 app.include_router(dashboard_api_router)
 app.include_router(dashboard_page_router)
 

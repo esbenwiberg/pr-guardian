@@ -37,3 +37,29 @@ class PlatformAdapter(Protocol):
     async def request_reviewers(self, pr: PlatformPR, group: str) -> None:
         """Request review from a team/group."""
         ...
+
+    # --- Scan-mode methods ---
+
+    async def fetch_recent_commits(
+        self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
+    ) -> list[dict]:
+        """Fetch commits on branch since a date (ISO 8601)."""
+        ...
+
+    async def fetch_merged_prs(
+        self, repo: str, since: str, base: str = "main",
+    ) -> list[dict]:
+        """Fetch recently merged PRs."""
+        ...
+
+    async def fetch_file_content(
+        self, repo: str, path: str, ref: str = "HEAD",
+    ) -> str:
+        """Fetch file content from the repo."""
+        ...
+
+    async def list_repo_files(
+        self, repo: str, ref: str = "HEAD", path: str = "",
+    ) -> list[str]:
+        """List files in repo (recursive tree)."""
+        ...

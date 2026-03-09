@@ -144,6 +144,22 @@ class SecuritySurfaceConfig(BaseModel):
     )
 
 
+class RecentChangesConfig(BaseModel):
+    time_window_days: int = 7
+    branch: str = "main"
+    max_commits: int = 200
+    group_by: str = "module"  # module, author, area
+
+
+class MaintenanceConfig(BaseModel):
+    staleness_months: int = 6
+    max_files: int = 100
+    exclude_patterns: list[str] = Field(
+        default_factory=lambda: ["**/migrations/**", "**/*.lock", "**/node_modules/**"]
+    )
+    include_patterns: list[str] = Field(default_factory=list)
+
+
 class GuardianConfig(BaseModel):
     """Top-level config: merged from service defaults + per-repo review.yml."""
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -166,3 +182,5 @@ class GuardianConfig(BaseModel):
     path_risk: PathRiskConfig = Field(default_factory=PathRiskConfig)
     file_roles: FileRolesConfig = Field(default_factory=FileRolesConfig)
     security_surface: SecuritySurfaceConfig = Field(default_factory=SecuritySurfaceConfig)
+    recent_changes: RecentChangesConfig = Field(default_factory=RecentChangesConfig)
+    maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)

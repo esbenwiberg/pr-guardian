@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — Scans</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --surface2: #232733;
+  --border: #2e3345;
+  --text: #e1e4ed;
+  --text-dim: #8b90a0;
+  --accent: #6c5ce7;
+  --accent-light: #a29bfe;
+  --green: #00b894;
+  --yellow: #fdcb6e;
+  --orange: #e17055;
+  --red: #d63031;
+  --blue: #0984e3;
+  --radius: 10px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+a { color: var(--accent-light); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+.header {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.header h1 { font-size: 20px; font-weight: 600; }
+.header .logo { font-size: 24px; color: var(--accent-light); }
+.header .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
+.header .nav-links a { color: var(--text-dim); }
+.header .nav-links a:hover { color: var(--accent-light); }
+
+.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
+
+/* Stats row */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+}
+.stat-card .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
+.stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
+
+/* Filters */
+.filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filters select, .filters button {
+  padding: 6px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.filters button:hover { border-color: var(--accent); }
+.filters button.active { background: var(--accent); border-color: var(--accent); }
+
+/* Scan list */
+.scan-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.scan-table th {
+  text-align: left;
+  padding: 12px 16px;
+  font-size: 11px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .5px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface2);
+}
+.scan-table td {
+  padding: 12px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+}
+.scan-table tr:last-child td { border-bottom: none; }
+.scan-table tr:hover { background: var(--surface2); }
+.scan-table .scan-link { color: var(--accent-light); cursor: pointer; }
+
+/* Type badge */
+.type-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.type-recent_changes { background: rgba(9,132,227,.15); color: var(--blue); }
+.type-maintenance { background: rgba(253,203,110,.15); color: var(--yellow); }
+
+/* Stage badge */
+.stage-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+}
+.stage-complete { background: rgba(0,184,148,.15); color: var(--green); }
+.stage-error { background: rgba(214,48,49,.15); color: var(--red); }
+.stage-discovery, .stage-scan_discovery, .stage-scan_analysis, .stage-scan_sampling, .stage-scan_report {
+  background: rgba(108,92,231,.15); color: var(--accent-light);
+}
+
+/* Severity badges */
+.sev-badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.sev-critical { background: rgba(214,48,49,.2); color: var(--red); }
+.sev-high { background: rgba(225,112,85,.2); color: var(--orange); }
+.sev-medium { background: rgba(253,203,110,.2); color: var(--yellow); }
+.sev-low { background: rgba(139,144,160,.2); color: var(--text-dim); }
+
+/* Detail view */
+.detail-view { display: none; }
+.detail-view.visible { display: block; }
+.list-view.hidden { display: none; }
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.detail-header h2 { font-size: 18px; }
+.detail-header .back-btn {
+  padding: 6px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+/* Agent group */
+.agent-group {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.agent-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+}
+.agent-header:hover { background: var(--surface2); }
+.agent-header .toggle { font-size: 12px; color: var(--text-dim); transition: transform .15s; }
+.agent-header .toggle.open { transform: rotate(90deg); }
+.agent-header .agent-name { font-weight: 600; font-size: 15px; }
+.agent-header .verdict-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.verdict-pass { background: rgba(0,184,148,.15); color: var(--green); }
+.verdict-warn { background: rgba(253,203,110,.15); color: var(--yellow); }
+.verdict-flag_human { background: rgba(225,112,85,.15); color: var(--orange); }
+.agent-header .finding-count { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+
+.findings-list { border-top: 1px solid var(--border); }
+.findings-list.collapsed { display: none; }
+
+.finding-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+}
+.finding-row:last-child { border-bottom: none; }
+.finding-row .f-body { flex: 1; min-width: 0; }
+.finding-row .f-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.f-location {
+  font-size: 12px;
+  color: var(--accent-light);
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.f-category { font-size: 12px; color: var(--text-dim); }
+.f-desc { font-size: 13px; margin-top: 6px; line-height: 1.5; }
+.f-suggestion {
+  font-size: 12px;
+  color: var(--green);
+  margin-top: 4px;
+  padding-left: 12px;
+  border-left: 2px solid var(--green);
+}
+.f-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; display: flex; gap: 12px; }
+.effort-small { color: var(--green); }
+.effort-medium { color: var(--yellow); }
+.effort-large { color: var(--orange); }
+
+.cert-badge {
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+/* Summary */
+.summary-box {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 18px;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  margin-bottom: 24px;
+}
+
+.loading { text-align: center; padding: 60px; color: var(--text-dim); font-size: 14px; }
+.empty { text-align: center; padding: 40px; color: var(--text-dim); font-size: 14px; }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <span class="logo">&#x1f6e1;</span>
+  <h1>PR Guardian — Scans</h1>
+  <div class="nav-links">
+    <a href="/dashboard">&larr; Dashboard</a>
+    <a href="/scans">Scans</a>
+  </div>
+</div>
+
+<div class="container">
+  <!-- List view -->
+  <div id="list-view" class="list-view">
+    <div id="stats-row" class="stats-row"></div>
+
+    <div class="filters">
+      <select id="filter-type" onchange="loadScans()">
+        <option value="">All Types</option>
+        <option value="recent_changes">Recent Changes</option>
+        <option value="maintenance">Maintenance</option>
+      </select>
+    </div>
+
+    <div id="scan-list-loading" class="loading">Loading scans...</div>
+    <table class="scan-table" id="scan-table" style="display:none">
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Repository</th>
+          <th>Findings</th>
+          <th>Stage</th>
+          <th>Cost</th>
+          <th>Date</th>
+          <th>Duration</th>
+        </tr>
+      </thead>
+      <tbody id="scan-tbody"></tbody>
+    </table>
+    <div id="scan-empty" class="empty" style="display:none">No scans found.</div>
+  </div>
+
+  <!-- Detail view -->
+  <div id="detail-view" class="detail-view">
+    <div class="detail-header">
+      <button class="back-btn" onclick="showList()">&larr; Back to Scans</button>
+      <h2 id="detail-title">Scan Detail</h2>
+    </div>
+
+    <div class="stats-row" id="detail-stats"></div>
+    <div id="detail-summary" class="summary-box" style="display:none"></div>
+    <div id="detail-agents"></div>
+  </div>
+</div>
+
+<script>
+const SCAN_ID = location.pathname.match(/\/scans\/([0-9a-f-]+)/)?.[1] || '';
+const AGENT_LABELS = {
+  trend: 'Trend Analysis',
+  consistency: 'Consistency',
+  integration_risk: 'Integration Risk',
+  architecture_drift: 'Architecture Drift',
+  tech_debt: 'Technical Debt',
+  security_hygiene: 'Security Hygiene',
+  refactor_candidate: 'Refactor Candidates',
+  dead_code: 'Dead Code',
+};
+const TYPE_LABELS = { recent_changes: 'Recent Changes', maintenance: 'Maintenance' };
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+// --- Stats ---
+async function loadStats() {
+  try {
+    const resp = await fetch('/api/dashboard/scan-stats');
+    const data = await resp.json();
+    document.getElementById('stats-row').innerHTML = `
+      <div class="stat-card"><div class="label">Total Scans</div><div class="value">${data.total_scans || 0}</div></div>
+      <div class="stat-card"><div class="label">Recent Changes</div><div class="value">${data.type_counts?.recent_changes || 0}</div></div>
+      <div class="stat-card"><div class="label">Maintenance</div><div class="value">${data.type_counts?.maintenance || 0}</div></div>
+      <div class="stat-card"><div class="label">Total Cost</div><div class="value">$${(data.total_cost_usd || 0).toFixed(4)}</div></div>
+    `;
+  } catch (e) { console.error('Stats load failed:', e); }
+}
+
+// --- Scan List ---
+async function loadScans() {
+  const typeFilter = document.getElementById('filter-type').value;
+  const params = new URLSearchParams({ limit: '50' });
+  if (typeFilter) params.set('scan_type', typeFilter);
+
+  try {
+    const resp = await fetch(`/api/dashboard/scans?${params}`);
+    const scans = await resp.json();
+    document.getElementById('scan-list-loading').style.display = 'none';
+
+    if (!scans.length) {
+      document.getElementById('scan-empty').style.display = '';
+      document.getElementById('scan-table').style.display = 'none';
+      return;
+    }
+
+    document.getElementById('scan-empty').style.display = 'none';
+    document.getElementById('scan-table').style.display = '';
+    document.getElementById('scan-tbody').innerHTML = scans.map(s => `
+      <tr>
+        <td><span class="type-badge type-${s.scan_type}">${TYPE_LABELS[s.scan_type] || s.scan_type}</span></td>
+        <td><a class="scan-link" onclick="loadDetail('${s.id}')">${esc(s.repo)}</a></td>
+        <td>${s.total_findings}</td>
+        <td><span class="stage-badge stage-${s.stage}">${s.stage}</span></td>
+        <td>${s.cost_usd ? '$' + s.cost_usd.toFixed(4) : '-'}</td>
+        <td>${s.started_at ? new Date(s.started_at).toLocaleDateString() : '-'}</td>
+        <td>${s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + 's' : '-'}</td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    document.getElementById('scan-list-loading').textContent = 'Failed to load scans.';
+    console.error(e);
+  }
+}
+
+// --- Detail ---
+async function loadDetail(id) {
+  try {
+    const resp = await fetch(`/api/dashboard/scans/${id}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    if (data.error) throw new Error(data.error);
+    renderDetail(data);
+    history.pushState(null, '', `/scans/${id}`);
+  } catch (e) {
+    alert('Failed to load scan: ' + e.message);
+  }
+}
+
+function renderDetail(d) {
+  document.getElementById('list-view').classList.add('hidden');
+  document.getElementById('detail-view').classList.add('visible');
+
+  const typeLabel = TYPE_LABELS[d.scan_type] || d.scan_type;
+  document.getElementById('detail-title').textContent = `${typeLabel} — ${d.repo}`;
+  document.title = `PR Guardian — ${typeLabel} Scan`;
+
+  const totalFindings = d.total_findings || 0;
+  document.getElementById('detail-stats').innerHTML = `
+    <div class="stat-card"><div class="label">Type</div><div class="value"><span class="type-badge type-${d.scan_type}">${typeLabel}</span></div></div>
+    <div class="stat-card"><div class="label">Findings</div><div class="value">${totalFindings}</div></div>
+    <div class="stat-card"><div class="label">Duration</div><div class="value">${d.duration_ms ? (d.duration_ms / 1000).toFixed(1) + 's' : '-'}</div></div>
+    <div class="stat-card"><div class="label">Cost</div><div class="value">${d.cost_usd ? '$' + d.cost_usd.toFixed(4) : '-'}</div></div>
+    <div class="stat-card"><div class="label">${d.scan_type === 'recent_changes' ? 'Window' : 'Staleness'}</div><div class="value">${d.scan_type === 'recent_changes' ? d.time_window_days + 'd' : d.staleness_months + 'mo'}</div></div>
+  `;
+
+  if (d.summary) {
+    document.getElementById('detail-summary').style.display = '';
+    document.getElementById('detail-summary').textContent = d.summary;
+  } else {
+    document.getElementById('detail-summary').style.display = 'none';
+  }
+
+  const agents = d.agent_results || [];
+  if (agents.length) {
+    document.getElementById('detail-agents').innerHTML = agents.map((agent, ai) => {
+      const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
+      const findings = agent.findings || [];
+      return `
+        <div class="agent-group">
+          <div class="agent-header" onclick="toggleAgent(${ai})">
+            <span class="toggle" id="toggle-${ai}">\u25b6</span>
+            <span class="agent-name">${esc(label)}</span>
+            <span class="verdict-badge verdict-${agent.verdict}">${agent.verdict}</span>
+            <span class="finding-count">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="findings-list collapsed" id="findings-${ai}">
+            ${agent.summary ? `<div style="padding:10px 18px;font-size:12px;color:var(--text-dim);border-bottom:1px solid var(--border)">${esc(agent.summary)}</div>` : ''}
+            ${findings.map(f => renderFinding(f)).join('')}
+          </div>
+        </div>`;
+    }).join('');
+  } else {
+    document.getElementById('detail-agents').innerHTML = '<div class="empty">No agent results available.</div>';
+  }
+}
+
+function renderFinding(f) {
+  const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
+  const effortClass = f.effort_estimate ? `effort-${f.effort_estimate}` : '';
+  return `
+    <div class="finding-row">
+      <div class="f-body">
+        <div class="f-top">
+          <span class="sev-badge sev-${f.severity}">${f.severity}</span>
+          <span class="cert-badge">${f.certainty}</span>
+          ${loc ? `<span class="f-location">${esc(loc)}</span>` : ''}
+          ${f.category ? `<span class="f-category">${esc(f.category)}</span>` : ''}
+        </div>
+        <div class="f-desc">${esc(f.description || '')}</div>
+        ${f.suggestion ? `<div class="f-suggestion">${esc(f.suggestion)}</div>` : ''}
+        <div class="f-meta">
+          ${f.priority != null ? `<span>Priority: ${(f.priority * 100).toFixed(0)}%</span>` : ''}
+          ${f.effort_estimate ? `<span class="${effortClass}">Effort: ${f.effort_estimate}</span>` : ''}
+          ${f.last_modified ? `<span>Last modified: ${f.last_modified.split('T')[0]}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+}
+
+function toggleAgent(ai) {
+  const list = document.getElementById(`findings-${ai}`);
+  const toggle = document.getElementById(`toggle-${ai}`);
+  const collapsed = list.classList.toggle('collapsed');
+  toggle.classList.toggle('open', !collapsed);
+}
+
+function showList() {
+  document.getElementById('list-view').classList.remove('hidden');
+  document.getElementById('detail-view').classList.remove('visible');
+  history.pushState(null, '', '/scans');
+}
+
+// Init
+loadStats();
+if (SCAN_ID) {
+  loadDetail(SCAN_ID);
+} else {
+  loadScans();
+}
+</script>
+</body>
+</html>

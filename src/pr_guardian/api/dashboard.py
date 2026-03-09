@@ -67,6 +67,37 @@ async def dashboard_events():
 
 
 # ---------------------------------------------------------------------------
+# Scan dashboard endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/scans")
+async def dashboard_scans(
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    repo: str | None = Query(None),
+    scan_type: str | None = Query(None),
+):
+    """Paginated list of scans."""
+    return await storage.list_scans(limit=limit, offset=offset, repo=repo, scan_type=scan_type)
+
+
+@router.get("/scans/{scan_id}")
+async def dashboard_scan_detail(scan_id: uuid.UUID):
+    """Full detail for a single scan."""
+    row = await storage.get_scan(scan_id)
+    if not row:
+        return {"error": "not found"}
+    return row
+
+
+@router.get("/scan-stats")
+async def dashboard_scan_stats():
+    """Aggregate scan statistics."""
+    return await storage.get_scan_stats()
+
+
+# ---------------------------------------------------------------------------
 # Prompt management
 # ---------------------------------------------------------------------------
 
