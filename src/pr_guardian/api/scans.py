@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from pr_guardian.config.loader import load_repo_config
+from pr_guardian.config.loader import load_service_defaults
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.maintenance import run_maintenance_scan
 from pr_guardian.core.recent_changes import run_recent_changes_scan
@@ -53,8 +53,12 @@ class ScanResponse(BaseModel):
 @router.post("/scan/recent", response_model=ScanResponse)
 async def trigger_recent_scan(req: RecentChangesScanRequest):
     """Trigger a recent changes scan. Runs asynchronously."""
-    adapter = create_adapter(req.platform)
-    config = GuardianConfig()
+    try:
+        adapter = create_adapter(req.platform)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    config = GuardianConfig(**load_service_defaults())
 
     async def _run():
         try:
@@ -67,16 +71,15 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
                 since=req.since,
             )
         except Exception as e:
-            log.error("recent_scan_background_error", repo=req.repo, error=str(e))
+            log.error("recent_scan_background_error", repo=req.repo, error=str(e), exc_info=True)
         finally:
             if hasattr(adapter, "close"):
                 await adapter.close()
 
-    task = asyncio.create_task(_run())
-    # Return immediately — scan runs in background
+    asyncio.create_task(_run())
     return ScanResponse(
         status="started",
-        scan_id="",  # ID assigned asynchronously in orchestrator
+        scan_id="",
         scan_type="recent_changes",
         repo=req.repo,
     )
@@ -85,8 +88,12 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
 @router.post("/scan/maintenance", response_model=ScanResponse)
 async def trigger_maintenance_scan(req: MaintenanceScanRequest):
     """Trigger a maintenance scan. Runs asynchronously."""
-    adapter = create_adapter(req.platform)
-    config = GuardianConfig()
+    try:
+        adapter = create_adapter(req.platform)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    config = GuardianConfig(**load_service_defaults())
 
     async def _run():
         try:
@@ -99,12 +106,12 @@ async def trigger_maintenance_scan(req: MaintenanceScanRequest):
                 max_files=req.max_files,
             )
         except Exception as e:
-            log.error("maintenance_scan_background_error", repo=req.repo, error=str(e))
+            log.error("maintenance_scan_background_error", repo=req.repo, error=str(e), exc_info=True)
         finally:
             if hasattr(adapter, "close"):
                 await adapter.close()
 
-    task = asyncio.create_task(_run())
+    asyncio.create_task(_run())
     return ScanResponse(
         status="started",
         scan_id="",

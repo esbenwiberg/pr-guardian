@@ -31,7 +31,8 @@ async def lifespan(app: FastAPI):
     if os.environ.get("DATABASE_URL") or os.environ.get("GUARDIAN_DB_ENABLED", "").lower() in (
         "1", "true", "yes",
     ):
-        from pr_guardian.persistence.database import close_db
+        from pr_guardian.persistence.database import close_db, init_db
+        await init_db()
         log.info("db_ready")
         yield
         await close_db()

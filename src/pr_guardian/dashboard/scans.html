@@ -746,6 +746,36 @@ function showToast(msg, type) {
   setTimeout(() => el.classList.remove('show'), 4000);
 }
 
+// --- SSE: live progress ---
+function connectSSE() {
+  const es = new EventSource('/api/dashboard/events');
+  es.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'connected') return;
+      const scanType = data.extra?.scan_type;
+      if (!scanType) return;
+      // A scan event — refresh the list and stats
+      if (data.stage === 'scan_complete' || data.stage === 'scan_error') {
+        loadScans();
+        loadStats();
+        if (data.stage === 'scan_complete') {
+          showToast(`Scan complete: ${data.repo} (${data.extra.scan_type})`, 'success');
+        } else {
+          showToast(`Scan failed: ${data.repo} — ${data.detail}`, 'error');
+        }
+      } else {
+        // In-progress update — refresh list to show stage changes
+        loadScans();
+      }
+    } catch {}
+  };
+  es.onerror = () => {
+    es.close();
+    setTimeout(connectSSE, 5000);
+  };
+}
+
 // Init
 loadStats();
 if (SCAN_ID) {
@@ -753,6 +783,7 @@ if (SCAN_ID) {
 } else {
   loadScans();
 }
+connectSSE();
 </script>
 </body>
 </html>
