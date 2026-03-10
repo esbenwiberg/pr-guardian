@@ -16,10 +16,25 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _column_exists(table: str, column: str) -> bool:
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = :table AND column_name = :column"
+        ),
+        {"table": table, "column": column},
+    )
+    return result.scalar() is not None
+
+
 def upgrade() -> None:
-    op.add_column("reviews", sa.Column("repo_risk_class", sa.String(16), server_default="standard"))
-    op.add_column("reviews", sa.Column("trust_tier", sa.String(32), server_default=""))
-    op.add_column("reviews", sa.Column("trust_tier_details", JSONB, nullable=True))
+    if not _column_exists("reviews", "repo_risk_class"):
+        op.add_column("reviews", sa.Column("repo_risk_class", sa.String(16), server_default="standard"))
+    if not _column_exists("reviews", "trust_tier"):
+        op.add_column("reviews", sa.Column("trust_tier", sa.String(32), server_default=""))
+    if not _column_exists("reviews", "trust_tier_details"):
+        op.add_column("reviews", sa.Column("trust_tier_details", JSONB, nullable=True))
 
 
 def downgrade() -> None:
