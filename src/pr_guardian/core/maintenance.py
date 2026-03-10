@@ -212,19 +212,7 @@ async def _run_maintenance_pipeline(
     async def _check_staleness(path: str):
         async with sem:
             try:
-                commits = await adapter.fetch_recent_commits(
-                    repo, branch="HEAD", since=cutoff_iso, per_page=1,
-                )
-                # If there are commits since cutoff touching this path, it's not stale
-                # But fetch_recent_commits returns repo-level commits, so we need a different approach.
-                # Use commits endpoint with path filter via direct API call.
-                client = adapter._get_client()
-                resp = await client.get(
-                    f"/repos/{repo}/commits",
-                    params={"path": path, "per_page": 1},
-                )
-                resp.raise_for_status()
-                path_commits = resp.json()
+                path_commits = await adapter.fetch_commits_for_path(repo, path, per_page=1)
                 if not path_commits:
                     return  # No history available
 
