@@ -18,7 +18,10 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 @router.get("/stats")
 async def dashboard_stats():
     """Aggregate statistics for the dashboard overview."""
-    return await storage.get_stats()
+    try:
+        return await storage.get_stats()
+    except Exception:
+        return {"total_reviews": 0, "decisions": {}, "avg_score": 0, "total_cost_usd": 0}
 
 
 @router.get("/reviews")
@@ -29,7 +32,10 @@ async def dashboard_reviews(
     decision: str | None = Query(None),
 ):
     """Paginated list of reviews with optional filters."""
-    return await storage.list_reviews(limit=limit, offset=offset, repo=repo, decision=decision)
+    try:
+        return await storage.list_reviews(limit=limit, offset=offset, repo=repo, decision=decision)
+    except Exception:
+        return []
 
 
 @router.get("/reviews/{review_id}")
@@ -44,7 +50,10 @@ async def dashboard_review_detail(review_id: uuid.UUID):
 @router.get("/active")
 async def dashboard_active():
     """Currently in-progress reviews."""
-    return await storage.get_active_reviews()
+    try:
+        return await storage.get_active_reviews()
+    except Exception:
+        return []
 
 
 @router.delete("/reviews/{review_id}")

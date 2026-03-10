@@ -57,6 +57,33 @@
       <input id="filter-repo" type="text" placeholder="Filter repo..." class="form-input text-xs py-1.5 px-2 w-40">
     </div>
 
+    <!-- Active Reviews -->
+    <div id="active-reviews" class="hidden mb-4">
+      <div class="card border-emerald-500/30">
+        <div class="card-header">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-emerald-400 flex items-center gap-2">
+            <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            Active Reviews
+          </h3>
+        </div>
+        <div class="card-body p-0">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>PR</th>
+                <th>Repo</th>
+                <th>Author</th>
+                <th>Stage</th>
+                <th>Elapsed</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="active-reviews-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <!-- Review History Table -->
     <div class="card">
       <div class="card-body p-0">
@@ -139,19 +166,63 @@ let currentFilter = { decision: '', repo: '' };
 
 // ---- Data Loading ----
 async function loadReviews() {
+  const el = document.getElementById('reviews-body');
   try {
     const params = new URLSearchParams();
     if (currentFilter.decision) params.set('decision', currentFilter.decision);
     if (currentFilter.repo) params.set('repo', currentFilter.repo);
-    const reviews = await fetch(`${API}/reviews?${params}`).then(r => r.json());
-    const el = document.getElementById('reviews-body');
-    if (!reviews.length) {
+    const resp = await fetch(`${API}/reviews?${params}`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const reviews = await resp.json();
+    if (!Array.isArray(reviews) || !reviews.length) {
       el.innerHTML = '<tr><td colspan="9" class="empty-state">No reviews found</td></tr>';
       return;
     }
     el.innerHTML = reviews.map(r => renderReviewRow(r)).join('');
   } catch (e) {
     console.error('Failed to load reviews', e);
+    el.innerHTML = '<tr><td colspan="9" class="empty-state text-red-400">Failed to load reviews — check database connection</td></tr>';
+  }
+}
+
+async function loadActiveReviews() {
+  const container = document.getElementById('active-reviews');
+  const tbody = document.getElementById('active-reviews-body');
+  try {
+    const resp = await fetch(`${API}/active`);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const active = await resp.json();
+    if (!Array.isArray(active) || !active.length) {
+      container.classList.add('hidden');
+      return;
+    }
+    container.classList.remove('hidden');
+    tbody.innerHTML = active.map(r => `
+      <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
+        <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
+        <td>${esc(r.repo)}</td>
+        <td>${esc(r.author)}</td>
+        <td><span class="badge badge-neutral text-xs">${esc(r.stage || 'queued')}</span>
+          ${r.stage_detail ? `<br><span class="text-2xs text-slate-400">${esc(truncate(r.stage_detail, 50))}</span>` : ''}
+        </td>
+        <td class="text-xs text-slate-400">${formatElapsed(r.started_at)}</td>
+        <td><button class="btn btn-ghost btn-xs text-red-400" onclick="event.stopPropagation(); cancelReview('${r.id}')" title="Cancel review">&#10005;</button></td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    console.error('Failed to load active reviews', e);
+    container.classList.add('hidden');
+  }
+}
+
+async function cancelReview(id) {
+  if (!confirm('Cancel this review?')) return;
+  try {
+    await fetch(`${API}/reviews/${id}`, { method: 'DELETE' });
+    loadActiveReviews();
+    loadReviews();
+  } catch (e) {
+    console.error('Failed to cancel review', e);
   }
 }
 
@@ -677,7 +748,8 @@ function connectSSE() {
     try {
       const data = JSON.parse(e.data);
       if (data.type === 'connected') return;
-      if (data.stage === 'complete') loadReviews();
+      loadActiveReviews();
+      if (TERMINAL_STAGES.includes(data.stage)) loadReviews();
     } catch {}
   };
   es.onerror = () => { es.close(); setTimeout(connectSSE, 5000); };
@@ -685,8 +757,10 @@ function connectSSE() {
 
 // ---- Init ----
 loadReviews();
+loadActiveReviews();
 connectSSE();
 setInterval(loadReviews, 30000);
+setInterval(loadActiveReviews, 5000);
 </script>
 </body>
 </html>
