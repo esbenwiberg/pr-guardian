@@ -63,3 +63,15 @@ class PlatformAdapter(Protocol):
     ) -> list[str]:
         """List files in repo (recursive tree)."""
         ...
+
+    async def fetch_pr_files(
+        self, repo: str, pr_id: int | str, project: str = "",
+    ) -> list[dict]:
+        """Fetch list of changed files for a PR (filename, additions, deletions)."""
+        ...
+
+    async def fetch_commits_for_path(
+        self, repo: str, path: str, per_page: int = 1, project: str = "",
+    ) -> list[dict]:
+        """Fetch recent commits that touched a specific file path."""
+        ...

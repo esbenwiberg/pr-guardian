@@ -214,13 +214,10 @@ async def _run_recent_pipeline(
         pr_number = pr.get("number")
         if pr_number:
             try:
-                client = adapter._get_client()
-                resp = await client.get(
-                    f"/repos/{repo}/pulls/{pr_number}/files",
-                    params={"per_page": 100},
-                )
-                resp.raise_for_status()
-                files = resp.json()
+                ado_project = pr.get("_ado_project", "")
+                ado_repo = pr.get("_ado_repo", "")
+                pr_repo = f"{ado_project}/{ado_repo}" if ado_project else repo
+                files = await adapter.fetch_pr_files(pr_repo, pr_number, project=ado_project)
                 for f in files:
                     f["_pr_number"] = pr_number
                     f["_pr_title"] = pr.get("title", "")

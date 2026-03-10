@@ -215,6 +215,30 @@ class GitHubAdapter:
         tree = resp.json().get("tree", [])
         return [item["path"] for item in tree if item.get("type") == "blob"]
 
+    async def fetch_pr_files(
+        self, repo: str, pr_id: int | str, project: str = "",
+    ) -> list[dict]:
+        """Fetch changed files for a PR."""
+        client = self._get_client()
+        resp = await client.get(
+            f"/repos/{repo}/pulls/{pr_id}/files",
+            params={"per_page": 100},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def fetch_commits_for_path(
+        self, repo: str, path: str, per_page: int = 1, project: str = "",
+    ) -> list[dict]:
+        """Fetch recent commits touching a specific file."""
+        client = self._get_client()
+        resp = await client.get(
+            f"/repos/{repo}/commits",
+            params={"path": path, "per_page": per_page},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

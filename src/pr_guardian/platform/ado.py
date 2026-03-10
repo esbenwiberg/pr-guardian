@@ -305,27 +305,255 @@ class ADOAdapter:
         # ADO uses reviewer IDs — would need group resolution via API
         # For now, log the intent
 
-    # --- Scan-mode methods (stubs — ADO implementation pending) ---
+    # --- Scan-mode methods ---
+
+    def _parse_repo(self, repo: str) -> tuple[str, str]:
+        """Split 'project/repo' into (project, repo_name).
+
+        ADO scan methods receive repo as 'project/repo'. If no slash is
+        present, the repo string is used for both project and repo name.
+        """
+        if "/" in repo:
+            project, _, repo_name = repo.partition("/")
+            return project, repo_name
+        return repo, repo
 
     async def fetch_recent_commits(
         self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
     ) -> list[dict]:
-        raise NotImplementedError("ADO fetch_recent_commits not yet implemented")
+        """Fetch commits on branch since a date (ISO 8601).
+
+        Normalizes to GitHub-compatible dict shape for scan agents.
+        """
+        client = self._get_client()
+        project, repo_name = self._parse_repo(repo)
+        url = f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/commits"
+        params: dict = {
+            "searchCriteria.fromDate": since,
+            "searchCriteria.itemVersion.version": branch,
+            "$top": per_page,
+            "api-version": "7.1",
+        }
+        if until:
+            params["searchCriteria.toDate"] = until
+
+        all_commits: list[dict] = []
+        skip = 0
+        while True:
+            params["$skip"] = skip
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            batch = resp.json().get("value", [])
+            if not batch:
+                break
+            # Normalize each commit to GitHub-like shape
+            for c in batch:
+                all_commits.append({
+                    "sha": c.get("commitId", ""),
+                    "commit": {
+                        "message": c.get("comment", ""),
+                        "author": {
+                            "name": c.get("author", {}).get("name", ""),
+                            "email": c.get("author", {}).get("email", ""),
+                            "date": c.get("author", {}).get("date", ""),
+                        },
+                        "committer": {
+                            "name": c.get("committer", {}).get("name", ""),
+                            "date": c.get("committer", {}).get("date", ""),
+                        },
+                    },
+                    "author": {"login": c.get("author", {}).get("name", "")},
+                })
+            if len(batch) < per_page:
+                break
+            skip += len(batch)
+        return all_commits
 
     async def fetch_merged_prs(
         self, repo: str, since: str, base: str = "main",
     ) -> list[dict]:
-        raise NotImplementedError("ADO fetch_merged_prs not yet implemented")
+        """Fetch recently merged (completed) PRs.
+
+        Normalizes to GitHub-compatible dict shape for scan agents.
+        """
+        client = self._get_client()
+        project, repo_name = self._parse_repo(repo)
+        url = (
+            f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/pullrequests"
+        )
+        params: dict = {
+            "searchCriteria.status": "completed",
+            "searchCriteria.targetRefName": f"refs/heads/{base}",
+            "$top": 100,
+            "api-version": "7.1",
+        }
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        all_prs = resp.json().get("value", [])
+
+        # Filter to PRs closed after `since`
+        merged: list[dict] = []
+        for pr in all_prs:
+            closed_date = pr.get("closedDate", "")
+            if closed_date and closed_date >= since:
+                merged.append({
+                    "number": pr.get("pullRequestId"),
+                    "title": pr.get("title", ""),
+                    "user": {"login": pr.get("createdBy", {}).get("uniqueName", "")},
+                    "merged_at": closed_date,
+                    "base": {"ref": base},
+                    "_ado_project": project,
+                    "_ado_repo": repo_name,
+                })
+        return merged
 
     async def fetch_file_content(
         self, repo: str, path: str, ref: str = "HEAD",
     ) -> str:
-        raise NotImplementedError("ADO fetch_file_content not yet implemented")
+        """Fetch file content from the repo."""
+        client = self._get_client()
+        project, repo_name = self._parse_repo(repo)
+        sem = asyncio.Semaphore(1)
+
+        # Map ref to ADO version type
+        version = ref
+        version_type = "branch"
+        if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()):
+            version_type = "commit"
+        elif ref == "HEAD":
+            # ADO doesn't support HEAD — use default branch (omit version)
+            version = ""
+            version_type = "branch"
+
+        if version:
+            content = await self._fetch_file_content(
+                client, sem, project, repo_name, path, version, version_type,
+            )
+        else:
+            # No version specified — fetch from default branch
+            url = f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/items"
+            params: dict = {
+                "path": f"/{path}",
+                "includeContent": "true",
+                "api-version": "7.1",
+            }
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            ct = resp.headers.get("content-type", "")
+            if "octet-stream" in ct:
+                return ""
+            content = resp.text
+
+        return content or ""
 
     async def list_repo_files(
         self, repo: str, ref: str = "HEAD", path: str = "",
     ) -> list[str]:
-        raise NotImplementedError("ADO list_repo_files not yet implemented")
+        """List files in repo (recursive tree)."""
+        client = self._get_client()
+        project, repo_name = self._parse_repo(repo)
+        url = f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/items"
+        params: dict = {
+            "recursionLevel": "full",
+            "api-version": "7.1",
+        }
+        if ref and ref != "HEAD":
+            params["versionDescriptor.version"] = ref
+            if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()):
+                params["versionDescriptor.versionType"] = "commit"
+            else:
+                params["versionDescriptor.versionType"] = "branch"
+        if path:
+            params["scopePath"] = f"/{path}"
+
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        items = resp.json().get("value", [])
+        # Filter to files only (not folders), strip leading slash
+        return [
+            item["path"].lstrip("/")
+            for item in items
+            if not item.get("isFolder", False) and item.get("path")
+        ]
+
+    async def fetch_pr_files(
+        self, repo: str, pr_id: int | str, project: str = "",
+    ) -> list[dict]:
+        """Fetch changed files for a PR.
+
+        Uses the iterations/changes API and normalizes to GitHub-compatible shape.
+        """
+        client = self._get_client()
+        if not project:
+            project, repo = self._parse_repo(repo)
+
+        # Get the last iteration
+        iter_url = (
+            f"{self._org_url}/{project}/_apis/git/repositories/{repo}"
+            f"/pullRequests/{pr_id}/iterations"
+        )
+        resp = await client.get(iter_url, params={"api-version": "7.1"})
+        resp.raise_for_status()
+        iterations = resp.json().get("value", [])
+        if not iterations:
+            return []
+
+        last_iter_id = iterations[-1]["id"]
+
+        # Get changes for that iteration
+        changes_url = (
+            f"{self._org_url}/{project}/_apis/git/repositories/{repo}"
+            f"/pullRequests/{pr_id}/iterations/{last_iter_id}/changes"
+        )
+        resp = await client.get(changes_url, params={"api-version": "7.1"})
+        resp.raise_for_status()
+        change_entries = resp.json().get("changeEntries", [])
+
+        files: list[dict] = []
+        for change in change_entries:
+            item = change.get("item", {})
+            raw_path = (item.get("path") or "").lstrip("/")
+            files.append({
+                "filename": raw_path,
+                "additions": 0,
+                "deletions": 0,
+                "status": change.get("changeType", "edit").lower(),
+            })
+        return files
+
+    async def fetch_commits_for_path(
+        self, repo: str, path: str, per_page: int = 1, project: str = "",
+    ) -> list[dict]:
+        """Fetch recent commits that touched a specific file path.
+
+        Normalizes to GitHub-compatible dict shape.
+        """
+        client = self._get_client()
+        if not project:
+            project, repo = self._parse_repo(repo)
+
+        url = f"{self._org_url}/{project}/_apis/git/repositories/{repo}/commits"
+        params: dict = {
+            "searchCriteria.itemPath": f"/{path}",
+            "$top": per_page,
+            "api-version": "7.1",
+        }
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        ado_commits = resp.json().get("value", [])
+
+        # Normalize to GitHub shape
+        return [
+            {
+                "sha": c.get("commitId", ""),
+                "commit": {
+                    "committer": {
+                        "date": c.get("committer", {}).get("date", ""),
+                    },
+                },
+            }
+            for c in ado_commits
+        ]
 
     async def close(self) -> None:
         if self._client:
