@@ -7,3 +7,4 @@ uv.lock
 *.egg
 dist/
 build/
+node_modules/

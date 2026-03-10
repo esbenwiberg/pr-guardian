@@ -1,397 +1,65 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PR Guardian — Review Findings</title>
-<style>
-:root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface2: #232733;
-  --border: #2e3345;
-  --text: #e1e4ed;
-  --text-dim: #8b90a0;
-  --accent: #6c5ce7;
-  --accent-light: #a29bfe;
-  --green: #00b894;
-  --yellow: #fdcb6e;
-  --orange: #e17055;
-  --red: #d63031;
-  --blue: #0984e3;
-  --radius: 10px;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-}
-a { color: var(--accent-light); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-/* Header */
-.header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 16px 32px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.header h1 { font-size: 20px; font-weight: 600; }
-.header .logo { font-size: 24px; color: var(--accent-light); }
-.header .back-link {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--text-dim);
-}
-.header .back-link:hover { color: var(--accent-light); }
-
-.container { max-width: 1100px; margin: 0 auto; padding: 24px; }
-
-/* Decision banner */
-.decision-banner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 20px 24px;
-  border-radius: var(--radius);
-  margin-bottom: 24px;
-  border: 1px solid var(--border);
-}
-.decision-banner.auto_approve { background: rgba(0,184,148,.12); border-color: var(--green); }
-.decision-banner.human_review { background: rgba(9,132,227,.12); border-color: var(--blue); }
-.decision-banner.reject { background: rgba(225,112,85,.12); border-color: var(--orange); }
-.decision-banner.hard_block { background: rgba(214,48,49,.12); border-color: var(--red); }
-.decision-banner .emoji { font-size: 32px; }
-.decision-banner .info { flex: 1; }
-.decision-banner .label { font-size: 18px; font-weight: 700; }
-.decision-banner .meta { font-size: 13px; color: var(--text-dim); margin-top: 4px; }
-.decision-banner .pr-link {
-  padding: 6px 14px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  font-size: 13px;
-  color: var(--accent-light);
-}
-
-/* Info row */
-.info-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  margin-bottom: 24px;
-}
-.info-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-}
-.info-card .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
-.info-card .value { font-size: 18px; font-weight: 700; margin-top: 4px; }
-
-/* Toolbar */
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-}
-.toolbar .count { font-size: 13px; color: var(--text-dim); margin-right: auto; }
-.toolbar button {
-  padding: 6px 14px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  font-family: inherit;
-}
-.toolbar button:hover { border-color: var(--accent); color: var(--accent-light); }
-.toolbar button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
-  font-weight: 600;
-}
-.toolbar button.primary:hover { background: var(--accent-light); color: var(--bg); }
-.toolbar button.primary:disabled {
-  opacity: .4;
-  cursor: not-allowed;
-  background: var(--surface2);
-  border-color: var(--border);
-  color: var(--text-dim);
-}
-
-/* Agent groups */
-.agent-group {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 16px;
-  overflow: hidden;
-}
-.agent-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  cursor: pointer;
-  user-select: none;
-}
-.agent-header:hover { background: var(--surface2); }
-.agent-header .toggle { font-size: 12px; color: var(--text-dim); transition: transform .15s; }
-.agent-header .toggle.open { transform: rotate(90deg); }
-.agent-header .agent-name { font-weight: 600; font-size: 15px; }
-.agent-header .verdict-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-.verdict-pass { background: rgba(0,184,148,.15); color: var(--green); }
-.verdict-warn { background: rgba(253,203,110,.15); color: var(--yellow); }
-.verdict-flag_human { background: rgba(225,112,85,.15); color: var(--orange); }
-.agent-header .finding-count { font-size: 12px; color: var(--text-dim); margin-left: auto; }
-.agent-header .group-check {
-  width: 16px; height: 16px;
-  accent-color: var(--accent);
-  cursor: pointer;
-}
-
-.findings-list { border-top: 1px solid var(--border); }
-.findings-list.collapsed { display: none; }
-
-/* Finding row */
-.finding-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-}
-.finding-row:last-child { border-bottom: none; }
-.finding-row .f-check {
-  width: 16px; height: 16px;
-  margin-top: 2px;
-  accent-color: var(--accent);
-  cursor: pointer;
-  flex-shrink: 0;
-}
-.finding-row .f-body { flex: 1; min-width: 0; }
-.finding-row .f-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.sev-badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.sev-critical { background: rgba(214,48,49,.2); color: var(--red); }
-.sev-high { background: rgba(225,112,85,.2); color: var(--orange); }
-.sev-medium { background: rgba(253,203,110,.2); color: var(--yellow); }
-.sev-low { background: rgba(139,144,160,.2); color: var(--text-dim); }
-.cert-badge {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-}
-.f-location {
-  font-size: 12px;
-  color: var(--accent-light);
-  font-family: 'SF Mono', Menlo, monospace;
-}
-.f-category { font-size: 12px; color: var(--text-dim); }
-.f-desc { font-size: 13px; margin-top: 6px; line-height: 1.5; }
-.f-suggestion {
-  font-size: 12px;
-  color: var(--green);
-  margin-top: 4px;
-  padding-left: 12px;
-  border-left: 2px solid var(--green);
-}
-.f-cwe { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
-
-/* Mechanical section */
-.mech-section {
-  margin-bottom: 16px;
-}
-.mech-section h3 { font-size: 15px; margin-bottom: 10px; }
-.mech-list {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.mech-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 13px;
-}
-.mech-card .status { font-size: 14px; }
-
-/* Export modal */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  z-index: 1000;
-  justify-content: center;
-  align-items: center;
-}
-.modal-overlay.visible { display: flex; }
-.modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  width: 90%;
-  max-width: 800px;
-  max-height: 80vh;
-  display: flex;
-  flex-direction: column;
-}
-.modal-header {
-  display: flex;
-  align-items: center;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-}
-.modal-header h2 { font-size: 16px; flex: 1; }
-.modal-header .close-btn {
-  background: none;
-  border: none;
-  color: var(--text-dim);
-  font-size: 20px;
-  cursor: pointer;
-  padding: 4px 8px;
-}
-.modal-header .close-btn:hover { color: var(--text); }
-.modal-body {
-  padding: 20px;
-  overflow-y: auto;
-  flex: 1;
-}
-.modal-body textarea {
-  width: 100%;
-  min-height: 300px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: 'SF Mono', Menlo, monospace;
-  font-size: 12px;
-  padding: 12px;
-  resize: vertical;
-}
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--border);
-}
-.modal-footer button {
-  padding: 8px 18px;
-  border-radius: 6px;
-  font-size: 13px;
-  cursor: pointer;
-  font-family: inherit;
-  border: 1px solid var(--border);
-}
-.modal-footer .btn-copy {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
-  font-weight: 600;
-}
-.modal-footer .btn-copy:hover { background: var(--accent-light); color: var(--bg); }
-.modal-footer .btn-secondary {
-  background: var(--surface2);
-  color: var(--text);
-}
-
-/* Loading */
-.loading {
-  text-align: center;
-  padding: 60px;
-  color: var(--text-dim);
-  font-size: 14px;
-}
-.error-msg {
-  text-align: center;
-  padding: 60px;
-  color: var(--orange);
-}
-
-/* Empty state */
-.empty { text-align: center; padding: 40px; color: var(--text-dim); font-size: 14px; }
-</style>
+<link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
 
-<div class="header">
-  <span class="logo">&#x1f6e1;</span>
-  <h1>PR Guardian</h1>
-  <a class="back-link" href="/dashboard">&larr; Dashboard</a>
+<!-- Header -->
+<div class="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 px-6 py-3 flex items-center gap-4 sticky top-0 z-40">
+  <span class="text-2xl text-emerald-400">&#x1f6e1;</span>
+  <h1 class="text-lg font-semibold">PR Guardian</h1>
+  <a class="ml-auto text-sm text-slate-400 hover:text-emerald-400 transition-colors" href="/dashboard">&larr; Dashboard</a>
 </div>
 
-<div class="container">
-  <div id="loading" class="loading">Loading review...</div>
-  <div id="error" class="error-msg" style="display:none"></div>
+<div class="max-w-5xl mx-auto px-6 py-6">
+  <div id="loading" class="text-center py-16 text-slate-400 text-sm">Loading review...</div>
+  <div id="error" class="text-center py-16 text-orange-400" style="display:none"></div>
   <div id="content" style="display:none">
 
     <!-- Decision banner -->
-    <div id="banner" class="decision-banner">
-      <span class="emoji" id="banner-emoji"></span>
-      <div class="info">
-        <div class="label" id="banner-label"></div>
-        <div class="meta" id="banner-meta"></div>
+    <div id="banner" class="flex items-center gap-4 p-5 rounded-xl mb-6">
+      <span class="text-3xl" id="banner-emoji"></span>
+      <div class="flex-1">
+        <div class="text-lg font-bold" id="banner-label"></div>
+        <div class="text-sm text-slate-400 mt-1" id="banner-meta"></div>
       </div>
-      <a id="pr-link" class="pr-link" target="_blank">View PR</a>
+      <a id="pr-link" class="btn btn-sm btn-secondary" target="_blank">View PR</a>
     </div>
 
     <!-- Info cards -->
-    <div class="info-row">
-      <div class="info-card"><div class="label">Risk Tier</div><div class="value" id="v-risk"></div></div>
-      <div class="info-card"><div class="label">Score</div><div class="value" id="v-score"></div></div>
-      <div class="info-card"><div class="label">Findings</div><div class="value" id="v-findings"></div></div>
-      <div class="info-card"><div class="label">Duration</div><div class="value" id="v-duration"></div></div>
-      <div class="info-card"><div class="label">Cost</div><div class="value" id="v-cost"></div></div>
+    <div class="grid grid-cols-5 gap-3 mb-6">
+      <div class="stat-card"><div class="stat-card-label">Risk Tier</div><div class="stat-card-value" id="v-risk"></div></div>
+      <div class="stat-card"><div class="stat-card-label">Score</div><div class="stat-card-value" id="v-score"></div></div>
+      <div class="stat-card"><div class="stat-card-label">Findings</div><div class="stat-card-value" id="v-findings"></div></div>
+      <div class="stat-card"><div class="stat-card-label">Duration</div><div class="stat-card-value" id="v-duration"></div></div>
+      <div class="stat-card"><div class="stat-card-label">Cost</div><div class="stat-card-value" id="v-cost"></div></div>
     </div>
 
     <!-- Summary -->
-    <div id="summary-section" style="display:none; margin-bottom:24px">
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:14px 18px;font-size:13px;line-height:1.6;color:var(--text-dim)" id="summary-text"></div>
+    <div id="summary-section" style="display:none" class="mb-6">
+      <div class="card card-compact">
+        <div class="card-body text-sm leading-relaxed text-slate-400" id="summary-text"></div>
+      </div>
     </div>
 
     <!-- Mechanical checks -->
-    <div id="mech-section" class="mech-section" style="display:none">
-      <h3>Mechanical Checks</h3>
-      <div id="mech-list" class="mech-list"></div>
+    <div id="mech-section" style="display:none" class="mb-6">
+      <h3 class="text-base font-semibold mb-3">Mechanical Checks</h3>
+      <div id="mech-list" class="flex gap-2.5 flex-wrap"></div>
     </div>
 
     <!-- Toolbar -->
-    <div class="toolbar" id="toolbar" style="display:none">
-      <span class="count" id="selection-count">0 selected</span>
-      <button onclick="selectBySeverity('critical','high')">Select Critical + High</button>
-      <button onclick="selectBySeverity('critical','high','medium')">+ Medium</button>
-      <button onclick="selectAll()">Select All</button>
-      <button onclick="deselectAll()">Deselect All</button>
-      <button class="primary" id="export-btn" onclick="openExport()" disabled>Export for Agent Fix</button>
+    <div class="flex items-center gap-2.5 mb-4 flex-wrap" id="toolbar" style="display:none">
+      <span class="text-sm text-slate-400 mr-auto" id="selection-count">0 selected</span>
+      <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high')">Select Critical + High</button>
+      <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high','medium')">+ Medium</button>
+      <button class="btn btn-sm btn-secondary" onclick="selectAll()">Select All</button>
+      <button class="btn btn-sm btn-secondary" onclick="deselectAll()">Deselect All</button>
+      <button class="btn btn-sm btn-primary" id="export-btn" onclick="openExport()" disabled>Export for Agent Fix</button>
     </div>
 
     <!-- Agent findings groups -->
@@ -400,19 +68,22 @@ a:hover { text-decoration: underline; }
   </div>
 </div>
 
-<!-- Export modal -->
-<div class="modal-overlay" id="export-modal">
-  <div class="modal">
-    <div class="modal-header">
-      <h2>Export Findings for Agent Fix</h2>
-      <button class="close-btn" onclick="closeExport()">&times;</button>
-    </div>
-    <div class="modal-body">
-      <textarea id="export-text" readonly></textarea>
-    </div>
-    <div class="modal-footer">
-      <button class="btn-secondary" onclick="closeExport()">Close</button>
-      <button class="btn-copy" onclick="copyExport()">Copy to Clipboard</button>
+<!-- Export modal (dialog pattern) -->
+<div id="export-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeExport()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-3xl">
+      <div class="dialog-header">
+        <h2 class="text-base font-semibold">Export Findings for Agent Fix</h2>
+        <button class="btn btn-ghost btn-sm" onclick="closeExport()">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <textarea id="export-text" class="form-textarea font-mono text-xs min-h-[300px]" readonly></textarea>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary" onclick="closeExport()">Close</button>
+        <button class="btn btn-primary" id="copy-btn" onclick="copyExport()">Copy to Clipboard</button>
+      </div>
     </div>
   </div>
 </div>
@@ -461,7 +132,7 @@ function render(d) {
 
   // Banner
   const banner = document.getElementById('banner');
-  banner.className = `decision-banner ${d.decision || ''}`;
+  banner.className = 'flex items-center gap-4 p-5 rounded-xl mb-6 banner-' + (d.decision || '');
   document.getElementById('banner-emoji').textContent = DECISION_EMOJI[d.decision] || '\u2753';
   document.getElementById('banner-label').textContent = DECISION_LABEL[d.decision] || d.decision || 'Pending';
   document.getElementById('banner-meta').textContent = `${d.repo} #${d.pr_id} — ${d.title || ''} by ${d.author || 'unknown'}`;
@@ -491,7 +162,7 @@ function render(d) {
     document.getElementById('mech-section').style.display = '';
     const list = document.getElementById('mech-list');
     list.innerHTML = d.mechanical_results.map(m =>
-      `<div class="mech-card"><span class="status">${m.passed ? '\u2705' : '\u274c'}</span><strong>${esc(m.tool)}</strong>${m.error ? ` <span style="color:var(--orange)">${esc(m.error)}</span>` : ''}</div>`
+      `<div class="card card-compact"><div class="card-body flex items-center gap-2 text-sm py-2.5 px-4"><span>${m.passed ? '\u2705' : '\u274c'}</span><strong>${esc(m.tool)}</strong>${m.error ? ` <span class="text-orange-400">${esc(m.error)}</span>` : ''}</div></div>`
     ).join('');
   }
 
@@ -505,21 +176,21 @@ function render(d) {
       const findings = agent.findings || [];
       const hasFindings = findings.length > 0;
       return `
-        <div class="agent-group" data-agent-idx="${ai}">
-          <div class="agent-header" onclick="toggleAgent(${ai})">
-            <span class="toggle" id="toggle-${ai}">\u25b6</span>
-            <span class="agent-name">${esc(label)}</span>
-            <span class="verdict-badge verdict-${agent.verdict}">${agent.verdict}</span>
-            <span class="finding-count">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
-            ${hasFindings ? `<input type="checkbox" class="group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
+        <div class="card mb-4 overflow-hidden" data-agent-idx="${ai}">
+          <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/40 transition-colors" onclick="toggleAgent(${ai})">
+            <span class="text-xs text-slate-400 transition-transform duration-150" id="toggle-${ai}">\u25b6</span>
+            <span class="font-semibold text-sm">${esc(label)}</span>
+            <span class="sev-badge verdict-${agent.verdict}">${agent.verdict}</span>
+            <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
+            ${hasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
-          <div class="findings-list collapsed" id="findings-${ai}">
+          <div class="border-t border-slate-700/50 collapsed" id="findings-${ai}" style="display:none">
             ${findings.map((f, fi) => renderFinding(ai, fi, f)).join('')}
           </div>
         </div>`;
     }).join('');
   } else {
-    document.getElementById('agents-container').innerHTML = '<div class="empty">No agent results available.</div>';
+    document.getElementById('agents-container').innerHTML = '<div class="empty-state"><div class="empty-state-text">No agent results available.</div></div>';
   }
 
   updateSelectionCount();
@@ -529,18 +200,18 @@ function renderFinding(ai, fi, f) {
   const key = `${ai}-${fi}`;
   const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
   return `
-    <div class="finding-row" data-key="${key}">
-      <input type="checkbox" class="f-check" data-key="${key}" onchange="toggleFinding('${key}')">
-      <div class="f-body">
-        <div class="f-top">
+    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0" data-key="${key}">
+      <input type="checkbox" class="form-checkbox f-check mt-0.5 shrink-0" data-key="${key}" onchange="toggleFinding('${key}')">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="sev-badge sev-${f.severity}">${f.severity}</span>
           <span class="cert-badge">${f.certainty}</span>
-          ${loc ? `<span class="f-location">${esc(loc)}</span>` : ''}
-          ${f.category ? `<span class="f-category">${esc(f.category)}</span>` : ''}
-          ${f.cwe ? `<span class="f-cwe">${esc(f.cwe)}</span>` : ''}
+          ${loc ? `<span class="font-mono text-xs text-emerald-400">${esc(loc)}</span>` : ''}
+          ${f.category ? `<span class="text-xs text-slate-400">${esc(f.category)}</span>` : ''}
+          ${f.cwe ? `<span class="text-xs text-slate-500">${esc(f.cwe)}</span>` : ''}
         </div>
-        <div class="f-desc">${esc(f.description || '')}</div>
-        ${f.suggestion ? `<div class="f-suggestion">${esc(f.suggestion)}</div>` : ''}
+        <div class="text-sm mt-1.5 leading-relaxed">${esc(f.description || '')}</div>
+        ${f.suggestion ? `<div class="text-xs text-emerald-400 mt-1 pl-3 border-l-2 border-emerald-400">${esc(f.suggestion)}</div>` : ''}
       </div>
     </div>`;
 }
@@ -600,7 +271,7 @@ function syncCheckboxes() {
   });
   // Sync group checkboxes
   (reviewData.agent_results || []).forEach((agent, ai) => {
-    const groupCb = document.querySelector(`.agent-group[data-agent-idx="${ai}"] .group-check`);
+    const groupCb = document.querySelector(`[data-agent-idx="${ai}"] .group-check`);
     if (!groupCb) return;
     const findings = agent.findings || [];
     const allSelected = findings.length > 0 && findings.every((_, fi) => selectedFindings.has(`${ai}-${fi}`));
@@ -621,8 +292,9 @@ function updateSelectionCount() {
 function toggleAgent(ai) {
   const list = document.getElementById(`findings-${ai}`);
   const toggle = document.getElementById(`toggle-${ai}`);
-  const collapsed = list.classList.toggle('collapsed');
-  toggle.classList.toggle('open', !collapsed);
+  const isHidden = list.style.display === 'none';
+  list.style.display = isHidden ? '' : 'none';
+  toggle.style.transform = isHidden ? 'rotate(90deg)' : '';
 }
 
 // --- Export ---
@@ -631,17 +303,17 @@ function openExport() {
   if (!selectedFindings.size) return;
   const text = buildExportText();
   document.getElementById('export-text').value = text;
-  document.getElementById('export-modal').classList.add('visible');
+  document.getElementById('export-modal').classList.remove('hidden');
 }
 
 function closeExport() {
-  document.getElementById('export-modal').classList.remove('visible');
+  document.getElementById('export-modal').classList.add('hidden');
 }
 
 function copyExport() {
   const textarea = document.getElementById('export-text');
   navigator.clipboard.writeText(textarea.value).then(() => {
-    const btn = document.querySelector('.btn-copy');
+    const btn = document.getElementById('copy-btn');
     btn.textContent = 'Copied!';
     setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 2000);
   });

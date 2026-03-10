@@ -1,0 +1,600 @@
+/*
+ * Tool Design System — Component Classes
+ *
+ * Import BEFORE @tailwind directives:
+ *   @import 'tool-design-system/base.css';
+ *   @import 'tool-design-system/components.css';
+ *   @tailwind base;
+ *   @tailwind components;
+ *   @tailwind utilities;
+ */
+
+@layer components {
+
+  /* ───────────────────────────── Buttons ───────────────────────────── */
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5
+           text-sm font-semibold whitespace-nowrap select-none
+           transition-all duration-150 ease-out
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-900
+           disabled:opacity-40 disabled:pointer-events-none;
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn-primary {
+    @apply text-slate-900 hover:brightness-110;
+    background: linear-gradient(135deg, var(--accent-400, #fbbf24), var(--accent-500, #f59e0b));
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.3),
+      0 4px 12px -2px color-mix(in srgb, var(--accent-400, #fbbf24) 30%, transparent);
+  }
+  .btn-primary:hover {
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.3),
+      0 6px 20px -2px color-mix(in srgb, var(--accent-400, #fbbf24) 40%, transparent);
+    transform: translateY(-1px);
+  }
+  .btn-primary:active {
+    transform: translateY(0) scale(0.97);
+  }
+  .btn-primary:focus-visible {
+    --tw-ring-color: color-mix(in srgb, var(--accent-400, #fbbf24) 50%, transparent);
+  }
+  .btn-secondary {
+    @apply border border-slate-600/80 text-slate-300 bg-slate-800/60
+           hover:bg-slate-700/60 hover:text-slate-50 hover:border-slate-500
+           focus-visible:ring-slate-500;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  }
+  .btn-danger {
+    @apply text-white hover:brightness-110 focus-visible:ring-red-400;
+    background: linear-gradient(135deg, #ef4444, #dc2626);
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.3),
+      0 4px 12px -2px rgba(239, 68, 68, 0.25);
+  }
+  .btn-danger:hover {
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 0.3),
+      0 6px 20px -2px rgba(239, 68, 68, 0.35);
+    transform: translateY(-1px);
+  }
+  .btn-danger:active {
+    transform: translateY(0) scale(0.97);
+  }
+  .btn-ghost {
+    @apply text-slate-400 bg-transparent
+           hover:text-slate-50 hover:bg-slate-800
+           focus-visible:ring-slate-500;
+  }
+  .btn-sm {
+    @apply text-xs px-3 py-1.5 rounded-md gap-1.5;
+  }
+  .btn-xs {
+    @apply text-xs px-2.5 py-1 rounded-md gap-1;
+  }
+  .btn-lg {
+    @apply text-base px-6 py-3 rounded-xl;
+  }
+  .btn-icon {
+    @apply p-2.5 rounded-lg;
+  }
+  .btn-icon.btn-sm {
+    @apply p-1.5 rounded-md;
+  }
+  .btn-icon.btn-xs {
+    @apply p-1 rounded;
+  }
+
+  /* ───────────────────────────── Badges ────────────────────────────── */
+
+  .badge {
+    @apply inline-flex items-center gap-1.5 rounded-full
+           px-2.5 py-0.5 text-xs font-medium ring-1 ring-inset;
+  }
+  .badge-neutral {
+    @apply bg-slate-400/10 text-slate-400 ring-slate-400/20;
+  }
+  .badge-accent {
+    color: var(--accent-400, #fbbf24);
+    background-color: color-mix(in srgb, var(--accent-400, #fbbf24) 10%, transparent);
+    --tw-ring-color: color-mix(in srgb, var(--accent-400, #fbbf24) 20%, transparent);
+  }
+  .badge-success {
+    @apply bg-emerald-400/10 text-emerald-400 ring-emerald-400/20;
+  }
+  .badge-warning {
+    @apply bg-orange-400/10 text-orange-400 ring-orange-400/20;
+  }
+  .badge-error {
+    @apply bg-red-400/10 text-red-400 ring-red-400/20;
+  }
+  .badge-info {
+    @apply bg-blue-400/10 text-blue-400 ring-blue-400/20;
+  }
+  .badge-sm {
+    @apply text-2xs px-2 py-px;
+  }
+  .badge-dot::before {
+    content: '';
+    @apply inline-block h-1.5 w-1.5 rounded-full bg-current;
+  }
+  .badge-dot.badge-pulse::before {
+    @apply animate-pulse-dot;
+  }
+
+  /* ───────────────────────────── Cards ─────────────────────────────── */
+
+  .card {
+    @apply rounded-xl border border-slate-700/50 bg-slate-800/80;
+    box-shadow:
+      0 1px 3px 0 rgb(0 0 0 / 0.3),
+      0 1px 2px -1px rgb(0 0 0 / 0.3);
+  }
+  .card-glass {
+    @apply rounded-xl border border-slate-700/30;
+    background: rgba(30, 41, 59, 0.5);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow:
+      0 4px 6px -1px rgb(0 0 0 / 0.3),
+      0 2px 4px -2px rgb(0 0 0 / 0.3),
+      inset 0 1px 0 0 rgba(148, 163, 184, 0.05);
+  }
+  .card-header {
+    @apply px-6 py-4 border-b border-slate-700/50;
+  }
+  .card-body {
+    @apply p-6;
+  }
+  .card-footer {
+    @apply px-6 py-4 border-t border-slate-700/50;
+  }
+  .card-compact .card-header {
+    @apply px-4 py-3;
+  }
+  .card-compact .card-body {
+    @apply p-4;
+  }
+  .card-compact .card-footer {
+    @apply px-4 py-3;
+  }
+
+  /* ───────────────────────── Stat Cards ────────────────────────────── */
+
+  .stat-card {
+    @apply rounded-xl border border-slate-700/50 bg-slate-800/80 p-5 flex flex-col gap-3;
+    box-shadow:
+      0 1px 3px 0 rgb(0 0 0 / 0.3),
+      0 1px 2px -1px rgb(0 0 0 / 0.3);
+  }
+  .stat-card-icon {
+    @apply flex h-10 w-10 items-center justify-center rounded-lg;
+  }
+  .stat-card-label {
+    @apply text-sm font-medium text-slate-400;
+  }
+  .stat-card-value {
+    @apply text-2xl font-bold text-slate-50 tracking-tight;
+  }
+
+  /* ───────────────────────────── Forms ─────────────────────────────── */
+
+  .form-label {
+    @apply block text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1.5;
+  }
+  .form-input {
+    @apply block w-full rounded-lg border border-slate-600/80 bg-slate-800/90
+           px-3.5 py-2.5 text-sm text-slate-50
+           placeholder-slate-500
+           transition-all duration-150;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.2);
+  }
+  .form-input:focus {
+    border-color: var(--accent-400, #fbbf24);
+    outline: none;
+    box-shadow:
+      inset 0 1px 2px rgb(0 0 0 / 0.2),
+      0 0 0 3px color-mix(in srgb, var(--accent-400, #fbbf24) 15%, transparent);
+  }
+  .form-select {
+    @apply form-input appearance-none pr-10 cursor-pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke-width='2' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' d='m19.5 8.25-7.5 7.5-7.5-7.5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 16px 16px;
+  }
+  .form-textarea {
+    @apply form-input resize-y min-h-[80px];
+  }
+  .form-checkbox {
+    @apply h-4 w-4 rounded border-slate-600 bg-slate-800 cursor-pointer;
+    accent-color: var(--accent-400, #fbbf24);
+  }
+  .form-checkbox:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-400, #fbbf24) 15%, transparent);
+  }
+  .form-hint {
+    @apply text-xs text-slate-500 mt-1.5;
+  }
+  .form-error-text {
+    @apply text-xs text-red-400 mt-1.5;
+  }
+  .form-group {
+    @apply flex flex-col;
+  }
+
+  /* Toggle switch */
+  .toggle {
+    @apply relative inline-flex h-6 w-11 items-center rounded-full
+           cursor-pointer transition-colors duration-200
+           bg-slate-600 shrink-0;
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.3);
+  }
+  .toggle[aria-checked="true"],
+  .toggle.active {
+    background-color: var(--accent-400, #fbbf24);
+    box-shadow:
+      inset 0 1px 3px rgb(0 0 0 / 0.1),
+      0 0 8px -2px color-mix(in srgb, var(--accent-400, #fbbf24) 40%, transparent);
+  }
+  .toggle-knob {
+    @apply inline-block h-4 w-4 rounded-full bg-white
+           transform transition-transform duration-200 translate-x-1;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 0.3);
+  }
+  .toggle[aria-checked="true"] .toggle-knob,
+  .toggle.active .toggle-knob {
+    @apply translate-x-6;
+  }
+
+  /* ───────────────────────────── Tables ────────────────────────────── */
+
+  .data-table {
+    @apply w-full text-left;
+  }
+  .data-table thead {
+    @apply border-b border-slate-700/50;
+  }
+  .data-table th {
+    @apply px-4 py-3 text-xs font-semibold uppercase tracking-wider text-slate-500;
+  }
+  .data-table td {
+    @apply px-4 py-3.5 text-sm text-slate-300;
+  }
+  .data-table tbody tr {
+    @apply border-b border-slate-700/30 transition-colors hover:bg-slate-800/60;
+  }
+
+  /* ──────────────────────────── Tabs ───────────────────────────────── */
+
+  .tabs {
+    @apply flex border-b border-slate-700/50 overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab {
+    @apply px-4 py-2.5 text-sm font-medium text-slate-400
+           border-b-2 border-transparent -mb-px
+           transition-colors duration-150
+           hover:text-slate-200
+           cursor-pointer whitespace-nowrap;
+  }
+  .tab.active,
+  .tab[aria-selected="true"] {
+    color: var(--accent-400, #fbbf24);
+    border-bottom-color: var(--accent-400, #fbbf24);
+  }
+
+  /* Pill-style tabs */
+  .tabs-pills {
+    @apply flex gap-1 overflow-x-auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .tab-pill {
+    @apply px-3.5 py-1.5 text-sm font-medium rounded-lg
+           text-slate-400 border border-transparent
+           transition-all duration-150
+           hover:text-slate-200 hover:bg-slate-800
+           cursor-pointer whitespace-nowrap;
+  }
+  .tab-pill.active,
+  .tab-pill[aria-selected="true"] {
+    color: var(--accent-400, #fbbf24);
+    background-color: color-mix(in srgb, var(--accent-400, #fbbf24) 10%, transparent);
+    border-color: color-mix(in srgb, var(--accent-400, #fbbf24) 20%, transparent);
+  }
+
+  /* ─────────────────────────── Dropdowns ───────────────────────────── */
+
+  .dropdown {
+    @apply relative inline-block;
+  }
+  .dropdown-menu {
+    @apply absolute z-50 mt-1.5 min-w-[13rem]
+           rounded-xl border border-slate-700/50 bg-slate-800
+           p-1.5 animate-scale-in origin-top-left;
+    box-shadow:
+      0 10px 40px -4px rgb(0 0 0 / 0.5),
+      0 4px 6px -2px rgb(0 0 0 / 0.3);
+  }
+  .dropdown-menu.right {
+    @apply right-0 origin-top-right;
+  }
+  .dropdown-item {
+    @apply flex items-center gap-2.5 px-3 py-2 text-sm text-slate-300
+           rounded-lg transition-colors duration-75
+           hover:bg-slate-700/60 hover:text-slate-50
+           cursor-pointer;
+  }
+  .dropdown-item.danger {
+    @apply text-red-400 hover:bg-red-400/10 hover:text-red-300;
+  }
+  .dropdown-divider {
+    @apply my-1.5 border-t border-slate-700/50;
+  }
+  .dropdown-label {
+    @apply px-3 py-1.5 text-2xs font-semibold uppercase tracking-wider text-slate-500;
+  }
+
+  /* ─────────────────────────── Dialogs ─────────────────────────────── */
+
+  .dialog-backdrop {
+    @apply fixed inset-0 bg-black/60 backdrop-blur-sm animate-fade-in;
+    z-index: 50;
+  }
+  .dialog {
+    @apply fixed inset-0 flex items-center justify-center p-4;
+    z-index: 51;
+  }
+  .dialog-panel {
+    @apply relative w-full max-w-lg
+           rounded-2xl border border-slate-700/50 bg-slate-800
+           animate-scale-in;
+    box-shadow:
+      0 24px 48px -12px rgb(0 0 0 / 0.5),
+      0 0 0 1px rgb(0 0 0 / 0.1);
+  }
+  @media (max-width: 640px) {
+    .dialog {
+      @apply items-end p-0;
+    }
+    .dialog-panel {
+      @apply max-w-full rounded-b-none rounded-t-2xl;
+    }
+  }
+  .dialog-header {
+    @apply flex items-center justify-between px-6 py-4 border-b border-slate-700/50;
+  }
+  .dialog-body {
+    @apply px-6 py-5;
+  }
+  .dialog-footer {
+    @apply flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-700/50;
+  }
+
+  /* Slide-over panel */
+  .slide-over {
+    @apply fixed inset-y-0 right-0 z-50 w-full max-w-md
+           border-l border-slate-700/50 bg-slate-800;
+    box-shadow: -20px 0 40px -8px rgb(0 0 0 / 0.4);
+  }
+
+  /* ─────────────────────────── Toasts ──────────────────────────────── */
+
+  .toast-container {
+    @apply fixed bottom-4 right-4 z-[100] flex flex-col gap-2;
+  }
+  .toast {
+    @apply flex items-center gap-3 rounded-xl bg-slate-800
+           px-4 py-3 ring-1 ring-slate-700/50
+           border-l-4 border-slate-500
+           animate-slide-in-up;
+    min-width: 280px;
+    max-width: 420px;
+    box-shadow:
+      0 10px 24px -4px rgb(0 0 0 / 0.45),
+      0 4px 8px -2px rgb(0 0 0 / 0.25);
+  }
+  .toast-success {
+    @apply border-l-emerald-400;
+  }
+  .toast-error {
+    @apply border-l-red-400;
+  }
+  .toast-warning {
+    @apply border-l-orange-400;
+  }
+  .toast-info {
+    @apply border-l-blue-400;
+  }
+
+  /* ──────────────────────── Sidebar / Nav ──────────────────────────── */
+
+  .sidebar {
+    @apply fixed inset-y-0 left-0 z-30
+           flex w-16 lg:w-64 flex-col
+           border-r border-slate-800;
+    background: rgba(2, 6, 23, 0.8);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+  .sidebar-header {
+    @apply flex items-center gap-3 px-4 h-14 border-b border-slate-800;
+  }
+  .sidebar-logo {
+    @apply flex h-8 w-8 items-center justify-center rounded-lg
+           text-slate-900 font-bold text-sm;
+    background: linear-gradient(135deg, var(--accent-400, #fbbf24), var(--accent-500, #f59e0b));
+    box-shadow: 0 2px 8px -2px color-mix(in srgb, var(--accent-400, #fbbf24) 40%, transparent);
+  }
+  .sidebar-nav {
+    @apply flex-1 overflow-y-auto py-3 px-2;
+  }
+  .sidebar-item {
+    @apply flex items-center gap-3 rounded-lg px-3 py-2
+           text-sm text-slate-400
+           transition-all duration-150
+           hover:bg-slate-800/80 hover:text-slate-50
+           cursor-pointer;
+  }
+  .sidebar-item.active {
+    color: var(--accent-400, #fbbf24);
+    background-color: color-mix(in srgb, var(--accent-400, #fbbf24) 5%, transparent);
+  }
+  .sidebar-footer {
+    @apply border-t border-slate-800 p-3;
+  }
+
+  /* ──────────────────── Command Palette ────────────────────────────── */
+
+  .command-palette {
+    @apply fixed inset-0 z-[100] flex items-start justify-center pt-[15vh];
+  }
+  .command-palette-box {
+    @apply relative z-10 w-full max-w-lg
+           rounded-2xl border border-slate-700/50 bg-slate-800
+           overflow-hidden animate-scale-in;
+    box-shadow:
+      0 24px 64px -12px rgb(0 0 0 / 0.6),
+      0 0 0 1px rgb(0 0 0 / 0.1);
+  }
+  .command-palette-input {
+    @apply w-full bg-transparent px-4 py-3.5 text-sm text-slate-50
+           placeholder-slate-500 border-b border-slate-700/50
+           focus:outline-none;
+  }
+  .command-palette-results {
+    @apply max-h-72 overflow-y-auto py-1.5;
+  }
+  .command-palette-item {
+    @apply flex items-center gap-3 px-4 py-2.5
+           text-sm text-slate-400
+           transition-colors duration-75
+           hover:bg-slate-700/50 hover:text-slate-50
+           cursor-pointer mx-1.5 rounded-lg;
+  }
+  .command-palette-item.highlighted {
+    @apply bg-slate-700/60 text-slate-50;
+  }
+  .command-palette-item-kbd {
+    @apply ml-auto text-2xs font-mono text-slate-500
+           bg-slate-700/50 rounded px-1.5 py-0.5;
+  }
+
+  /* ─────────────────────── Avatars ─────────────────────────────────── */
+
+  .avatar {
+    @apply flex items-center justify-center rounded-full
+           font-semibold text-sm h-9 w-9;
+    color: var(--accent-400, #fbbf24);
+    background-color: color-mix(in srgb, var(--accent-400, #fbbf24) 10%, transparent);
+  }
+  .avatar-sm {
+    @apply h-7 w-7 text-xs;
+  }
+  .avatar-lg {
+    @apply h-12 w-12 text-lg;
+  }
+  .avatar-group {
+    @apply flex -space-x-2;
+  }
+  .avatar-group .avatar {
+    @apply ring-2 ring-slate-900;
+  }
+
+  /* ────────────────────── Empty State ──────────────────────────────── */
+
+  .empty-state {
+    @apply rounded-xl border border-dashed border-slate-700
+           py-12 px-6 text-center;
+  }
+  .empty-state-icon {
+    @apply mx-auto h-12 w-12 text-slate-600;
+  }
+  .empty-state-title {
+    @apply mt-4 text-sm font-medium text-slate-300;
+  }
+  .empty-state-text {
+    @apply mt-1 text-sm text-slate-500;
+  }
+
+  /* ────────────────────── Skeleton ─────────────────────────────────── */
+
+  .skeleton {
+    @apply rounded-md bg-slate-700/40 animate-shimmer;
+    background-image: linear-gradient(
+      90deg,
+      transparent 0%,
+      rgba(148, 163, 184, 0.06) 50%,
+      transparent 100%
+    );
+    background-size: 200% 100%;
+  }
+
+  /* ────────────────────── Tooltips ─────────────────────────────────── */
+
+  .tooltip {
+    @apply absolute z-50 px-2.5 py-1.5 text-xs font-medium
+           bg-slate-700 text-slate-200 rounded-lg
+           pointer-events-none animate-fade-in whitespace-nowrap;
+    box-shadow: 0 4px 12px -2px rgb(0 0 0 / 0.4);
+  }
+  .tooltip::after {
+    content: '';
+    @apply absolute w-2 h-2 bg-slate-700 rotate-45;
+  }
+  .tooltip.top::after {
+    @apply -bottom-1 left-1/2 -translate-x-1/2;
+  }
+  .tooltip.bottom::after {
+    @apply -top-1 left-1/2 -translate-x-1/2;
+  }
+
+  /* ──────────────────── Progress ───────────────────────────────────── */
+
+  .progress-bar {
+    @apply h-2 w-full rounded-full bg-slate-700/50 overflow-hidden;
+  }
+  .progress-bar-fill {
+    @apply h-full rounded-full transition-all duration-500 ease-out;
+    background: linear-gradient(90deg, var(--accent-500, #f59e0b), var(--accent-400, #fbbf24));
+  }
+
+  /* ──────────────────── Kbd / Shortcut ─────────────────────────────── */
+
+  .kbd {
+    @apply inline-flex items-center justify-center
+           min-w-[1.5rem] h-6 px-1.5
+           text-2xs font-mono font-medium text-slate-400
+           rounded-md;
+    background: linear-gradient(180deg, rgba(51,65,85,0.6) 0%, rgba(51,65,85,0.4) 100%);
+    border: 1px solid rgba(71, 85, 105, 0.5);
+    box-shadow: 0 1px 0 0 rgb(30 41 59), inset 0 1px 0 0 rgba(148, 163, 184, 0.05);
+  }
+
+  /* ──────────────────── Divider ────────────────────────────────────── */
+
+  .divider {
+    @apply border-t border-slate-700/50;
+  }
+  .divider-label {
+    @apply relative flex items-center gap-4 text-xs text-slate-500;
+  }
+  .divider-label::before,
+  .divider-label::after {
+    content: '';
+    @apply flex-1 border-t border-slate-700/50;
+  }
+
+  /* ──────────────────── Code block ────────────────────────────────── */
+
+  .code-block {
+    @apply rounded-lg font-mono text-sm text-slate-300 overflow-x-auto;
+    background: rgba(2, 6, 23, 0.6);
+    border: 1px solid rgba(51, 65, 85, 0.4);
+    box-shadow: inset 0 1px 3px rgb(0 0 0 / 0.2);
+  }
+}

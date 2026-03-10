@@ -1,0 +1,243 @@
+/*
+ * PR Guardian — Dashboard Styles
+ *
+ * Built on the Tool Design System (https://github.com/esbenwiberg/tool-design-system)
+ * with a violet accent palette for PR Guardian's identity.
+ */
+
+/* Design system base: fonts + default accent variables */
+@import '../vendor/base.css';
+
+/* Design system component classes (.btn, .card, .badge, etc.) */
+@import '../vendor/components.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── PR Guardian accent: Emerald ─────────────────────────────────────── */
+:root {
+  --accent-50:  #ecfdf5;
+  --accent-100: #d1fae5;
+  --accent-200: #a7f3d0;
+  --accent-300: #6ee7b7;
+  --accent-400: #34d399;
+  --accent-500: #10b981;
+  --accent-600: #059669;
+  --accent-700: #047857;
+  --accent-800: #065f46;
+  --accent-900: #064e3b;
+  --accent-950: #022c22;
+}
+
+/* ── Page-specific styles ────────────────────────────────────────────── */
+
+@layer components {
+
+  /* Pipeline progress bar (dashboard active reviews) */
+  .pipeline {
+    @apply flex gap-0.5 h-1 mt-2;
+  }
+  .pipeline .step {
+    @apply flex-1 rounded-sm bg-slate-700/50 transition-colors duration-300;
+  }
+  .pipeline .step.done {
+    @apply bg-emerald-400;
+  }
+  .pipeline .step.active {
+    background-color: var(--accent-400);
+    animation: pulseDot 1.5s ease-in-out infinite;
+  }
+  .pipeline .step.error {
+    @apply bg-red-400;
+  }
+
+  /* Modal pipeline steps (detail view) */
+  .modal-pipeline {
+    @apply flex gap-1 mb-5;
+  }
+  .modal-pipeline .pipe-step {
+    @apply flex-1 text-center py-2 px-0.5 rounded-md
+           text-2xs font-semibold uppercase tracking-wider
+           bg-slate-800 text-slate-500
+           border border-transparent transition-all duration-200;
+  }
+  .modal-pipeline .pipe-step.done {
+    @apply bg-emerald-400/10 text-emerald-400 border-emerald-400/20;
+  }
+  .modal-pipeline .pipe-step.active {
+    background-color: color-mix(in srgb, var(--accent-400) 15%, transparent);
+    color: var(--accent-400);
+    border-color: color-mix(in srgb, var(--accent-400) 30%, transparent);
+    animation: pulseDot 1.5s ease-in-out infinite;
+  }
+  .modal-pipeline .pipe-step.error {
+    @apply bg-red-400/10 text-red-400 border-red-400/20;
+  }
+
+  /* CSS-only donut chart */
+  .donut {
+    @apply w-28 h-28 rounded-full relative shrink-0;
+  }
+  .donut-hole {
+    @apply absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2
+           w-[70px] h-[70px] rounded-full
+           bg-slate-800 flex items-center justify-center
+           text-xl font-bold;
+  }
+
+  /* CSS-only bar chart */
+  .bar-row {
+    @apply flex items-center gap-3;
+  }
+  .bar-label {
+    @apply w-[70px] text-xs text-slate-400 text-right;
+  }
+  .bar-track {
+    @apply flex-1 h-5 bg-slate-700/50 rounded overflow-hidden;
+  }
+  .bar-fill {
+    @apply h-full rounded transition-[width] duration-500 ease-out
+           flex items-center pl-2 text-2xs font-semibold;
+  }
+  .bar-count {
+    @apply w-10 text-xs text-right tabular-nums;
+  }
+
+  /* Pipeline log */
+  .log-entry {
+    @apply flex gap-2 px-3 py-1.5 text-xs font-mono
+           border-b border-slate-700/30 leading-relaxed;
+  }
+  .log-entry:hover {
+    @apply bg-slate-800/60;
+  }
+  .log-ts {
+    @apply text-slate-500 shrink-0 min-w-[70px] text-2xs mt-px;
+  }
+  .log-badge {
+    @apply shrink-0 text-2xs font-bold px-1.5 py-px rounded
+           uppercase tracking-wider mt-px min-w-[38px] text-center;
+  }
+  .log-badge-info  { @apply bg-blue-400/[0.15] text-blue-400; }
+  .log-badge-warn  { @apply bg-orange-400/[0.15] text-orange-400; }
+  .log-badge-error { @apply bg-red-400/[0.15] text-red-400; }
+  .log-badge-debug { @apply bg-slate-400/10 text-slate-500; }
+  .log-stage {
+    @apply shrink-0 text-2xs min-w-[70px] mt-px;
+    color: var(--accent-400);
+  }
+  .log-msg { @apply text-slate-300 break-words; }
+  .log-entry.log-level-debug .log-msg { @apply text-slate-500; }
+
+  /* Decision-colored banners */
+  .banner-auto_approve { @apply border; background: rgba(52, 211, 153, 0.08); border-color: rgba(52, 211, 153, 0.25); }
+  .banner-human_review { @apply border; background: rgba(251, 146, 60, 0.08); border-color: rgba(251, 146, 60, 0.25); }
+  .banner-hard_block   { @apply border; background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.25); }
+  .banner-pending      { @apply bg-slate-800 border border-slate-700/50; }
+  .banner-error        { @apply border; background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.25); }
+
+  /* Decision badges (review table) */
+  .badge-auto_approve { @apply bg-emerald-400/10 text-emerald-400 ring-emerald-400/20; }
+  .badge-human_review { @apply bg-orange-400/10 text-orange-400 ring-orange-400/20; }
+  .badge-hard_block   { @apply bg-red-400/10 text-red-400 ring-red-400/20; }
+  .badge-pending      { @apply bg-slate-400/10 text-slate-400 ring-slate-400/20; }
+  .badge-error        { @apply bg-red-400/10 text-red-400 ring-red-400/20; }
+
+  /* Risk tier badges */
+  .badge-trivial { @apply bg-emerald-400/10 text-emerald-400 ring-emerald-400/20; }
+  .badge-low     { @apply bg-blue-400/10 text-blue-400 ring-blue-400/20; }
+  .badge-medium  { @apply bg-orange-400/10 text-orange-400 ring-orange-400/20; }
+  .badge-high    { @apply bg-red-400/10 text-red-400 ring-red-400/20; }
+
+  /* Stage badges */
+  .stage-badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5
+           text-xs font-semibold ring-1 ring-inset;
+  }
+  .stage-discovery   { @apply bg-blue-400/10 text-blue-400 ring-blue-400/20; }
+  .stage-mechanical  { @apply bg-orange-400/10 text-orange-400 ring-orange-400/20; }
+  .stage-triage      { background-color: color-mix(in srgb, var(--accent-400) 10%, transparent); color: var(--accent-400); --tw-ring-color: color-mix(in srgb, var(--accent-400) 20%, transparent); }
+  .stage-agents      { background-color: color-mix(in srgb, var(--accent-400) 10%, transparent); color: var(--accent-400); --tw-ring-color: color-mix(in srgb, var(--accent-400) 20%, transparent); }
+  .stage-decision    { @apply bg-emerald-400/10 text-emerald-400 ring-emerald-400/20; }
+  .stage-complete    { @apply bg-emerald-400/[0.15] text-emerald-400 ring-emerald-400/20; }
+  .stage-queued      { @apply bg-slate-400/10 text-slate-400 ring-slate-400/20; }
+  .stage-error       { @apply bg-red-400/10 text-red-400 ring-red-400/20; }
+
+  /* Severity badges (findings) */
+  .sev-badge {
+    @apply inline-flex items-center rounded px-1.5 py-px
+           text-2xs font-bold uppercase;
+  }
+  .sev-critical { @apply bg-red-400/[0.15] text-red-400; }
+  .sev-high     { @apply bg-orange-400/[0.15] text-orange-400; }
+  .sev-medium   { @apply bg-yellow-400/[0.15] text-yellow-400; }
+  .sev-low      { @apply bg-slate-400/[0.15] text-slate-500; }
+
+  /* Scan type badges */
+  .type-badge {
+    @apply inline-flex items-center rounded px-2 py-0.5
+           text-2xs font-semibold;
+  }
+  .type-recent_changes { @apply bg-blue-400/[0.15] text-blue-400; }
+  .type-maintenance    { @apply bg-yellow-400/[0.15] text-yellow-400; }
+
+  /* Scan stage badges (used in scans.html) */
+  .scan-stage-badge {
+    @apply inline-flex items-center rounded px-1.5 py-px
+           text-2xs font-medium;
+  }
+  .scan-stage-complete { @apply bg-emerald-400/[0.15] text-emerald-400; }
+  .scan-stage-error    { @apply bg-red-400/[0.15] text-red-400; }
+  .scan-stage-discovery,
+  .scan-stage-scan_discovery,
+  .scan-stage-scan_analysis,
+  .scan-stage-scan_sampling,
+  .scan-stage-scan_report {
+    background-color: color-mix(in srgb, var(--accent-400) 15%, transparent);
+    color: var(--accent-400);
+  }
+
+  /* Verdict badges (agent results) */
+  .verdict-pass       { @apply bg-emerald-400/10 text-emerald-400; }
+  .verdict-warn       { @apply bg-orange-400/10 text-orange-400; }
+  .verdict-flag_human { @apply bg-red-400/10 text-red-400; }
+
+  /* Certainty badge */
+  .cert-badge {
+    @apply text-2xs px-1.5 py-px rounded border border-slate-700/50 text-slate-500;
+  }
+
+  /* Effort estimate colors */
+  .effort-small  { @apply text-emerald-400; }
+  .effort-medium { @apply text-yellow-400; }
+  .effort-large  { @apply text-orange-400; }
+
+  /* Prompt editor (sidebar layout) */
+  .prompt-sidebar-item {
+    @apply flex items-center gap-2 px-4 py-2.5 cursor-pointer
+           text-sm font-medium border-l-[3px] border-transparent
+           transition-all duration-150 text-slate-400;
+  }
+  .prompt-sidebar-item:hover {
+    @apply bg-slate-800;
+  }
+  .prompt-sidebar-item.active {
+    @apply bg-slate-800;
+    color: var(--accent-400);
+    border-left-color: var(--accent-400);
+  }
+
+  /* Toast with slide-in animation */
+  .pg-toast {
+    @apply fixed bottom-6 right-6 px-5 py-3 rounded-xl
+           text-sm font-semibold text-white z-[200]
+           opacity-0 translate-y-2
+           transition-all duration-300;
+  }
+  .pg-toast.show {
+    @apply opacity-100 translate-y-0;
+  }
+  .pg-toast-success { @apply bg-emerald-500; }
+  .pg-toast-error   { @apply bg-red-500; }
+}

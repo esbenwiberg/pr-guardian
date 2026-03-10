@@ -1,0 +1,40 @@
+/*
+ * Tool Design System — Base Styles
+ *
+ * Import this in your tool's main CSS file:
+ *   @import 'tool-design-system/base.css';
+ *
+ * Override the accent for your tool:
+ *   :root {
+ *     --accent-50:  #eff6ff;
+ *     --accent-100: #dbeafe;
+ *     --accent-200: #bfdbfe;
+ *     --accent-300: #93c5fd;
+ *     --accent-400: #60a5fa;
+ *     --accent-500: #3b82f6;
+ *     --accent-600: #2563eb;
+ *     --accent-700: #1d4ed8;
+ *     --accent-800: #1e40af;
+ *     --accent-900: #1e3a8a;
+ *     --accent-950: #172554;
+ *   }
+ */
+
+/* Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* Default accent — Amber (Hive identity) */
+:root {
+  --accent-50:  #fffbeb;
+  --accent-100: #fef3c7;
+  --accent-200: #fde68a;
+  --accent-300: #fcd34d;
+  --accent-400: #fbbf24;
+  --accent-500: #f59e0b;
+  --accent-600: #d97706;
+  --accent-700: #b45309;
+  --accent-800: #92400e;
+  --accent-900: #78350f;
+  --accent-950: #451a03;
+}

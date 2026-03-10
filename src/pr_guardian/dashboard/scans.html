@@ -1,490 +1,127 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PR Guardian — Scans</title>
-<style>
-:root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface2: #232733;
-  --border: #2e3345;
-  --text: #e1e4ed;
-  --text-dim: #8b90a0;
-  --accent: #6c5ce7;
-  --accent-light: #a29bfe;
-  --green: #00b894;
-  --yellow: #fdcb6e;
-  --orange: #e17055;
-  --red: #d63031;
-  --blue: #0984e3;
-  --radius: 10px;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-}
-a { color: var(--accent-light); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-.header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 16px 32px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.header h1 { font-size: 20px; font-weight: 600; }
-.header .logo { font-size: 24px; color: var(--accent-light); }
-.header .nav-links { margin-left: auto; display: flex; gap: 16px; font-size: 13px; }
-.header .nav-links a { color: var(--text-dim); }
-.header .nav-links a:hover { color: var(--accent-light); }
-
-.container { max-width: 1200px; margin: 0 auto; padding: 24px; }
-
-/* Stats row */
-.stats-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 12px;
-  margin-bottom: 24px;
-}
-.stat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 16px 20px;
-}
-.stat-card .label { font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .5px; }
-.stat-card .value { font-size: 22px; font-weight: 700; margin-top: 4px; }
-
-/* Filters */
-.filters {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 16px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-.filters select, .filters button {
-  padding: 6px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-}
-.filters button:hover { border-color: var(--accent); }
-.filters button.active { background: var(--accent); border-color: var(--accent); }
-
-/* Scan list */
-.scan-table {
-  width: 100%;
-  border-collapse: collapse;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
-}
-.scan-table th {
-  text-align: left;
-  padding: 12px 16px;
-  font-size: 11px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  border-bottom: 1px solid var(--border);
-  background: var(--surface2);
-}
-.scan-table td {
-  padding: 12px 16px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--border);
-}
-.scan-table tr:last-child td { border-bottom: none; }
-.scan-table tr:hover { background: var(--surface2); }
-.scan-table .scan-link { color: var(--accent-light); cursor: pointer; }
-
-/* Type badge */
-.type-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-}
-.type-recent_changes { background: rgba(9,132,227,.15); color: var(--blue); }
-.type-maintenance { background: rgba(253,203,110,.15); color: var(--yellow); }
-
-/* Stage badge */
-.stage-badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-}
-.stage-complete { background: rgba(0,184,148,.15); color: var(--green); }
-.stage-error { background: rgba(214,48,49,.15); color: var(--red); }
-.stage-discovery, .stage-scan_discovery, .stage-scan_analysis, .stage-scan_sampling, .stage-scan_report {
-  background: rgba(108,92,231,.15); color: var(--accent-light);
-}
-
-/* Severity badges */
-.sev-badge {
-  font-size: 11px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-weight: 700;
-  text-transform: uppercase;
-}
-.sev-critical { background: rgba(214,48,49,.2); color: var(--red); }
-.sev-high { background: rgba(225,112,85,.2); color: var(--orange); }
-.sev-medium { background: rgba(253,203,110,.2); color: var(--yellow); }
-.sev-low { background: rgba(139,144,160,.2); color: var(--text-dim); }
-
-/* Detail view */
-.detail-view { display: none; }
-.detail-view.visible { display: block; }
-.list-view.hidden { display: none; }
-
-.detail-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 24px;
-}
-.detail-header h2 { font-size: 18px; }
-.detail-header .back-btn {
-  padding: 6px 14px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 13px;
-  cursor: pointer;
-  font-family: inherit;
-}
-
-/* Agent group */
-.agent-group {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 16px;
-  overflow: hidden;
-}
-.agent-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 18px;
-  cursor: pointer;
-  user-select: none;
-}
-.agent-header:hover { background: var(--surface2); }
-.agent-header .toggle { font-size: 12px; color: var(--text-dim); transition: transform .15s; }
-.agent-header .toggle.open { transform: rotate(90deg); }
-.agent-header .agent-name { font-weight: 600; font-size: 15px; }
-.agent-header .verdict-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-weight: 600;
-  text-transform: uppercase;
-}
-.verdict-pass { background: rgba(0,184,148,.15); color: var(--green); }
-.verdict-warn { background: rgba(253,203,110,.15); color: var(--yellow); }
-.verdict-flag_human { background: rgba(225,112,85,.15); color: var(--orange); }
-.agent-header .finding-count { font-size: 12px; color: var(--text-dim); margin-left: auto; }
-
-.findings-list { border-top: 1px solid var(--border); }
-.findings-list.collapsed { display: none; }
-
-.finding-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 12px 18px;
-  border-bottom: 1px solid var(--border);
-}
-.finding-row:last-child { border-bottom: none; }
-.finding-row .f-body { flex: 1; min-width: 0; }
-.finding-row .f-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.f-location {
-  font-size: 12px;
-  color: var(--accent-light);
-  font-family: 'SF Mono', Menlo, monospace;
-}
-.f-category { font-size: 12px; color: var(--text-dim); }
-.f-desc { font-size: 13px; margin-top: 6px; line-height: 1.5; }
-.f-suggestion {
-  font-size: 12px;
-  color: var(--green);
-  margin-top: 4px;
-  padding-left: 12px;
-  border-left: 2px solid var(--green);
-}
-.f-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; display: flex; gap: 12px; }
-.effort-small { color: var(--green); }
-.effort-medium { color: var(--yellow); }
-.effort-large { color: var(--orange); }
-
-.cert-badge {
-  font-size: 10px;
-  padding: 1px 5px;
-  border-radius: 3px;
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-}
-
-/* Summary */
-.summary-box {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 14px 18px;
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--text-dim);
-  margin-bottom: 24px;
-}
-
-.loading { text-align: center; padding: 60px; color: var(--text-dim); font-size: 14px; }
-.empty { text-align: center; padding: 40px; color: var(--text-dim); font-size: 14px; }
-
-/* New Scan button */
-.btn-new-scan {
-  padding: 8px 18px;
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background .15s;
-}
-.btn-new-scan:hover { background: #5b4bd5; }
-
-/* Modal overlay */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.6);
-  z-index: 100;
-  align-items: center;
-  justify-content: center;
-}
-.modal-overlay.open { display: flex; }
-.modal {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 28px 32px;
-  width: 480px;
-  max-width: 90vw;
-}
-.modal h3 { font-size: 17px; margin-bottom: 20px; }
-.modal label {
-  display: block;
-  font-size: 12px;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  letter-spacing: .5px;
-  margin-bottom: 6px;
-  margin-top: 16px;
-}
-.modal label:first-of-type { margin-top: 0; }
-.modal input, .modal select {
-  width: 100%;
-  padding: 9px 12px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text);
-  font-size: 14px;
-  font-family: inherit;
-}
-.modal input:focus, .modal select:focus {
-  outline: none;
-  border-color: var(--accent);
-}
-.modal input::placeholder { color: var(--text-dim); }
-.modal-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 24px;
-  justify-content: flex-end;
-}
-.modal-actions button {
-  padding: 9px 20px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  border: 1px solid var(--border);
-}
-.btn-cancel { background: var(--surface2); color: var(--text); }
-.btn-cancel:hover { border-color: var(--text-dim); }
-.btn-start-recent { background: var(--blue); border-color: var(--blue); color: #fff; }
-.btn-start-recent:hover { background: #0773c5; }
-.btn-start-maintenance { background: #e3a008; border-color: #e3a008; color: #000; }
-.btn-start-maintenance:hover { background: #c98e07; }
-.btn-start-recent:disabled, .btn-start-maintenance:disabled {
-  opacity: .5;
-  cursor: not-allowed;
-}
-/* Scan type tabs inside modal */
-.scan-type-tabs {
-  display: flex;
-  gap: 0;
-  margin-bottom: 20px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  overflow: hidden;
-}
-.scan-type-tab {
-  flex: 1;
-  padding: 10px 0;
-  text-align: center;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  background: var(--surface2);
-  color: var(--text-dim);
-  border: none;
-  font-family: inherit;
-  transition: all .15s;
-}
-.scan-type-tab:not(:last-child) { border-right: 1px solid var(--border); }
-.scan-type-tab.active-recent { background: rgba(9,132,227,.2); color: var(--blue); }
-.scan-type-tab.active-maintenance { background: rgba(253,203,110,.2); color: var(--yellow); }
-.modal-section { display: none; }
-.modal-section.visible { display: block; }
-.toast {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  padding: 12px 20px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  color: #fff;
-  z-index: 200;
-  opacity: 0;
-  transform: translateY(10px);
-  transition: all .3s;
-}
-.toast.show { opacity: 1; transform: translateY(0); }
-.toast-success { background: var(--green); }
-.toast-error { background: var(--red); }
-</style>
+<link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
 
-<div class="header">
-  <span class="logo">&#x1f6e1;</span>
-  <h1>PR Guardian — Scans</h1>
-  <div class="nav-links">
-    <a href="/dashboard">&larr; Dashboard</a>
-    <a href="/scans">Scans</a>
-  </div>
-</div>
+<header class="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 px-6 py-3 flex items-center gap-4 sticky top-0 z-40">
+  <span class="text-2xl">&#x1f6e1;</span>
+  <h1 class="text-lg font-semibold">PR Guardian — Scans</h1>
+  <nav class="ml-auto flex gap-4 text-sm">
+    <a href="/dashboard" class="text-slate-400 hover:text-emerald-400 transition-colors">&larr; Dashboard</a>
+    <a href="/scans" class="text-slate-400 hover:text-emerald-400 transition-colors">Scans</a>
+  </nav>
+</header>
 
-<div class="container">
+<div class="max-w-[1200px] mx-auto px-6 py-6">
   <!-- List view -->
   <div id="list-view" class="list-view">
-    <div id="stats-row" class="stats-row"></div>
+    <div id="stats-row" class="grid grid-cols-4 gap-3 mb-6"></div>
 
-    <div class="filters">
-      <select id="filter-type" onchange="loadScans()">
+    <div class="flex items-center gap-2.5 mb-4 flex-wrap">
+      <select id="filter-type" onchange="loadScans()" class="form-select w-auto">
         <option value="">All Types</option>
         <option value="recent_changes">Recent Changes</option>
         <option value="maintenance">Maintenance</option>
       </select>
-      <button class="btn-new-scan" onclick="openModal()">+ New Scan</button>
+      <button class="btn btn-primary btn-sm" onclick="openModal()">+ New Scan</button>
     </div>
 
-    <div id="scan-list-loading" class="loading">Loading scans...</div>
-    <table class="scan-table" id="scan-table" style="display:none">
-      <thead>
-        <tr>
-          <th>Type</th>
-          <th>Repository</th>
-          <th>Findings</th>
-          <th>Stage</th>
-          <th>Cost</th>
-          <th>Date</th>
-          <th>Duration</th>
-        </tr>
-      </thead>
-      <tbody id="scan-tbody"></tbody>
-    </table>
-    <div id="scan-empty" class="empty" style="display:none">No scans yet. Start one with the button above.</div>
+    <div id="scan-list-loading" class="text-center py-16 text-slate-400 text-sm">Loading scans...</div>
+    <div class="card overflow-hidden" id="scan-table-wrapper" style="display:none">
+      <table class="data-table" id="scan-table">
+        <thead>
+          <tr>
+            <th>Type</th>
+            <th>Repository</th>
+            <th>Findings</th>
+            <th>Stage</th>
+            <th>Cost</th>
+            <th>Date</th>
+            <th>Duration</th>
+          </tr>
+        </thead>
+        <tbody id="scan-tbody"></tbody>
+      </table>
+    </div>
+    <div id="scan-empty" class="empty-state py-10" style="display:none">
+      <p class="empty-state-text">No scans yet. Start one with the button above.</p>
+    </div>
   </div>
 
   <!-- Detail view -->
-  <div id="detail-view" class="detail-view">
-    <div class="detail-header">
-      <button class="back-btn" onclick="showList()">&larr; Back to Scans</button>
-      <h2 id="detail-title">Scan Detail</h2>
+  <div id="detail-view" class="hidden">
+    <div class="flex items-center gap-4 mb-6">
+      <button class="btn btn-secondary btn-sm" onclick="showList()">&larr; Back to Scans</button>
+      <h2 class="text-lg font-semibold" id="detail-title">Scan Detail</h2>
     </div>
 
-    <div class="stats-row" id="detail-stats"></div>
-    <div id="detail-summary" class="summary-box" style="display:none"></div>
+    <div class="grid grid-cols-4 gap-3 mb-6" id="detail-stats"></div>
+    <div id="detail-summary" class="card card-body text-sm leading-relaxed text-slate-400 mb-6" style="display:none"></div>
     <div id="detail-agents"></div>
   </div>
 </div>
 
 <!-- New Scan modal -->
-<div class="modal-overlay" id="scan-modal" onclick="if(event.target===this)closeModal()">
-  <div class="modal">
-    <h3>Start New Scan</h3>
+<div id="scan-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeModal()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-md">
+      <div class="dialog-header">
+        <h3 class="text-base font-semibold">Start New Scan</h3>
+      </div>
+      <div class="dialog-body space-y-4">
+        <div class="tabs-pills">
+          <button class="tab-pill active flex-1 text-center" id="tab-recent" onclick="switchTab('recent')">Recent Changes</button>
+          <button class="tab-pill flex-1 text-center" id="tab-maintenance" onclick="switchTab('maintenance')">Maintenance</button>
+        </div>
 
-    <div class="scan-type-tabs">
-      <button class="scan-type-tab active-recent" id="tab-recent" onclick="switchTab('recent')">Recent Changes</button>
-      <button class="scan-type-tab" id="tab-maintenance" onclick="switchTab('maintenance')">Maintenance</button>
-    </div>
+        <div>
+          <label class="form-label" for="scan-repo">Repository</label>
+          <input id="scan-repo" type="text" class="form-input" placeholder="owner/repo" spellcheck="false">
+        </div>
 
-    <label for="scan-repo">Repository</label>
-    <input id="scan-repo" type="text" placeholder="owner/repo" spellcheck="false">
+        <div>
+          <label class="form-label" for="scan-platform">Platform</label>
+          <select id="scan-platform" class="form-select">
+            <option value="github">GitHub</option>
+            <option value="ado">Azure DevOps</option>
+          </select>
+        </div>
 
-    <label for="scan-platform">Platform</label>
-    <select id="scan-platform">
-      <option value="github">GitHub</option>
-      <option value="ado">Azure DevOps</option>
-    </select>
+        <!-- Recent Changes options -->
+        <div id="section-recent">
+          <label class="form-label" for="scan-days">Time Window (days)</label>
+          <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
+        </div>
 
-    <!-- Recent Changes options -->
-    <div class="modal-section visible" id="section-recent">
-      <label for="scan-days">Time Window (days)</label>
-      <input id="scan-days" type="number" value="7" min="1" max="90">
-    </div>
-
-    <!-- Maintenance options -->
-    <div class="modal-section" id="section-maintenance">
-      <label for="scan-staleness">Staleness Threshold (months)</label>
-      <input id="scan-staleness" type="number" value="6" min="1" max="36">
-      <label for="scan-max-files">Max Files</label>
-      <input id="scan-max-files" type="number" value="50" min="1" max="200">
-    </div>
-
-    <div class="modal-actions">
-      <button class="btn-cancel" onclick="closeModal()">Cancel</button>
-      <button class="btn-start-recent" id="btn-start" onclick="startScan()">Start Scan</button>
+        <!-- Maintenance options -->
+        <div id="section-maintenance" class="hidden">
+          <div class="space-y-4">
+            <div>
+              <label class="form-label" for="scan-staleness">Staleness Threshold (months)</label>
+              <input id="scan-staleness" type="number" class="form-input" value="6" min="1" max="36">
+            </div>
+            <div>
+              <label class="form-label" for="scan-max-files">Max Files</label>
+              <input id="scan-max-files" type="number" class="form-input" value="50" min="1" max="200">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-primary btn-sm" id="btn-start" onclick="startScan()">Start Scan</button>
+      </div>
     </div>
   </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="pg-toast" id="toast"></div>
 
 <script>
 const SCAN_ID = location.pathname.match(/\/scans\/([0-9a-f-]+)/)?.[1] || '';
@@ -508,10 +145,10 @@ async function loadStats() {
     const resp = await fetch('/api/dashboard/scan-stats');
     const data = await resp.json();
     document.getElementById('stats-row').innerHTML = `
-      <div class="stat-card"><div class="label">Total Scans</div><div class="value">${data.total_scans || 0}</div></div>
-      <div class="stat-card"><div class="label">Recent Changes</div><div class="value">${data.type_counts?.recent_changes || 0}</div></div>
-      <div class="stat-card"><div class="label">Maintenance</div><div class="value">${data.type_counts?.maintenance || 0}</div></div>
-      <div class="stat-card"><div class="label">Total Cost</div><div class="value">$${(data.total_cost_usd || 0).toFixed(4)}</div></div>
+      <div class="stat-card"><div class="stat-card-label">Total Scans</div><div class="stat-card-value">${data.total_scans || 0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">Recent Changes</div><div class="stat-card-value">${data.type_counts?.recent_changes || 0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">Maintenance</div><div class="stat-card-value">${data.type_counts?.maintenance || 0}</div></div>
+      <div class="stat-card"><div class="stat-card-label">Total Cost</div><div class="stat-card-value">$${(data.total_cost_usd || 0).toFixed(4)}</div></div>
     `;
   } catch (e) { console.error('Stats load failed:', e); }
 }
@@ -529,18 +166,18 @@ async function loadScans() {
 
     if (!Array.isArray(scans) || !scans.length) {
       document.getElementById('scan-empty').style.display = '';
-      document.getElementById('scan-table').style.display = 'none';
+      document.getElementById('scan-table-wrapper').style.display = 'none';
       return;
     }
 
     document.getElementById('scan-empty').style.display = 'none';
-    document.getElementById('scan-table').style.display = '';
+    document.getElementById('scan-table-wrapper').style.display = '';
     document.getElementById('scan-tbody').innerHTML = scans.map(s => `
       <tr>
         <td><span class="type-badge type-${s.scan_type}">${TYPE_LABELS[s.scan_type] || s.scan_type}</span></td>
-        <td><a class="scan-link" onclick="loadDetail('${s.id}')">${esc(s.repo)}</a></td>
+        <td><a class="text-emerald-400 hover:text-emerald-300 cursor-pointer transition-colors" onclick="loadDetail('${s.id}')">${esc(s.repo)}</a></td>
         <td>${s.total_findings}</td>
-        <td><span class="stage-badge stage-${s.stage}">${s.stage}</span></td>
+        <td><span class="scan-stage-badge scan-stage-${s.stage}">${s.stage}</span></td>
         <td>${s.cost_usd ? '$' + s.cost_usd.toFixed(4) : '-'}</td>
         <td>${s.started_at ? new Date(s.started_at).toLocaleDateString() : '-'}</td>
         <td>${s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + 's' : '-'}</td>
@@ -549,7 +186,7 @@ async function loadScans() {
   } catch (e) {
     document.getElementById('scan-list-loading').style.display = 'none';
     document.getElementById('scan-empty').style.display = '';
-    document.getElementById('scan-empty').textContent = 'No scans yet. Start one with the button above.';
+    document.getElementById('scan-empty').querySelector('.empty-state-text').textContent = 'No scans yet. Start one with the button above.';
     console.error(e);
   }
 }
@@ -570,7 +207,7 @@ async function loadDetail(id) {
 
 function renderDetail(d) {
   document.getElementById('list-view').classList.add('hidden');
-  document.getElementById('detail-view').classList.add('visible');
+  document.getElementById('detail-view').classList.remove('hidden');
 
   const typeLabel = TYPE_LABELS[d.scan_type] || d.scan_type;
   document.getElementById('detail-title').textContent = `${typeLabel} — ${d.repo}`;
@@ -578,11 +215,11 @@ function renderDetail(d) {
 
   const totalFindings = d.total_findings || 0;
   document.getElementById('detail-stats').innerHTML = `
-    <div class="stat-card"><div class="label">Type</div><div class="value"><span class="type-badge type-${d.scan_type}">${typeLabel}</span></div></div>
-    <div class="stat-card"><div class="label">Findings</div><div class="value">${totalFindings}</div></div>
-    <div class="stat-card"><div class="label">Duration</div><div class="value">${d.duration_ms ? (d.duration_ms / 1000).toFixed(1) + 's' : '-'}</div></div>
-    <div class="stat-card"><div class="label">Cost</div><div class="value">${d.cost_usd ? '$' + d.cost_usd.toFixed(4) : '-'}</div></div>
-    <div class="stat-card"><div class="label">${d.scan_type === 'recent_changes' ? 'Window' : 'Staleness'}</div><div class="value">${d.scan_type === 'recent_changes' ? d.time_window_days + 'd' : d.staleness_months + 'mo'}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Type</div><div class="stat-card-value"><span class="type-badge type-${d.scan_type}">${typeLabel}</span></div></div>
+    <div class="stat-card"><div class="stat-card-label">Findings</div><div class="stat-card-value">${totalFindings}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Duration</div><div class="stat-card-value">${d.duration_ms ? (d.duration_ms / 1000).toFixed(1) + 's' : '-'}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Cost</div><div class="stat-card-value">${d.cost_usd ? '$' + d.cost_usd.toFixed(4) : '-'}</div></div>
+    <div class="stat-card"><div class="stat-card-label">${d.scan_type === 'recent_changes' ? 'Window' : 'Staleness'}</div><div class="stat-card-value">${d.scan_type === 'recent_changes' ? d.time_window_days + 'd' : d.staleness_months + 'mo'}</div></div>
   `;
 
   if (d.summary) {
@@ -598,21 +235,21 @@ function renderDetail(d) {
       const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
       const findings = agent.findings || [];
       return `
-        <div class="agent-group">
-          <div class="agent-header" onclick="toggleAgent(${ai})">
-            <span class="toggle" id="toggle-${ai}">\u25b6</span>
-            <span class="agent-name">${esc(label)}</span>
-            <span class="verdict-badge verdict-${agent.verdict}">${agent.verdict}</span>
-            <span class="finding-count">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
+        <div class="card mb-4 overflow-hidden">
+          <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/30 transition-colors" onclick="toggleAgent(${ai})">
+            <span class="text-xs text-slate-400 transition-transform duration-150" id="toggle-${ai}">&#x25b6;</span>
+            <span class="font-semibold text-sm">${esc(label)}</span>
+            <span class="verdict-${agent.verdict} text-2xs font-semibold uppercase px-2 py-0.5 rounded">${agent.verdict}</span>
+            <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
           </div>
-          <div class="findings-list collapsed" id="findings-${ai}">
-            ${agent.summary ? `<div style="padding:10px 18px;font-size:12px;color:var(--text-dim);border-bottom:1px solid var(--border)">${esc(agent.summary)}</div>` : ''}
+          <div class="border-t border-slate-700/50 hidden" id="findings-${ai}">
+            ${agent.summary ? `<div class="px-5 py-2.5 text-xs text-slate-400 border-b border-slate-700/50">${esc(agent.summary)}</div>` : ''}
             ${findings.map(f => renderFinding(f)).join('')}
           </div>
         </div>`;
     }).join('');
   } else {
-    document.getElementById('detail-agents').innerHTML = '<div class="empty">No agent results available.</div>';
+    document.getElementById('detail-agents').innerHTML = '<div class="empty-state py-10"><p class="empty-state-text">No agent results available.</p></div>';
   }
 }
 
@@ -620,17 +257,17 @@ function renderFinding(f) {
   const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
   const effortClass = f.effort_estimate ? `effort-${f.effort_estimate}` : '';
   return `
-    <div class="finding-row">
-      <div class="f-body">
-        <div class="f-top">
+    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
           <span class="sev-badge sev-${f.severity}">${f.severity}</span>
           <span class="cert-badge">${f.certainty}</span>
-          ${loc ? `<span class="f-location">${esc(loc)}</span>` : ''}
-          ${f.category ? `<span class="f-category">${esc(f.category)}</span>` : ''}
+          ${loc ? `<span class="text-xs text-emerald-400 font-mono">${esc(loc)}</span>` : ''}
+          ${f.category ? `<span class="text-xs text-slate-400">${esc(f.category)}</span>` : ''}
         </div>
-        <div class="f-desc">${esc(f.description || '')}</div>
-        ${f.suggestion ? `<div class="f-suggestion">${esc(f.suggestion)}</div>` : ''}
-        <div class="f-meta">
+        <div class="text-sm mt-1.5 leading-relaxed">${esc(f.description || '')}</div>
+        ${f.suggestion ? `<div class="text-xs text-emerald-400 mt-1 pl-3 border-l-2 border-emerald-400">${esc(f.suggestion)}</div>` : ''}
+        <div class="text-2xs text-slate-400 mt-1 flex gap-3">
           ${f.priority != null ? `<span>Priority: ${(f.priority * 100).toFixed(0)}%</span>` : ''}
           ${f.effort_estimate ? `<span class="${effortClass}">Effort: ${f.effort_estimate}</span>` : ''}
           ${f.last_modified ? `<span>Last modified: ${f.last_modified.split('T')[0]}</span>` : ''}
@@ -642,13 +279,17 @@ function renderFinding(f) {
 function toggleAgent(ai) {
   const list = document.getElementById(`findings-${ai}`);
   const toggle = document.getElementById(`toggle-${ai}`);
-  const collapsed = list.classList.toggle('collapsed');
-  toggle.classList.toggle('open', !collapsed);
+  const isHidden = list.classList.toggle('hidden');
+  if (!isHidden) {
+    toggle.style.transform = 'rotate(90deg)';
+  } else {
+    toggle.style.transform = '';
+  }
 }
 
 function showList() {
   document.getElementById('list-view').classList.remove('hidden');
-  document.getElementById('detail-view').classList.remove('visible');
+  document.getElementById('detail-view').classList.add('hidden');
   history.pushState(null, '', '/scans');
 }
 
@@ -656,26 +297,24 @@ function showList() {
 let currentTab = 'recent';
 
 function openModal() {
-  document.getElementById('scan-modal').classList.add('open');
+  document.getElementById('scan-modal').classList.remove('hidden');
   document.getElementById('scan-repo').focus();
 }
 
 function closeModal() {
-  document.getElementById('scan-modal').classList.remove('open');
+  document.getElementById('scan-modal').classList.add('hidden');
 }
 
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('tab-recent').className = 'scan-type-tab' + (tab === 'recent' ? ' active-recent' : '');
-  document.getElementById('tab-maintenance').className = 'scan-type-tab' + (tab === 'maintenance' ? ' active-maintenance' : '');
-  document.getElementById('section-recent').classList.toggle('visible', tab === 'recent');
-  document.getElementById('section-maintenance').classList.toggle('visible', tab === 'maintenance');
+  document.getElementById('tab-recent').classList.toggle('active', tab === 'recent');
+  document.getElementById('tab-maintenance').classList.toggle('active', tab === 'maintenance');
+  document.getElementById('section-recent').classList.toggle('hidden', tab !== 'recent');
+  document.getElementById('section-maintenance').classList.toggle('hidden', tab !== 'maintenance');
   const btn = document.getElementById('btn-start');
   if (tab === 'recent') {
-    btn.className = 'btn-start-recent';
     btn.textContent = 'Start Recent Changes Scan';
   } else {
-    btn.className = 'btn-start-maintenance';
     btn.textContent = 'Start Maintenance Scan';
   }
 }
@@ -742,7 +381,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 function showToast(msg, type) {
   const el = document.getElementById('toast');
   el.textContent = msg;
-  el.className = `toast toast-${type} show`;
+  el.className = `pg-toast pg-toast-${type} show`;
   setTimeout(() => el.classList.remove('show'), 4000);
 }
 

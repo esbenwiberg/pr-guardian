@@ -1,833 +1,150 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PR Guardian Dashboard</title>
-<style>
-:root {
-  --bg: #0f1117;
-  --surface: #1a1d27;
-  --surface2: #232733;
-  --border: #2e3345;
-  --text: #e1e4ed;
-  --text-dim: #8b90a0;
-  --accent: #6c5ce7;
-  --accent-light: #a29bfe;
-  --green: #00b894;
-  --yellow: #fdcb6e;
-  --orange: #e17055;
-  --red: #d63031;
-  --blue: #0984e3;
-  --radius: 10px;
-}
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-}
-a { color: var(--accent-light); text-decoration: none; }
-a:hover { text-decoration: underline; }
-
-/* Header */
-.header {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
-  padding: 16px 32px;
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.header h1 { font-size: 20px; font-weight: 600; }
-.header .logo { font-size: 24px; color: var(--accent-light); }
-.header .review-btn {
-  padding: 6px 14px;
-  background: var(--accent);
-  border: none;
-  border-radius: 6px;
-  color: white;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-left: auto;
-}
-.header .review-btn:hover { background: var(--accent-light); color: var(--bg); }
-.header .status-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--green);
-  animation: pulse 2s infinite;
-}
-.header .status-label { font-size: 12px; color: var(--text-dim); }
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.4; }
-}
-
-/* Layout */
-.container { max-width: 1400px; margin: 0 auto; padding: 24px; }
-
-/* Stats cards */
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 16px;
-  margin-bottom: 24px;
-}
-.stat-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-}
-.stat-card .label { font-size: 12px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
-.stat-card .value { font-size: 32px; font-weight: 700; margin-top: 4px; }
-.stat-card .sub { font-size: 12px; color: var(--text-dim); margin-top: 4px; }
-
-/* Sections */
-.section {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 24px;
-  overflow: hidden;
-}
-.section-header {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-.section-header h2 { font-size: 16px; font-weight: 600; }
-.section-body { padding: 0; }
-
-/* Active reviews */
-.active-review {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-.active-review:last-child { border-bottom: none; }
-.active-review { cursor: pointer; transition: background 0.15s; }
-.active-review:hover { background: var(--surface2); }
-.active-review .stage-badge {
-  font-size: 11px;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.stage-discovery { background: rgba(9,132,227,0.15); color: var(--blue); }
-.stage-mechanical { background: rgba(253,203,110,0.15); color: var(--yellow); }
-.stage-triage { background: rgba(162,155,254,0.15); color: var(--accent-light); }
-.stage-agents { background: rgba(108,92,231,0.15); color: var(--accent); }
-.stage-decision { background: rgba(0,184,148,0.15); color: var(--green); }
-.stage-complete { background: rgba(0,184,148,0.2); color: var(--green); }
-.stage-queued { background: rgba(139,144,160,0.15); color: var(--text-dim); }
-.stage-error { background: rgba(214,48,49,0.15); color: var(--red); }
-
-.active-review .pr-info { flex: 1; }
-.active-review .pr-info .pr-title { font-weight: 500; font-size: 14px; }
-.active-review .pr-info .pr-meta { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-.active-review .elapsed { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
-.cancel-review-btn { background: none; border: 1px solid var(--border); color: var(--text-dim); cursor: pointer; border-radius: 4px; font-size: 16px; line-height: 1; padding: 2px 6px; margin-left: 8px; transition: all 0.15s; }
-.cancel-review-btn:hover { color: var(--red); border-color: var(--red); }
-
-/* Pipeline progress bar */
-.pipeline {
-  display: flex;
-  gap: 2px;
-  height: 4px;
-  margin-top: 8px;
-}
-.pipeline .step {
-  flex: 1;
-  border-radius: 2px;
-  background: var(--border);
-  transition: background 0.3s;
-}
-.pipeline .step.done { background: var(--green); }
-.pipeline .step.active { background: var(--accent-light); animation: pulse 1.5s infinite; }
-.pipeline .step.error { background: var(--red); }
-
-/* Review table */
-.review-table { width: 100%; border-collapse: collapse; }
-.review-table th {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  color: var(--text-dim);
-  text-align: left;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--border);
-  font-weight: 500;
-}
-.review-table td {
-  padding: 12px 16px;
-  font-size: 13px;
-  border-bottom: 1px solid var(--border);
-  vertical-align: middle;
-}
-.review-table tr:hover { background: var(--surface2); cursor: pointer; }
-
-/* Decision badges */
-.badge {
-  display: inline-block;
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-weight: 600;
-}
-.badge-auto_approve { background: rgba(0,184,148,0.15); color: var(--green); }
-.badge-human_review { background: rgba(253,203,110,0.15); color: var(--yellow); }
-.badge-hard_block { background: rgba(214,48,49,0.15); color: var(--red); }
-.badge-pending { background: rgba(139,144,160,0.15); color: var(--text-dim); }
-.badge-error { background: rgba(214,48,49,0.15); color: var(--red); }
-
-.badge-trivial { background: rgba(0,184,148,0.1); color: var(--green); }
-.badge-low { background: rgba(9,132,227,0.1); color: var(--blue); }
-.badge-medium { background: rgba(253,203,110,0.1); color: var(--yellow); }
-.badge-high { background: rgba(214,48,49,0.1); color: var(--red); }
-
-/* Charts row */
-.charts-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 24px;
-  margin-bottom: 24px;
-}
-.chart-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 20px;
-}
-.chart-card h3 { font-size: 14px; margin-bottom: 16px; font-weight: 600; }
-
-/* Donut chart (CSS only) */
-.donut-container { display: flex; align-items: center; gap: 24px; }
-.donut {
-  width: 120px; height: 120px;
-  border-radius: 50%;
-  position: relative;
-  flex-shrink: 0;
-}
-.donut-hole {
-  position: absolute;
-  top: 50%; left: 50%;
-  transform: translate(-50%, -50%);
-  width: 70px; height: 70px;
-  border-radius: 50%;
-  background: var(--surface);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  font-weight: 700;
-}
-.legend { display: flex; flex-direction: column; gap: 8px; }
-.legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-
-/* Bar chart (CSS only) */
-.bar-chart { display: flex; flex-direction: column; gap: 10px; }
-.bar-row { display: flex; align-items: center; gap: 12px; }
-.bar-label { width: 70px; font-size: 12px; color: var(--text-dim); text-align: right; }
-.bar-track { flex: 1; height: 20px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
-.bar-fill { height: 100%; border-radius: 4px; transition: width 0.5s ease; display: flex; align-items: center; padding-left: 8px; font-size: 11px; font-weight: 600; }
-.bar-count { width: 40px; font-size: 12px; text-align: right; font-variant-numeric: tabular-nums; }
-
-/* Modal overlay */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.65);
-  backdrop-filter: blur(4px);
-  z-index: 100;
-  align-items: center;
-  justify-content: center;
-}
-.modal-overlay.open { display: flex; }
-.modal {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  width: 92%;
-  max-width: 860px;
-  max-height: 85vh;
-  overflow-y: auto;
-  padding: 28px 32px;
-  box-shadow: 0 24px 64px rgba(0,0,0,0.5);
-}
-.modal::-webkit-scrollbar { width: 6px; }
-.modal::-webkit-scrollbar-track { background: transparent; }
-.modal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-.modal-top-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-bottom: 4px;
-}
-.modal .close-btn, .modal .export-md-btn {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  height: 32px;
-  border-radius: 8px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-.modal .close-btn { width: 32px; font-size: 18px; }
-.modal .export-md-btn { padding: 0 12px; gap: 4px; font-family: inherit; }
-.modal .close-btn:hover { color: var(--text); background: var(--surface2); border-color: var(--text-dim); }
-.modal .export-md-btn:hover { color: var(--accent-light); background: var(--surface2); border-color: var(--accent); }
-
-/* Modal header */
-.modal-header { margin-bottom: 20px; }
-.modal-header h2 { font-size: 20px; font-weight: 700; margin-bottom: 6px; line-height: 1.3; }
-.modal-header .modal-meta { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.modal-header .modal-meta code { font-size: 11px; background: var(--surface); padding: 1px 6px; border-radius: 4px; }
-
-/* Decision banner */
-.decision-banner {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 14px 18px;
-  border-radius: 10px;
-  margin-bottom: 20px;
-}
-.decision-banner.banner-auto_approve { background: rgba(0,184,148,0.08); border: 1px solid rgba(0,184,148,0.25); }
-.decision-banner.banner-human_review { background: rgba(253,203,110,0.08); border: 1px solid rgba(253,203,110,0.25); }
-.decision-banner.banner-hard_block { background: rgba(214,48,49,0.08); border: 1px solid rgba(214,48,49,0.25); }
-.decision-banner.banner-pending { background: var(--surface); border: 1px solid var(--border); }
-.decision-banner.banner-error { background: rgba(214,48,49,0.08); border: 1px solid rgba(214,48,49,0.25); }
-.decision-banner .banner-icon { font-size: 24px; }
-.decision-banner .banner-text { flex: 1; }
-.decision-banner .banner-label { font-size: 15px; font-weight: 600; }
-.decision-banner .banner-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
-
-/* Pipeline steps */
-.modal-pipeline {
-  display: flex;
-  gap: 3px;
-  margin-bottom: 20px;
-}
-.modal-pipeline .pipe-step {
-  flex: 1;
-  text-align: center;
-  padding: 7px 2px;
-  border-radius: 6px;
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  background: var(--surface);
-  color: var(--text-dim);
-  border: 1px solid transparent;
-  transition: all 0.2s;
-}
-.modal-pipeline .pipe-step.done {
-  background: rgba(0,184,148,0.12);
-  color: var(--green);
-  border-color: rgba(0,184,148,0.2);
-}
-.modal-pipeline .pipe-step.active {
-  background: rgba(162,155,254,0.15);
-  color: var(--accent-light);
-  border-color: rgba(162,155,254,0.3);
-  animation: pulse 1.5s infinite;
-}
-.modal-pipeline .pipe-step.error {
-  background: rgba(214,48,49,0.12);
-  color: var(--red);
-  border-color: rgba(214,48,49,0.2);
-}
-
-/* Stage detail bar */
-.modal-stage-detail {
-  background: rgba(162,155,254,0.08);
-  border: 1px solid rgba(162,155,254,0.2);
-  border-radius: 8px;
-  padding: 10px 16px;
-  margin-bottom: 20px;
-  font-size: 13px;
-  color: var(--accent-light);
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.modal-stage-detail .stage-icon {
-  font-size: 14px;
-  animation: spin 1.5s linear infinite;
-}
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
-/* Info cards grid */
-.info-cards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-  margin-bottom: 20px;
-}
-.info-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-}
-.info-card .info-label { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 4px; }
-.info-card .info-value { font-size: 14px; font-weight: 600; }
-
-/* Section cards */
-.modal-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  margin-bottom: 14px;
-  overflow: hidden;
-}
-.modal-card-header {
-  padding: 12px 16px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: var(--surface);
-}
-.modal-card-header h3 {
-  font-size: 13px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.4px;
-  color: var(--text-dim);
-}
-.modal-card-header .card-count {
-  font-size: 11px;
-  background: var(--surface2);
-  padding: 2px 8px;
-  border-radius: 10px;
-  color: var(--text-dim);
-}
-.modal-card-body { padding: 14px 16px; }
-
-/* Escalation list */
-.escalation-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 8px 0;
-  font-size: 13px;
-  color: var(--yellow);
-  border-bottom: 1px solid var(--border);
-}
-.escalation-item:last-child { border-bottom: none; }
-.escalation-item .esc-icon { flex-shrink: 0; margin-top: 1px; }
-
-/* Mechanical check items */
-.mech-grid {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.mech-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 14px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px;
-}
-.mech-item .mech-icon { font-size: 16px; flex-shrink: 0; }
-.mech-item .mech-name { font-weight: 600; }
-.mech-item .mech-error { font-size: 12px; color: var(--yellow); }
-.mech-item .mech-count { font-size: 11px; color: var(--text-dim); }
-
-/* Agent result card */
-.agent-card {
-  background: var(--surface2);
-  border-radius: 8px;
-  margin-bottom: 10px;
-  overflow: hidden;
-}
-.agent-card:last-child { margin-bottom: 0; }
-.agent-card-header {
-  padding: 10px 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.agent-card-header:hover { background: rgba(255,255,255,0.03); }
-.agent-card-header .agent-name { font-weight: 600; font-size: 13px; }
-.agent-card-header .agent-meta { margin-left: auto; font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 8px; }
-.agent-card-header .chevron { transition: transform 0.2s; font-size: 12px; color: var(--text-dim); }
-.agent-card-header .chevron.open { transform: rotate(90deg); }
-.agent-card-findings { padding: 0 14px 12px; }
-
-/* Finding card */
-.finding-card {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 12px 14px;
-  margin-bottom: 8px;
-}
-.finding-card:last-child { margin-bottom: 0; }
-.finding-card .finding-header {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-  flex-wrap: wrap;
-}
-.finding-card .finding-file { font-size: 11px; color: var(--text-dim); margin-left: auto; font-family: monospace; }
-.finding-card .finding-desc { font-size: 13px; color: var(--text); line-height: 1.5; }
-.finding-card .finding-suggestion { font-size: 12px; color: var(--accent-light); margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--border); }
-.finding-card .finding-cwe { font-size: 10px; color: var(--text-dim); margin-top: 4px; }
-
-/* Pipeline log */
-.pipeline-log { max-height: 400px; overflow-y: auto; }
-.pipeline-log::-webkit-scrollbar { width: 5px; }
-.pipeline-log::-webkit-scrollbar-track { background: transparent; }
-.pipeline-log::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-.log-entry {
-  display: flex;
-  gap: 8px;
-  padding: 5px 10px;
-  font-size: 12px;
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  border-bottom: 1px solid rgba(46,51,69,0.5);
-  line-height: 1.5;
-}
-.log-entry:hover { background: rgba(255,255,255,0.02); }
-.log-ts { color: var(--text-dim); flex-shrink: 0; min-width: 70px; font-size: 10px; margin-top: 1px; }
-.log-badge {
-  flex-shrink: 0;
-  font-size: 9px;
-  font-weight: 700;
-  padding: 1px 5px;
-  border-radius: 3px;
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-top: 1px;
-  min-width: 38px;
-  text-align: center;
-}
-.log-badge-info { background: rgba(9,132,227,0.15); color: var(--blue); }
-.log-badge-warn { background: rgba(253,203,110,0.15); color: var(--yellow); }
-.log-badge-error { background: rgba(214,48,49,0.15); color: var(--red); }
-.log-badge-debug { background: rgba(139,144,160,0.1); color: var(--text-dim); }
-.log-stage {
-  flex-shrink: 0;
-  font-size: 10px;
-  color: var(--accent-light);
-  min-width: 70px;
-  margin-top: 1px;
-}
-.log-msg { color: var(--text); word-break: break-word; }
-.log-entry.log-level-debug .log-msg { color: var(--text-dim); }
-.log-toggle {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  color: var(--text-dim);
-  padding: 6px 14px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.log-toggle:hover { color: var(--text); border-color: var(--text-dim); }
-.log-toggle .arrow { transition: transform 0.2s; font-size: 10px; }
-.log-toggle .arrow.open { transform: rotate(90deg); }
-
-/* Summary */
-.modal-summary {
-  font-size: 13px;
-  line-height: 1.7;
-  white-space: pre-wrap;
-  color: var(--text);
-  padding: 2px 0;
-}
-
-/* Empty state */
-.empty-state {
-  padding: 40px;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 14px;
-}
-
-/* Prompt editor */
-.prompt-modal { max-width: 1000px; display: flex; flex-direction: column; }
-.prompt-layout { display: flex; gap: 0; min-height: 500px; }
-.prompt-sidebar {
-  width: 220px;
-  flex-shrink: 0;
-  border-right: 1px solid var(--border);
-  padding: 12px 0;
-  overflow-y: auto;
-}
-.prompt-sidebar-item {
-  padding: 10px 16px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  border-left: 3px solid transparent;
-  transition: all 0.15s;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.prompt-sidebar-item:hover { background: var(--surface); }
-.prompt-sidebar-item.active {
-  background: var(--surface);
-  border-left-color: var(--accent-light);
-  color: var(--accent-light);
-}
-.prompt-sidebar-item .override-dot {
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--yellow);
-  flex-shrink: 0;
-}
-.prompt-editor {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  padding: 16px 20px;
-  min-width: 0;
-}
-.prompt-editor-header {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
-.prompt-editor-header h3 { font-size: 15px; font-weight: 600; }
-.prompt-editor-header .override-badge {
-  font-size: 10px;
-  padding: 2px 8px;
-  border-radius: 10px;
-  background: rgba(253,203,110,0.15);
-  color: var(--yellow);
-  font-weight: 600;
-}
-.prompt-textarea {
-  flex: 1;
-  width: 100%;
-  min-height: 320px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  color: var(--text);
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 12.5px;
-  line-height: 1.6;
-  padding: 14px;
-  resize: vertical;
-  outline: none;
-  transition: border-color 0.15s;
-}
-.prompt-textarea:focus { border-color: var(--accent); }
-.prompt-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 12px;
-}
-.prompt-actions .btn-save {
-  padding: 8px 20px;
-  background: var(--accent);
-  border: none;
-  border-radius: 6px;
-  color: white;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.prompt-actions .btn-save:hover { background: var(--accent-light); color: var(--bg); }
-.prompt-actions .btn-reset {
-  padding: 8px 16px;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-dim);
-  font-size: 13px;
-  cursor: pointer;
-}
-.prompt-actions .btn-reset:hover { color: var(--text); border-color: var(--text-dim); }
-.prompt-actions .prompt-status {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-.prompt-ref-section {
-  margin-top: 14px;
-  border-top: 1px solid var(--border);
-  padding-top: 10px;
-}
-.prompt-ref-toggle {
-  font-size: 12px;
-  color: var(--text-dim);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: none;
-  border: none;
-  padding: 0;
-}
-.prompt-ref-toggle:hover { color: var(--text); }
-.prompt-ref-content {
-  display: none;
-  margin-top: 8px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 12px;
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  font-size: 11px;
-  line-height: 1.5;
-  color: var(--text-dim);
-  white-space: pre-wrap;
-  max-height: 200px;
-  overflow-y: auto;
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-  .charts-row { grid-template-columns: 1fr; }
-  .stats-grid { grid-template-columns: repeat(2, 1fr); }
-  .container { padding: 16px; }
-  .prompt-layout { flex-direction: column; }
-  .prompt-sidebar { width: 100%; border-right: none; border-bottom: 1px solid var(--border); flex-direction: row; overflow-x: auto; display: flex; }
-}
-</style>
+<link rel="stylesheet" href="/static/styles.css">
 </head>
-<body>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
 
-<div class="header">
-  <span class="logo">&#9781;</span>
-  <h1>PR Guardian</h1>
-  <a href="/scans" class="review-btn" style="background:var(--surface2);border:1px solid var(--border);text-decoration:none;color:var(--text)">Scans</a>
-  <button class="review-btn" onclick="openPromptEditor()" style="background:var(--surface2);border:1px solid var(--border)">Prompts</button>
-  <button class="review-btn" onclick="openReviewModal()">+ Review PR</button>
-  <div class="status-dot" id="status-dot"></div>
-  <span class="status-label" id="status-label">Connecting...</span>
-</div>
+<!-- Header -->
+<header class="bg-slate-800/80 backdrop-blur border-b border-slate-700/50 px-6 py-3 flex items-center gap-4 sticky top-0 z-40">
+  <span class="text-2xl text-emerald-400">&#9781;</span>
+  <h1 class="text-lg font-semibold">PR Guardian</h1>
+  <a href="/scans" class="btn btn-secondary btn-sm ml-auto">Scans</a>
+  <button class="btn btn-secondary btn-sm" onclick="openPromptEditor()">Prompts</button>
+  <button class="btn btn-primary btn-sm" onclick="openReviewModal()">+ Review PR</button>
+  <div class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" id="status-dot"></div>
+  <span class="text-xs text-slate-400" id="status-label">Connecting...</span>
+</header>
 
-<div class="modal-overlay" id="review-modal-overlay">
-  <div class="modal" style="max-width:500px">
-    <button class="close-btn" onclick="closeReviewModal()">&#10005;</button>
-    <div class="modal-header"><h2>Trigger PR Review</h2></div>
-    <form id="review-form" onsubmit="submitReview(event)">
-      <div style="margin-bottom:14px">
-        <label style="font-size:12px;color:var(--text-dim);display:block;margin-bottom:6px">PR URL</label>
-        <input type="url" id="review-pr-url" required placeholder="https://github.com/org/repo/pull/123"
-          style="width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);font-size:14px;outline:none">
+<!-- Review Modal -->
+<div id="review-modal-overlay" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeReviewModal()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-md">
+      <div class="dialog-header">
+        <h2 class="text-lg font-bold">Trigger PR Review</h2>
+        <button class="btn btn-ghost btn-icon btn-sm" onclick="closeReviewModal()">&#10005;</button>
       </div>
-      <div style="margin-bottom:14px;display:flex;gap:12px">
-        <label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer">
-          <input type="checkbox" id="review-post-comment"> Post comment on PR
-        </label>
-      </div>
-      <div style="display:flex;gap:10px;justify-content:flex-end">
-        <button type="button" onclick="closeReviewModal()" style="padding:8px 16px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);cursor:pointer">Cancel</button>
-        <button type="submit" id="review-submit-btn" style="padding:8px 20px;background:var(--accent);border:none;border-radius:6px;color:white;cursor:pointer;font-weight:600">Start Review</button>
-      </div>
-      <div id="review-status" style="margin-top:12px;font-size:13px;display:none"></div>
-    </form>
+      <form id="review-form" onsubmit="submitReview(event)">
+        <div class="dialog-body space-y-4">
+          <div>
+            <label class="form-label" for="review-pr-url">PR URL</label>
+            <input type="url" id="review-pr-url" required placeholder="https://github.com/org/repo/pull/123" class="form-input w-full">
+          </div>
+          <div>
+            <label class="flex items-center gap-2 text-sm cursor-pointer">
+              <input type="checkbox" id="review-post-comment" class="form-checkbox"> Post comment on PR
+            </label>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <div id="review-status" class="text-sm hidden mr-auto"></div>
+          <button type="button" onclick="closeReviewModal()" class="btn btn-secondary btn-sm">Cancel</button>
+          <button type="submit" id="review-submit-btn" class="btn btn-primary btn-sm">Start Review</button>
+        </div>
+      </form>
+    </div>
   </div>
 </div>
 
-<div class="container">
+<div class="max-w-[1400px] mx-auto p-6">
   <!-- Stats -->
-  <div class="stats-grid" id="stats-grid">
-    <div class="stat-card"><div class="label">Total Reviews</div><div class="value" id="stat-total">-</div></div>
-    <div class="stat-card"><div class="label">Auto-Approved</div><div class="value" style="color:var(--green)" id="stat-approved">-</div></div>
-    <div class="stat-card"><div class="label">Human Review</div><div class="value" style="color:var(--yellow)" id="stat-human">-</div></div>
-    <div class="stat-card"><div class="label">Blocked</div><div class="value" style="color:var(--red)" id="stat-blocked">-</div></div>
-    <div class="stat-card"><div class="label">Avg Score</div><div class="value" id="stat-avg-score">-</div></div>
-    <div class="stat-card"><div class="label">Avg Duration</div><div class="value" id="stat-avg-duration">-</div></div>
-    <div class="stat-card"><div class="label">Avg Cost</div><div class="value" style="color:var(--accent-light)" id="stat-avg-cost">-</div><div class="sub" id="stat-total-cost"></div></div>
+  <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 mb-6" id="stats-grid">
+    <div class="stat-card">
+      <div class="stat-card-label">Total Reviews</div>
+      <div class="stat-card-value" id="stat-total">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Auto-Approved</div>
+      <div class="stat-card-value text-emerald-400" id="stat-approved">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Human Review</div>
+      <div class="stat-card-value text-orange-400" id="stat-human">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Blocked</div>
+      <div class="stat-card-value text-red-400" id="stat-blocked">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Avg Score</div>
+      <div class="stat-card-value" id="stat-avg-score">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Avg Duration</div>
+      <div class="stat-card-value" id="stat-avg-duration">-</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-card-label">Avg Cost</div>
+      <div class="stat-card-value text-emerald-400" id="stat-avg-cost">-</div>
+      <div class="text-xs text-slate-400 mt-1" id="stat-total-cost"></div>
+    </div>
   </div>
 
   <!-- Active Reviews -->
-  <div class="section" id="active-section">
-    <div class="section-header">
-      <h2>Active Reviews</h2>
-      <span class="badge badge-pending" id="active-count">0 active</span>
+  <div class="card mb-6" id="active-section">
+    <div class="card-header">
+      <h2 class="text-base font-semibold">Active Reviews</h2>
+      <span class="badge badge-neutral" id="active-count">0 active</span>
     </div>
-    <div class="section-body" id="active-list">
-      <div class="empty-state">No active reviews</div>
+    <div class="card-body p-0" id="active-list">
+      <div class="empty-state"><p class="empty-state-text">No active reviews</p></div>
     </div>
   </div>
 
   <!-- Charts -->
-  <div class="charts-row">
-    <div class="chart-card">
-      <h3>Decision Distribution</h3>
-      <div class="donut-container">
-        <div class="donut" id="decision-donut"></div>
-        <div class="legend" id="decision-legend"></div>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="card">
+      <div class="card-body">
+        <h3 class="text-sm font-semibold mb-4">Decision Distribution</h3>
+        <div class="flex items-center gap-6">
+          <div class="donut" id="decision-donut"></div>
+          <div class="flex flex-col gap-2" id="decision-legend"></div>
+        </div>
       </div>
     </div>
-    <div class="chart-card">
-      <h3>Risk Tiers</h3>
-      <div class="bar-chart" id="risk-bars"></div>
+    <div class="card">
+      <div class="card-body">
+        <h3 class="text-sm font-semibold mb-4">Risk Tiers</h3>
+        <div class="flex flex-col gap-2.5" id="risk-bars"></div>
+      </div>
     </div>
   </div>
 
-  <div class="charts-row">
-    <div class="chart-card">
-      <h3>Finding Severity</h3>
-      <div class="bar-chart" id="severity-bars"></div>
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="card">
+      <div class="card-body">
+        <h3 class="text-sm font-semibold mb-4">Finding Severity</h3>
+        <div class="flex flex-col gap-2.5" id="severity-bars"></div>
+      </div>
     </div>
-    <div class="chart-card">
-      <h3>Top Repositories</h3>
-      <div class="bar-chart" id="repo-bars"></div>
+    <div class="card">
+      <div class="card-body">
+        <h3 class="text-sm font-semibold mb-4">Top Repositories</h3>
+        <div class="flex flex-col gap-2.5" id="repo-bars"></div>
+      </div>
     </div>
   </div>
 
   <!-- Review History -->
-  <div class="section">
-    <div class="section-header">
-      <h2>Review History</h2>
-      <div style="display:flex;gap:8px;align-items:center;">
-        <select id="filter-decision" style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;">
+  <div class="card">
+    <div class="card-header">
+      <h2 class="text-base font-semibold">Review History</h2>
+      <div class="flex gap-2 items-center">
+        <select id="filter-decision" class="form-select text-xs py-1.5 px-2">
           <option value="">All decisions</option>
           <option value="auto_approve">Auto-Approved</option>
           <option value="human_review">Human Review</option>
           <option value="hard_block">Blocked</option>
         </select>
-        <input id="filter-repo" type="text" placeholder="Filter repo..." style="background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:12px;width:160px;">
+        <input id="filter-repo" type="text" placeholder="Filter repo..." class="form-input text-xs py-1.5 px-2 w-40">
       </div>
     </div>
-    <div class="section-body">
-      <table class="review-table">
+    <div class="card-body p-0">
+      <table class="data-table">
         <thead>
           <tr>
             <th>PR</th>
@@ -850,27 +167,35 @@ a:hover { text-decoration: underline; }
 </div>
 
 <!-- Prompt Editor Modal -->
-<div class="modal-overlay" id="prompt-modal-overlay">
-  <div class="modal prompt-modal">
-    <button class="close-btn" onclick="closePromptEditor()">&times;</button>
-    <div class="modal-header"><h2>Agent Prompts</h2></div>
-    <div class="prompt-layout">
-      <div class="prompt-sidebar" id="prompt-sidebar"></div>
-      <div class="prompt-editor" id="prompt-editor">
-        <div style="padding:40px;text-align:center;color:var(--text-dim)">Select an agent to edit its prompt</div>
+<div id="prompt-modal-overlay" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closePromptEditor()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-[1000px] flex flex-col">
+      <div class="dialog-header">
+        <h2 class="text-lg font-bold">Agent Prompts</h2>
+        <button class="btn btn-ghost btn-icon btn-sm" onclick="closePromptEditor()">&times;</button>
+      </div>
+      <div class="flex min-h-[500px]">
+        <div class="w-[220px] shrink-0 border-r border-slate-700/50 py-3 overflow-y-auto" id="prompt-sidebar"></div>
+        <div class="flex-1 flex flex-col p-4 min-w-0" id="prompt-editor">
+          <div class="p-10 text-center text-slate-400">Select an agent to edit its prompt</div>
+        </div>
       </div>
     </div>
   </div>
 </div>
 
 <!-- Detail Modal -->
-<div class="modal-overlay" id="modal-overlay">
-  <div class="modal" id="modal-content">
-    <div class="modal-top-actions">
-      <button class="export-md-btn" id="export-md-btn" onclick="exportMarkdown()" title="Export as Markdown report">&#8675; MD</button>
-      <button class="close-btn" onclick="closeModal()">&times;</button>
+<div id="modal-overlay" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeModal()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-[860px]">
+      <div class="flex justify-end gap-2 mb-1">
+        <button class="btn btn-secondary btn-sm" id="export-md-btn" onclick="exportMarkdown()" title="Export as Markdown report">&#8675; MD</button>
+        <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">&times;</button>
+      </div>
+      <div id="modal-body"></div>
     </div>
-    <div id="modal-body"></div>
   </div>
 </div>
 
@@ -890,7 +215,7 @@ let currentFilter = { decision: '', repo: '' };
 function connectSSE() {
   sse = new EventSource(`${API}/events`);
   sse.onopen = () => {
-    document.getElementById('status-dot').style.background = 'var(--green)';
+    document.getElementById('status-dot').style.background = '#34d399';
     document.getElementById('status-label').textContent = 'Connected';
   };
   sse.onmessage = (e) => {
@@ -899,7 +224,7 @@ function connectSSE() {
     handleEvent(data);
   };
   sse.onerror = () => {
-    document.getElementById('status-dot').style.background = 'var(--red)';
+    document.getElementById('status-dot').style.background = '#f87171';
     document.getElementById('status-label').textContent = 'Disconnected';
     setTimeout(connectSSE, 5000);
   };
@@ -942,7 +267,7 @@ async function loadActive() {
     const countEl = document.getElementById('active-count');
     countEl.textContent = `${reviews.length} active`;
     if (!reviews.length) {
-      el.innerHTML = '<div class="empty-state">No active reviews</div>';
+      el.innerHTML = '<div class="empty-state"><p class="empty-state-text">No active reviews</p></div>';
       return;
     }
     el.innerHTML = reviews.map(r => renderActiveReview(r)).join('');
@@ -991,31 +316,31 @@ function renderActiveReview(r) {
   }).join('') + (isError ? '<div class="step error"></div>' : '');
   const elapsed = r.started_at ? formatElapsed(r.started_at) : '';
   return `
-    <div class="active-review" onclick="openDetail('${r.id}')">
+    <div class="flex items-center gap-4 px-5 py-4 border-b border-slate-700/50 last:border-b-0 cursor-pointer transition-colors hover:bg-slate-700/40" onclick="openDetail('${r.id}')">
       <span class="stage-badge stage-${r.stage}">${r.stage}</span>
-      <div class="pr-info">
-        <div class="pr-title">${esc(r.title || `PR #${r.pr_id}`)}</div>
-        <div class="pr-meta">${esc(r.repo)} &middot; ${esc(r.author)} &middot; ${esc(r.source_branch)} &rarr; ${esc(r.target_branch)}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-medium text-sm truncate">${esc(r.title || `PR #${r.pr_id}`)}</div>
+        <div class="text-xs text-slate-400 mt-0.5">${esc(r.repo)} &middot; ${esc(r.author)} &middot; ${esc(r.source_branch)} &rarr; ${esc(r.target_branch)}</div>
         <div class="pipeline">${steps}</div>
       </div>
-      <div class="elapsed">${elapsed}</div>
-      <button class="cancel-review-btn" title="Cancel review" onclick="event.stopPropagation();cancelReview('${r.id}')">&times;</button>
+      <div class="text-xs text-slate-400 tabular-nums shrink-0">${elapsed}</div>
+      <button class="btn btn-ghost btn-icon btn-xs text-slate-500 hover:text-red-400" title="Cancel review" onclick="event.stopPropagation();cancelReview('${r.id}')">&times;</button>
     </div>
   `;
 }
 
 function renderReviewRow(r) {
   return `
-    <tr onclick="openDetail('${r.id}')">
-      <td><strong>#${esc(r.pr_id)}</strong><br><span style="font-size:11px;color:var(--text-dim)">${esc(truncate(r.title, 40))}</span></td>
+    <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
+      <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
       <td>${esc(r.repo)}</td>
       <td>${esc(r.author)}</td>
       <td><span class="badge badge-${r.risk_tier}">${r.risk_tier || '-'}</span></td>
       <td>${r.combined_score?.toFixed(1) ?? '-'}</td>
       <td><span class="badge badge-${r.decision}">${formatDecision(r.decision)}</span></td>
-      <td style="font-size:12px;color:var(--accent-light)">${formatCost(r.cost_usd)}</td>
+      <td class="text-xs text-emerald-400">${formatCost(r.cost_usd)}</td>
       <td>${formatDuration(r.duration_ms)}</td>
-      <td style="font-size:12px;color:var(--text-dim)">${formatTime(r.started_at)}</td>
+      <td class="text-xs text-slate-400">${formatTime(r.started_at)}</td>
     </tr>
   `;
 }
@@ -1024,7 +349,7 @@ function renderDecisionDonut(counts, total) {
   const el = document.getElementById('decision-donut');
   const legend = document.getElementById('decision-legend');
   if (!total) {
-    el.style.background = 'var(--border)';
+    el.style.background = 'rgb(51 65 85 / 0.5)';
     el.innerHTML = '<div class="donut-hole">0</div>';
     legend.innerHTML = '';
     return;
@@ -1039,7 +364,7 @@ function renderDecisionDonut(counts, total) {
   el.style.background = `conic-gradient(${segments.join(', ')})`;
   el.innerHTML = `<div class="donut-hole">${total}</div>`;
   legend.innerHTML = Object.entries(DECISION_COLORS).map(([key, color]) =>
-    `<div class="legend-item"><div class="legend-dot" style="background:${color}"></div>${formatDecision(key)} (${counts[key] || 0})</div>`
+    `<div class="flex items-center gap-2 text-sm"><div class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></div>${formatDecision(key)} (${counts[key] || 0})</div>`
   ).join('');
 }
 
@@ -1078,7 +403,7 @@ function renderSeverityBars(counts) {
 function renderRepoBars(repos) {
   const el = document.getElementById('repo-bars');
   if (!repos || !repos.length) {
-    el.innerHTML = '<div class="empty-state" style="padding:12px">No data</div>';
+    el.innerHTML = '<div class="empty-state py-3"><p class="empty-state-text">No data</p></div>';
     return;
   }
   const max = repos[0].count;
@@ -1086,8 +411,8 @@ function renderRepoBars(repos) {
     const pct = (r.count / max) * 100;
     return `
       <div class="bar-row">
-        <div class="bar-label" style="width:120px;font-size:11px">${esc(truncate(r.repo, 18))}</div>
-        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:var(--accent)">${r.count}</div></div>
+        <div class="bar-label" style="width:120px">${esc(truncate(r.repo, 18))}</div>
+        <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:var(--accent-400)">${r.count}</div></div>
         <div class="bar-count">${r.count}</div>
       </div>
     `;
@@ -1103,7 +428,7 @@ async function openDetail(id) {
     const r = await fetch(`${API}/reviews/${id}`).then(res => res.json());
     if (r.error) { console.error('Review not found'); return; }
     renderDetailModal(r);
-    document.getElementById('modal-overlay').classList.add('open');
+    document.getElementById('modal-overlay').classList.remove('hidden');
 
     // Auto-refresh for active reviews
     clearInterval(activeDetailInterval);
@@ -1148,80 +473,80 @@ function renderDetailModal(r) {
   const totalFindings = (r.agent_results || []).reduce((sum, a) => sum + (a.findings?.length || 0), 0);
 
   body.innerHTML = `
-    <div class="modal-header">
-      <h2>${r.pr_url ? `<a href="${esc(r.pr_url)}" target="_blank" rel="noopener">PR #${esc(r.pr_id)}</a>` : `PR #${esc(r.pr_id)}`} — ${esc(r.title || 'Untitled')}</h2>
-      <div class="modal-meta">
+    <div class="mb-5">
+      <h2 class="text-xl font-bold mb-1.5 leading-snug">${r.pr_url ? `<a href="${esc(r.pr_url)}" target="_blank" rel="noopener" class="hover:underline">PR #${esc(r.pr_id)}</a>` : `PR #${esc(r.pr_id)}`} — ${esc(r.title || 'Untitled')}</h2>
+      <div class="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap">
         <span>${esc(r.repo)}</span> &middot;
         <span>${esc(r.author)}</span> &middot;
         <span>${esc(r.source_branch)} &rarr; ${esc(r.target_branch)}</span>
-        ${r.head_commit_sha ? `&middot; <code>${esc(r.head_commit_sha.slice(0, 8))}</code>` : ''}
+        ${r.head_commit_sha ? `&middot; <code class="text-2xs bg-slate-800 px-1.5 py-px rounded">${esc(r.head_commit_sha.slice(0, 8))}</code>` : ''}
       </div>
     </div>
 
-    <div class="decision-banner banner-${r.decision}">
-      <span class="banner-icon">${decisionIcon}</span>
-      <div class="banner-text">
-        <div class="banner-label">${formatDecision(r.decision)}</div>
-        <div class="banner-sub">${isError ? esc(r.stage_detail || 'Review failed') : isActive ? 'Review in progress...' : (r.risk_tier ? `Risk: ${r.risk_tier} &middot; Score: ${r.combined_score?.toFixed(2) ?? '—'}` : 'Completed')}</div>
+    <div class="flex items-center gap-4 p-4 rounded-xl mb-5 banner-${r.decision}">
+      <span class="text-2xl">${decisionIcon}</span>
+      <div class="flex-1">
+        <div class="text-[15px] font-semibold">${formatDecision(r.decision)}</div>
+        <div class="text-xs text-slate-400 mt-0.5">${isError ? esc(r.stage_detail || 'Review failed') : isActive ? 'Review in progress...' : (r.risk_tier ? `Risk: ${r.risk_tier} &middot; Score: ${r.combined_score?.toFixed(2) ?? '—'}` : 'Completed')}</div>
       </div>
-      ${r.risk_tier ? `<span class="badge badge-${r.risk_tier}" style="font-size:12px;padding:4px 12px">${r.risk_tier} risk</span>` : ''}
+      ${r.risk_tier ? `<span class="badge badge-${r.risk_tier} text-xs px-3 py-1">${r.risk_tier} risk</span>` : ''}
     </div>
 
     <div class="modal-pipeline">${pipelineSteps}</div>
 
     ${isError && r.stage_detail ? `
-      <div class="modal-stage-detail" style="background:rgba(214,48,49,0.08);border-color:rgba(214,48,49,0.2)">
-        <span class="stage-icon" style="color:var(--red)">&#9888;</span>
-        <span style="color:var(--red)">${esc(r.stage_detail)}</span>
+      <div class="flex items-center gap-2.5 p-3 rounded-lg mb-5 text-sm bg-red-400/[0.08] border border-red-400/20">
+        <span class="text-sm text-red-400 animate-spin">&#9888;</span>
+        <span class="text-red-400">${esc(r.stage_detail)}</span>
       </div>
     ` : isActive && r.stage_detail ? `
-      <div class="modal-stage-detail">
-        <span class="stage-icon">&#9881;</span>
-        <span>${esc(r.stage_detail)}</span>
+      <div class="flex items-center gap-2.5 p-3 rounded-lg mb-5 text-sm" style="background:color-mix(in srgb, var(--accent-400) 8%, transparent);border:1px solid color-mix(in srgb, var(--accent-400) 20%, transparent)">
+        <span class="text-sm animate-spin" style="color:var(--accent-400)">&#9881;</span>
+        <span style="color:var(--accent-400)">${esc(r.stage_detail)}</span>
       </div>
     ` : ''}
 
-    <div class="info-cards" style="grid-template-columns:repeat(5,1fr)">
-      <div class="info-card">
-        <div class="info-label">Platform</div>
-        <div class="info-value">${esc(r.platform)}</div>
+    <div class="grid grid-cols-5 gap-2.5 mb-5">
+      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
+        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Platform</div>
+        <div class="text-sm font-semibold">${esc(r.platform)}</div>
       </div>
-      <div class="info-card">
-        <div class="info-label">${isActive ? 'Elapsed' : 'Duration'}</div>
-        <div class="info-value">${timeInfo}</div>
+      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
+        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">${isActive ? 'Elapsed' : 'Duration'}</div>
+        <div class="text-sm font-semibold">${timeInfo}</div>
       </div>
-      <div class="info-card">
-        <div class="info-label">Score</div>
-        <div class="info-value">${r.combined_score ? r.combined_score.toFixed(2) : '<span style="color:var(--text-dim)">—</span>'}</div>
+      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
+        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Score</div>
+        <div class="text-sm font-semibold">${r.combined_score ? r.combined_score.toFixed(2) : '<span class="text-slate-500">—</span>'}</div>
       </div>
-      <div class="info-card">
-        <div class="info-label">Findings</div>
-        <div class="info-value">${totalFindings || '<span style="color:var(--text-dim)">—</span>'}</div>
+      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
+        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Findings</div>
+        <div class="text-sm font-semibold">${totalFindings || '<span class="text-slate-500">—</span>'}</div>
       </div>
-      <div class="info-card">
-        <div class="info-label">Cost</div>
-        <div class="info-value" style="color:var(--accent-light)">${r.cost_usd ? formatCost(r.cost_usd) : '<span style="color:var(--text-dim)">—</span>'}</div>
-        ${r.total_input_tokens ? '<div style="font-size:10px;color:var(--text-dim);margin-top:2px">' + r.total_input_tokens.toLocaleString() + ' + ' + r.total_output_tokens.toLocaleString() + ' tokens</div>' : ''}
+      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
+        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Cost</div>
+        <div class="text-sm font-semibold text-emerald-400">${r.cost_usd ? formatCost(r.cost_usd) : '<span class="text-slate-500">—</span>'}</div>
+        ${r.total_input_tokens ? '<div class="text-2xs text-slate-500 mt-0.5">' + r.total_input_tokens.toLocaleString() + ' + ' + r.total_output_tokens.toLocaleString() + ' tokens</div>' : ''}
       </div>
     </div>
 
     ${r.summary ? `
-      <div class="modal-card">
-        <div class="modal-card-header"><h3>Summary</h3></div>
-        <div class="modal-card-body"><div class="modal-summary">${esc(r.summary)}</div></div>
+      <div class="card mb-3.5">
+        <div class="card-header"><h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Summary</h3></div>
+        <div class="card-body"><div class="text-sm leading-relaxed whitespace-pre-wrap">${esc(r.summary)}</div></div>
       </div>
     ` : ''}
 
     ${r.override_reasons?.length ? `
-      <div class="modal-card">
-        <div class="modal-card-header">
-          <h3>Escalation Reasons</h3>
-          <span class="card-count">${r.override_reasons.length}</span>
+      <div class="card mb-3.5">
+        <div class="card-header">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Escalation Reasons</h3>
+          <span class="badge badge-neutral badge-sm">${r.override_reasons.length}</span>
         </div>
-        <div class="modal-card-body">
+        <div class="card-body">
           ${r.override_reasons.map(x => `
-            <div class="escalation-item">
-              <span class="esc-icon">&#9888;</span>
+            <div class="flex items-start gap-2.5 py-2 text-sm text-orange-400 border-b border-slate-700/30 last:border-b-0">
+              <span class="shrink-0 mt-px">&#9888;</span>
               <span>${esc(x)}</span>
             </div>
           `).join('')}
@@ -1230,20 +555,20 @@ function renderDetailModal(r) {
     ` : ''}
 
     ${r.mechanical_results?.length ? `
-      <div class="modal-card">
-        <div class="modal-card-header">
-          <h3>Mechanical Checks</h3>
-          <span class="card-count">${r.mechanical_results.filter(m => m.passed).length}/${r.mechanical_results.length} passed</span>
+      <div class="card mb-3.5">
+        <div class="card-header">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Mechanical Checks</h3>
+          <span class="badge badge-neutral badge-sm">${r.mechanical_results.filter(m => m.passed).length}/${r.mechanical_results.length} passed</span>
         </div>
-        <div class="modal-card-body">
-          <div class="mech-grid">
+        <div class="card-body">
+          <div class="flex gap-2.5 flex-wrap">
           ${r.mechanical_results.map(m => `
-            <div class="mech-item">
-              <span class="mech-icon">${m.passed ? '<span style="color:var(--green)">&#10003;</span>' : '<span style="color:var(--red)">&#10007;</span>'}</span>
-              <span class="mech-name">${esc(m.tool)}</span>
-              <span class="badge badge-${m.severity || 'low'}" style="font-size:10px">${m.severity || 'info'}</span>
-              ${m.error ? `<span class="mech-error">${esc(m.error)}</span>` : ''}
-              ${m.findings?.length ? `<span class="mech-count">${m.findings.length} issue${m.findings.length !== 1 ? 's' : ''}</span>` : ''}
+            <div class="flex items-center gap-2 px-3.5 py-2 bg-slate-800 border border-slate-700/50 rounded-lg text-sm">
+              <span class="text-base shrink-0">${m.passed ? '<span class="text-emerald-400">&#10003;</span>' : '<span class="text-red-400">&#10007;</span>'}</span>
+              <span class="font-semibold">${esc(m.tool)}</span>
+              <span class="badge badge-sm badge-${m.severity || 'low'}">${m.severity || 'info'}</span>
+              ${m.error ? `<span class="text-xs text-orange-400">${esc(m.error)}</span>` : ''}
+              ${m.findings?.length ? `<span class="text-2xs text-slate-400">${m.findings.length} issue${m.findings.length !== 1 ? 's' : ''}</span>` : ''}
             </div>
           `).join('')}
           </div>
@@ -1252,40 +577,40 @@ function renderDetailModal(r) {
     ` : ''}
 
     ${r.agent_results?.length ? `
-      <div class="modal-card">
-        <div class="modal-card-header">
-          <h3>Agent Results</h3>
-          <span class="card-count">${r.agent_results.length} agent${r.agent_results.length !== 1 ? 's' : ''}</span>
+      <div class="card mb-3.5">
+        <div class="card-header">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Agent Results</h3>
+          <span class="badge badge-neutral badge-sm">${r.agent_results.length} agent${r.agent_results.length !== 1 ? 's' : ''}</span>
         </div>
-        <div class="modal-card-body" style="padding:10px">
+        <div class="card-body p-2.5">
           ${r.agent_results.map((a, idx) => {
             const fc = a.findings?.length || 0;
             const hasFindings = fc > 0;
             return `
-              <div class="agent-card">
-                <div class="agent-card-header" onclick="toggleAgentFindings(this, ${idx})">
-                  <span class="agent-name">${esc(a.agent_name)}</span>
-                  <span class="badge badge-${a.verdict === 'pass' ? 'auto_approve' : a.verdict === 'warn' ? 'human_review' : 'hard_block'}">${a.verdict}</span>
-                  ${a.languages_reviewed?.length ? `<span style="font-size:11px;color:var(--text-dim)">${a.languages_reviewed.join(', ')}</span>` : ''}
-                  <span class="agent-meta">
+              <div class="bg-slate-700/50 rounded-lg mb-2.5 last:mb-0 overflow-hidden">
+                <div class="flex items-center gap-2 px-3.5 py-2.5 cursor-pointer transition-colors hover:bg-white/[0.03]" onclick="toggleAgentFindings(this, ${idx})">
+                  <span class="font-semibold text-sm">${esc(a.agent_name)}</span>
+                  <span class="badge badge-sm badge-${a.verdict === 'pass' ? 'auto_approve' : a.verdict === 'warn' ? 'human_review' : 'hard_block'}">${a.verdict}</span>
+                  ${a.languages_reviewed?.length ? `<span class="text-2xs text-slate-400">${a.languages_reviewed.join(', ')}</span>` : ''}
+                  <span class="ml-auto text-2xs text-slate-400 flex items-center gap-2">
                     <span>${fc} finding${fc !== 1 ? 's' : ''}</span>
-                    ${hasFindings ? '<span class="chevron">&#9656;</span>' : ''}
+                    ${hasFindings ? '<span class="chevron transition-transform duration-200 text-xs text-slate-400">&#9656;</span>' : ''}
                   </span>
                 </div>
-                ${a.error ? `<div style="color:var(--red);font-size:12px;padding:0 14px 10px">${esc(a.error)}</div>` : ''}
+                ${a.error ? `<div class="text-red-400 text-xs px-3.5 pb-2.5">${esc(a.error)}</div>` : ''}
                 ${hasFindings ? `
-                  <div class="agent-card-findings" id="agent-findings-${idx}" style="display:none">
+                  <div class="px-3.5 pb-3 hidden" id="agent-findings-${idx}">
                     ${a.findings.map(f => `
-                      <div class="finding-card">
-                        <div class="finding-header">
-                          <span class="badge badge-${f.severity}">${f.severity}</span>
-                          <span class="badge" style="background:var(--surface);border:1px solid var(--border)">${f.certainty}</span>
-                          ${f.category ? `<span style="font-size:11px;color:var(--accent-light)">${esc(f.category)}</span>` : ''}
-                          <span class="finding-file">${esc(f.file)}${f.line ? ':' + f.line : ''}</span>
+                      <div class="bg-surface-overlay border border-slate-700/50 rounded-lg p-3 mb-2 last:mb-0">
+                        <div class="flex gap-1.5 items-center mb-1.5 flex-wrap">
+                          <span class="sev-badge sev-${f.severity}">${f.severity}</span>
+                          <span class="cert-badge">${f.certainty}</span>
+                          ${f.category ? `<span class="text-2xs" style="color:var(--accent-400)">${esc(f.category)}</span>` : ''}
+                          <span class="text-2xs text-slate-400 ml-auto font-mono">${esc(f.file)}${f.line ? ':' + f.line : ''}</span>
                         </div>
-                        <div class="finding-desc">${esc(f.description)}</div>
-                        ${f.suggestion ? `<div class="finding-suggestion">${esc(f.suggestion)}</div>` : ''}
-                        ${f.cwe ? `<div class="finding-cwe">CWE: ${esc(f.cwe)}</div>` : ''}
+                        <div class="text-sm leading-relaxed">${esc(f.description)}</div>
+                        ${f.suggestion ? `<div class="text-xs mt-1.5 pt-1.5 border-t border-slate-700/30" style="color:var(--accent-400)">${esc(f.suggestion)}</div>` : ''}
+                        ${f.cwe ? `<div class="text-2xs text-slate-500 mt-1">CWE: ${esc(f.cwe)}</div>` : ''}
                       </div>
                     `).join('')}
                   </div>
@@ -1298,16 +623,16 @@ function renderDetailModal(r) {
     ` : ''}
 
     ${r.pipeline_log?.length ? `
-      <div class="modal-card">
-        <div class="modal-card-header" style="cursor:pointer" onclick="togglePipelineLog()">
-          <h3>Pipeline Log</h3>
-          <button class="log-toggle" id="log-toggle-btn">
-            <span class="arrow" id="log-toggle-arrow">&#9656;</span>
+      <div class="card mb-3.5">
+        <div class="card-header cursor-pointer" onclick="togglePipelineLog()">
+          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Pipeline Log</h3>
+          <button class="btn btn-ghost btn-xs" id="log-toggle-btn">
+            <span class="chevron text-2xs transition-transform duration-200" id="log-toggle-arrow">&#9656;</span>
             ${r.pipeline_log.length} entries
           </button>
         </div>
-        <div class="modal-card-body" id="pipeline-log-body" style="display:none;padding:0">
-          <div class="pipeline-log">
+        <div class="card-body hidden p-0" id="pipeline-log-body">
+          <div class="max-h-[400px] overflow-y-auto">
             ${r.pipeline_log.map(e => `
               <div class="log-entry log-level-${e.level}">
                 <span class="log-ts">${formatLogTime(e.ts)}</span>
@@ -1322,9 +647,9 @@ function renderDetailModal(r) {
     ` : ''}
 
     ${isActive && !r.mechanical_results?.length && !r.agent_results?.length ? `
-      <div class="modal-card">
-        <div class="modal-card-body" style="text-align:center;padding:32px;color:var(--text-dim)">
-          <div style="font-size:24px;margin-bottom:8px">&#9881;</div>
+      <div class="card">
+        <div class="card-body text-center py-8 text-slate-400">
+          <div class="text-2xl mb-2">&#9881;</div>
           Review is in progress — results will appear as stages complete...
         </div>
       </div>
@@ -1336,11 +661,11 @@ function togglePipelineLog() {
   const body = document.getElementById('pipeline-log-body');
   const arrow = document.getElementById('log-toggle-arrow');
   if (!body) return;
-  if (body.style.display === 'none') {
-    body.style.display = 'block';
+  if (body.classList.contains('hidden')) {
+    body.classList.remove('hidden');
     if (arrow) arrow.classList.add('open');
   } else {
-    body.style.display = 'none';
+    body.classList.add('hidden');
     if (arrow) arrow.classList.remove('open');
   }
 }
@@ -1357,17 +682,17 @@ function toggleAgentFindings(header, idx) {
   const el = document.getElementById('agent-findings-' + idx);
   if (!el) return;
   const chevron = header.querySelector('.chevron');
-  if (el.style.display === 'none') {
-    el.style.display = 'block';
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
     if (chevron) chevron.classList.add('open');
   } else {
-    el.style.display = 'none';
+    el.classList.add('hidden');
     if (chevron) chevron.classList.remove('open');
   }
 }
 
 function closeModal() {
-  document.getElementById('modal-overlay').classList.remove('open');
+  document.getElementById('modal-overlay').classList.add('hidden');
   clearInterval(activeDetailInterval);
 }
 
@@ -1477,11 +802,11 @@ document.addEventListener('keydown', (e) => {
 
 // ---- Review Modal ----
 function openReviewModal() {
-  document.getElementById('review-modal-overlay').classList.add('open');
+  document.getElementById('review-modal-overlay').classList.remove('hidden');
   document.getElementById('review-pr-url').focus();
 }
 function closeReviewModal() {
-  document.getElementById('review-modal-overlay').classList.remove('open');
+  document.getElementById('review-modal-overlay').classList.add('hidden');
   document.getElementById('review-status').style.display = 'none';
   document.getElementById('review-submit-btn').disabled = false;
   document.getElementById('review-submit-btn').textContent = 'Start Review';
@@ -1500,7 +825,7 @@ async function submitReview(e) {
   btn.disabled = true;
   btn.textContent = 'Reviewing...';
   status.style.display = 'block';
-  status.style.color = 'var(--text-dim)';
+  status.className = 'text-sm mr-auto text-slate-400';
   status.textContent = 'Submitting review request...';
 
   try {
@@ -1511,19 +836,19 @@ async function submitReview(e) {
     });
     const data = await resp.json();
     if (!resp.ok) {
-      status.style.color = 'var(--red)';
+      status.className = 'text-sm mr-auto text-red-400';
       status.textContent = data.detail || 'Request failed';
       btn.disabled = false;
       btn.textContent = 'Start Review';
       return;
     }
-    status.style.color = 'var(--green)';
+    status.className = 'text-sm mr-auto text-emerald-400';
     status.textContent = `Done — ${data.decision || data.status} (score: ${data.score ?? '-'})`;
     btn.textContent = 'Done';
     loadReviews();
     loadStats();
   } catch (err) {
-    status.style.color = 'var(--red)';
+    status.className = 'text-sm mr-auto text-red-400';
     status.textContent = `Error: ${err.message}`;
     btn.disabled = false;
     btn.textContent = 'Start Review';
@@ -1599,11 +924,11 @@ let promptData = null;  // cached from API
 let activePromptAgent = null;
 
 function openPromptEditor() {
-  document.getElementById('prompt-modal-overlay').classList.add('open');
+  document.getElementById('prompt-modal-overlay').classList.remove('hidden');
   loadPrompts();
 }
 function closePromptEditor() {
-  document.getElementById('prompt-modal-overlay').classList.remove('open');
+  document.getElementById('prompt-modal-overlay').classList.add('hidden');
 }
 document.getElementById('prompt-modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('prompt-modal-overlay')) closePromptEditor();
@@ -1630,7 +955,7 @@ function renderPromptSidebar() {
   el.innerHTML = promptData.agents.map(a => `
     <div class="prompt-sidebar-item ${a.agent_name === activePromptAgent ? 'active' : ''}"
          onclick="selectPromptAgent('${a.agent_name}')">
-      ${a.is_override ? '<span class="override-dot"></span>' : ''}
+      ${a.is_override ? '<span class="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0"></span>' : ''}
       <span>${esc(a.agent_name)}</span>
     </div>
   `).join('');
@@ -1647,30 +972,30 @@ function selectPromptAgent(name) {
 function renderPromptEditorFor(agent) {
   const editor = document.getElementById('prompt-editor');
   editor.innerHTML = `
-    <div class="prompt-editor-header">
-      <h3>${esc(agent.agent_name)}</h3>
-      ${agent.is_override ? '<span class="override-badge">CUSTOMIZED</span>' : ''}
-      ${agent.updated_at ? `<span style="font-size:11px;color:var(--text-dim)">Updated ${formatTime(agent.updated_at)}</span>` : ''}
+    <div class="flex items-center gap-2.5 mb-3">
+      <h3 class="text-[15px] font-semibold">${esc(agent.agent_name)}</h3>
+      ${agent.is_override ? '<span class="badge badge-warning badge-sm">CUSTOMIZED</span>' : ''}
+      ${agent.updated_at ? `<span class="text-2xs text-slate-400">Updated ${formatTime(agent.updated_at)}</span>` : ''}
     </div>
-    <textarea class="prompt-textarea" id="prompt-content">${esc(agent.content)}</textarea>
-    <div class="prompt-actions">
-      <button class="btn-save" onclick="savePrompt('${agent.agent_name}')">Save</button>
-      ${agent.is_override ? `<button class="btn-reset" onclick="resetPrompt('${agent.agent_name}')">Reset to Default</button>` : ''}
-      <span class="prompt-status" id="prompt-status"></span>
+    <textarea class="form-textarea flex-1 w-full min-h-[320px] font-mono text-xs leading-relaxed resize-y" id="prompt-content">${esc(agent.content)}</textarea>
+    <div class="flex items-center gap-2.5 mt-3">
+      <button class="btn btn-primary btn-sm" onclick="savePrompt('${agent.agent_name}')">Save</button>
+      ${agent.is_override ? `<button class="btn btn-secondary btn-sm" onclick="resetPrompt('${agent.agent_name}')">Reset to Default</button>` : ''}
+      <span class="ml-auto text-xs text-slate-400" id="prompt-status"></span>
     </div>
-    <div class="prompt-ref-section">
-      <button class="prompt-ref-toggle" onclick="togglePromptRef('output-schema-ref')">
-        <span class="arrow" id="output-schema-ref-arrow">&#9656;</span>
+    <div class="mt-3.5 border-t border-slate-700/50 pt-2.5">
+      <button class="text-xs text-slate-400 cursor-pointer flex items-center gap-1.5 bg-transparent border-0 p-0 hover:text-slate-200 transition-colors" onclick="togglePromptRef('output-schema-ref')">
+        <span class="text-2xs transition-transform duration-200" id="output-schema-ref-arrow">&#9656;</span>
         Output Schema (appended to all agents)
       </button>
-      <div class="prompt-ref-content" id="output-schema-ref">${esc(promptData.output_schema)}</div>
+      <div class="hidden mt-2 bg-slate-800 border border-slate-700/50 rounded-lg p-3 font-mono text-2xs leading-relaxed text-slate-400 whitespace-pre-wrap max-h-[200px] overflow-y-auto" id="output-schema-ref">${esc(promptData.output_schema)}</div>
     </div>
-    <div class="prompt-ref-section" style="margin-top:8px;border-top:none">
-      <button class="prompt-ref-toggle" onclick="togglePromptRef('cross-lang-ref')">
-        <span class="arrow" id="cross-lang-ref-arrow">&#9656;</span>
+    <div class="mt-2">
+      <button class="text-xs text-slate-400 cursor-pointer flex items-center gap-1.5 bg-transparent border-0 p-0 hover:text-slate-200 transition-colors" onclick="togglePromptRef('cross-lang-ref')">
+        <span class="text-2xs transition-transform duration-200" id="cross-lang-ref-arrow">&#9656;</span>
         Cross-Language Section (added when 2+ languages)
       </button>
-      <div class="prompt-ref-content" id="cross-lang-ref">${esc(promptData.cross_language_section)}</div>
+      <div class="hidden mt-2 bg-slate-800 border border-slate-700/50 rounded-lg p-3 font-mono text-2xs leading-relaxed text-slate-400 whitespace-pre-wrap max-h-[200px] overflow-y-auto" id="cross-lang-ref">${esc(promptData.cross_language_section)}</div>
     </div>
   `;
 }
@@ -1679,11 +1004,11 @@ function togglePromptRef(id) {
   const el = document.getElementById(id);
   const arrow = document.getElementById(id + '-arrow');
   if (!el) return;
-  if (el.style.display === 'none' || !el.style.display) {
-    el.style.display = 'block';
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
     if (arrow) arrow.innerHTML = '&#9662;';
   } else {
-    el.style.display = 'none';
+    el.classList.add('hidden');
     if (arrow) arrow.innerHTML = '&#9656;';
   }
 }
@@ -1692,7 +1017,7 @@ async function savePrompt(agentName) {
   const content = document.getElementById('prompt-content').value;
   const status = document.getElementById('prompt-status');
   status.textContent = 'Saving...';
-  status.style.color = 'var(--text-dim)';
+  status.className = 'ml-auto text-xs text-slate-400';
   try {
     const resp = await fetch(`${API}/prompts/${agentName}`, {
       method: 'PUT',
@@ -1701,27 +1026,27 @@ async function savePrompt(agentName) {
     });
     if (!resp.ok) throw new Error('Save failed');
     status.textContent = 'Saved';
-    status.style.color = 'var(--green)';
+    status.className = 'ml-auto text-xs text-emerald-400';
     await loadPrompts();
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
-    status.style.color = 'var(--red)';
+    status.className = 'ml-auto text-xs text-red-400';
   }
 }
 
 async function resetPrompt(agentName) {
   const status = document.getElementById('prompt-status');
   status.textContent = 'Resetting...';
-  status.style.color = 'var(--text-dim)';
+  status.className = 'ml-auto text-xs text-slate-400';
   try {
     const resp = await fetch(`${API}/prompts/${agentName}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error('Reset failed');
     status.textContent = 'Reset to default';
-    status.style.color = 'var(--green)';
+    status.className = 'ml-auto text-xs text-emerald-400';
     await loadPrompts();
   } catch (e) {
     status.textContent = `Error: ${e.message}`;
-    status.style.color = 'var(--red)';
+    status.className = 'ml-auto text-xs text-red-400';
   }
 }
 

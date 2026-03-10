@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
 from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from pr_guardian.api.dashboard import router as dashboard_api_router
 from pr_guardian.api.dashboard_page import router as dashboard_page_router
@@ -54,6 +56,10 @@ app.include_router(webhooks_router)
 app.include_router(scans_router)
 app.include_router(dashboard_api_router)
 app.include_router(dashboard_page_router)
+
+_STATIC_DIR = Path(__file__).resolve().parent / "dashboard" / "static"
+if _STATIC_DIR.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
 
 @app.get("/")
