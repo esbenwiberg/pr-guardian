@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
-from pr_guardian.models.context import RiskTier, RepoRiskClass
+from pr_guardian.models.context import RiskTier, RepoRiskClass, TrustTier
 from pr_guardian.models.findings import AgentResult
 
 
@@ -44,6 +44,12 @@ class ReviewResult:
     override_reasons: list[str] = field(default_factory=list)
     summary: str = ""
     pipeline_log: list[dict] = field(default_factory=list)
+
+    trust_tier: TrustTier | None = None
+    trust_tier_reasons: list[str] = field(default_factory=list)
+    trust_tier_files: dict[str, str] = field(default_factory=dict)
+    reviewer_group_override: str | None = None
+    escalated_from: str | None = None
 
     total_input_tokens: int = 0
     total_output_tokens: int = 0

@@ -5,7 +5,7 @@ from fnmatch import fnmatch
 import structlog
 
 from pr_guardian.config.schema import GuardianConfig
-from pr_guardian.models.context import RepoRiskClass, ReviewContext, RiskTier
+from pr_guardian.models.context import RepoRiskClass, ReviewContext, RiskTier, TrustTier, TrustTierResult
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, ReviewResult
 
@@ -149,11 +149,20 @@ def decide(
     agent_results: list[AgentResult],
     risk_tier: RiskTier,
     config: GuardianConfig,
+    trust_tier_result: TrustTierResult | None = None,
 ) -> ReviewResult:
-    """Apply decision matrix to produce final review decision."""
+    """Apply decision matrix to produce final review decision.
+
+    Trust tier governs *who reviews*, orthogonal to risk tier (analysis depth):
+    - AI_ONLY: AI decides (auto-approve allowed)
+    - SPOT_CHECK: auto-approve, but flag for optional human glance
+    - MANDATORY_HUMAN: block until human approves
+    - HUMAN_PRIMARY: block until designated reviewer group approves
+    """
     score = combined_score(agent_results, config)
     override_reasons = check_overrides(agent_results, context, config)
     repo_risk = context.repo_risk_class
+    trust_tier = trust_tier_result.resolved_tier if trust_tier_result else None
 
     # Check auto-approve branch rules
     target = context.pr.target_branch
@@ -161,12 +170,20 @@ def decide(
     branch_blocked = any(
         fnmatch(target, p) for p in auto_approve_cfg.blocked_target_branches
     )
-    branch_allowed = any(
-        fnmatch(target, p) for p in auto_approve_cfg.allowed_target_branches
-    )
 
-    # Start with decision matrix
+    # Start with decision matrix (risk-based)
     decision = _apply_matrix(risk_tier, repo_risk, agent_results, score, config)
+
+    # Trust tier overrides: MANDATORY_HUMAN and HUMAN_PRIMARY force human review
+    reviewer_group_override: str | None = None
+    if trust_tier in (TrustTier.MANDATORY_HUMAN, TrustTier.HUMAN_PRIMARY):
+        if decision == Decision.AUTO_APPROVE:
+            decision = Decision.HUMAN_REVIEW
+            override_reasons.append(
+                f"Trust tier {trust_tier.value} requires human review"
+            )
+        if trust_tier == TrustTier.HUMAN_PRIMARY and trust_tier_result:
+            reviewer_group_override = trust_tier_result.reviewer_group_override
 
     # Override: always escalate if override rules triggered
     if override_reasons and decision == Decision.AUTO_APPROVE:
@@ -193,6 +210,20 @@ def decide(
     if score >= config.thresholds.hard_block_score:
         decision = Decision.HARD_BLOCK
 
+    # Build trust tier metadata for the result
+    escalated_from: str | None = None
+    trust_tier_reasons: list[str] = []
+    trust_tier_files: dict[str, str] = {}
+    if trust_tier_result:
+        trust_tier_reasons = list(trust_tier_result.reasons + trust_tier_result.escalation_reasons)
+        trust_tier_files = {f: t.value for f, t in trust_tier_result.file_tiers.items()}
+        if trust_tier_result.escalated:
+            # Find original tier from reasons (first escalation reason contains it)
+            for r in trust_tier_result.escalation_reasons:
+                if r.startswith("Trust tier escalated from "):
+                    escalated_from = r.split("from ")[1].split(" to ")[0]
+                    break
+
     result = ReviewResult(
         pr_id=context.pr.pr_id,
         repo=context.pr.repo,
@@ -202,6 +233,11 @@ def decide(
         combined_score=score,
         decision=decision,
         override_reasons=override_reasons,
+        trust_tier=trust_tier,
+        trust_tier_reasons=trust_tier_reasons,
+        trust_tier_files=trust_tier_files,
+        reviewer_group_override=reviewer_group_override,
+        escalated_from=escalated_from,
     )
 
     log.info(
@@ -210,6 +246,7 @@ def decide(
         decision=decision.value,
         score=round(score, 2),
         risk_tier=risk_tier.value,
+        trust_tier=trust_tier.value if trust_tier else "none",
         overrides=len(override_reasons),
     )
     return result

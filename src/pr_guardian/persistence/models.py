@@ -41,6 +41,8 @@ class ReviewRow(Base):
 
     risk_tier: Mapped[str] = mapped_column(String(16), default="")
     repo_risk_class: Mapped[str] = mapped_column(String(16), default="standard")
+    trust_tier: Mapped[str] = mapped_column(String(32), default="")
+    trust_tier_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     combined_score: Mapped[float] = mapped_column(Float, default=0.0)
     decision: Mapped[str] = mapped_column(String(32), default="pending")
 

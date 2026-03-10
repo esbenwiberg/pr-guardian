@@ -32,6 +32,39 @@ class FileRole(str, Enum):
     DEPENDENCY = "dependency"
 
 
+class TrustTier(str, Enum):
+    AI_ONLY = "ai_only"
+    SPOT_CHECK = "spot_check"
+    MANDATORY_HUMAN = "mandatory_human"
+    HUMAN_PRIMARY = "human_primary"
+
+
+# Ordered from most trusting to least trusting — used for max() comparisons.
+_TRUST_TIER_ORDER = {
+    TrustTier.AI_ONLY: 0,
+    TrustTier.SPOT_CHECK: 1,
+    TrustTier.MANDATORY_HUMAN: 2,
+    TrustTier.HUMAN_PRIMARY: 3,
+}
+
+
+def max_trust_tier(a: TrustTier, b: TrustTier) -> TrustTier:
+    """Return the *least trusting* (highest governance) of two tiers."""
+    return a if _TRUST_TIER_ORDER[a] >= _TRUST_TIER_ORDER[b] else b
+
+
+@dataclass
+class TrustTierResult:
+    """Output of trust-tier classification (path-based + optional escalation)."""
+    resolved_tier: TrustTier = TrustTier.SPOT_CHECK
+    file_tiers: dict[str, TrustTier] = field(default_factory=dict)
+    triggering_files: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    reviewer_group_override: str | None = None
+    escalated: bool = False
+    escalation_reasons: list[str] = field(default_factory=list)
+
+
 @dataclass
 class SecuritySurface:
     """File classifications from security surface patterns."""
@@ -101,3 +134,4 @@ class ReviewContext:
     security_surface: SecuritySurface = field(default_factory=SecuritySurface)
     blast_radius: BlastRadius = field(default_factory=BlastRadius)
     change_profile: ChangeProfile = field(default_factory=ChangeProfile)
+    trust_tier_result: TrustTierResult = field(default_factory=TrustTierResult)

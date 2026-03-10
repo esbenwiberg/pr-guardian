@@ -144,6 +144,30 @@ class SecuritySurfaceConfig(BaseModel):
     )
 
 
+class TrustTierRule(BaseModel):
+    tier: str  # ai_only, spot_check, mandatory_human, human_primary
+    patterns: list[str] = Field(default_factory=list)
+    reason: str = ""
+    reviewer_group: str = ""
+
+
+class TrustTierConfig(BaseModel):
+    default_tier: str = "spot_check"
+    rules: list[TrustTierRule] = Field(default_factory=list)
+    reviewer_groups: dict[str, str] = Field(default_factory=lambda: {
+        "mandatory_human": "",
+        "human_primary": "security-team",
+    })
+    spot_check_window_hours: int = 48
+    escalation_keywords: list[str] = Field(default_factory=lambda: [
+        "auth", "permission", "token", "credential", "secret",
+        "encryption", "crypto", "rbac", "role", "privilege",
+        "session", "injection", "csrf", "xss", "cors",
+        "oauth", "jwt", "certificate", "password", "api_key",
+    ])
+    escalation_min_severity: str = "medium"
+
+
 class RecentChangesConfig(BaseModel):
     time_window_days: int = 7
     branch: str = "main"
@@ -182,5 +206,6 @@ class GuardianConfig(BaseModel):
     path_risk: PathRiskConfig = Field(default_factory=PathRiskConfig)
     file_roles: FileRolesConfig = Field(default_factory=FileRolesConfig)
     security_surface: SecuritySurfaceConfig = Field(default_factory=SecuritySurfaceConfig)
+    trust_tiers: TrustTierConfig = Field(default_factory=TrustTierConfig)
     recent_changes: RecentChangesConfig = Field(default_factory=RecentChangesConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)

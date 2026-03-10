@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 
+from pr_guardian.models.context import TrustTier
 from pr_guardian.models.findings import Verdict
 from pr_guardian.models.output import Decision, ReviewResult
 
@@ -49,11 +50,19 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     lines.append("")
 
     # ── Metrics ─────────────────────────────────────────────────────
-    lines.append(
+    metrics = (
         f"**Risk** {result.risk_tier.value.upper()} "
         f"\u00b7 **Score** {result.combined_score:.1f}/10 "
         f"\u00b7 **Mechanical** {'passed' if result.mechanical_passed else 'FAILED'}"
     )
+    lines.append(metrics)
+
+    # ── Trust tier line ──────────────────────────────────────────
+    if result.trust_tier:
+        trust_display = _trust_tier_display(result)
+        if trust_display:
+            lines.append(trust_display)
+
     lines.append("")
 
     # ── Per-area verdicts with short category summaries ─────────────
@@ -105,6 +114,15 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
         )
         lines.append("")
 
+    # ── Escalation notice (trust tier escalated by agent findings) ──
+    if result.escalated_from:
+        lines.append(
+            f"> **Trust tier escalated** from {result.escalated_from.upper()} "
+            f"to {result.trust_tier.value.upper() if result.trust_tier else '?'} "
+            f"based on agent findings."
+        )
+        lines.append("")
+
     lines.append("---")
     lines.append("*PR Guardian \u2014 automated review*")
 
@@ -112,15 +130,40 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
 
 
 
+def _trust_tier_display(result: ReviewResult) -> str:
+    """Build the trust tier display line for the PR comment."""
+    tier = result.trust_tier
+    if not tier:
+        return ""
+
+    labels = {
+        TrustTier.AI_ONLY: "AI-only review",
+        TrustTier.SPOT_CHECK: "reviewer spot-check requested",
+        TrustTier.MANDATORY_HUMAN: "AI first-pass complete, human approval required",
+        TrustTier.HUMAN_PRIMARY: "security team review required",
+    }
+    return f"**Trust** {tier.value.upper()} \u2014 {labels.get(tier, tier.value)}"
+
+
 def get_review_labels(result: ReviewResult) -> list[str]:
-    """Get labels to apply to the PR."""
+    """Get labels to apply to the PR based on decision and trust tier."""
     labels: list[str] = []
-    if result.decision == Decision.HUMAN_REVIEW:
-        labels.append("needs-human-review")
+
+    # Decision-based labels
+    if result.decision == Decision.HARD_BLOCK:
+        labels.append("guardian-blocked")
     elif result.decision == Decision.REJECT:
         labels.append("changes-requested")
-    elif result.decision == Decision.HARD_BLOCK:
-        labels.append("guardian-blocked")
+    elif result.decision == Decision.HUMAN_REVIEW:
+        # Trust tier differentiates the human review label
+        if result.trust_tier == TrustTier.HUMAN_PRIMARY:
+            labels.append("needs-security-review")
+        else:
+            labels.append("needs-human-review")
     elif result.decision == Decision.AUTO_APPROVE:
-        labels.append("guardian-approved")
+        if result.trust_tier == TrustTier.SPOT_CHECK:
+            labels.append("guardian-spot-check")
+        else:
+            labels.append("guardian-approved")
+
     return labels

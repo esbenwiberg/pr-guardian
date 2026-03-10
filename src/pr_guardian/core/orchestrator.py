@@ -32,6 +32,8 @@ from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.triage.classifier import classify
 from pr_guardian.triage.hotspots import load_hotspots
 from pr_guardian.triage.surface_map import build_security_surface
+from pr_guardian.triage.trust_classifier import classify_trust_tier
+from pr_guardian.triage.trust_escalation import maybe_escalate_trust
 
 log = structlog.get_logger()
 
@@ -209,6 +211,15 @@ async def _run_pipeline(
         change_profile=change_profile,
     )
 
+    # Trust tier classification (path-based, deterministic)
+    trust_tier_result = classify_trust_tier(
+        changed_files, config, context.repo_risk_class,
+    )
+    context.trust_tier_result = trust_tier_result
+    _plog("info", "discovery",
+          f"Trust tier: {trust_tier_result.resolved_tier.value}. "
+          f"Triggering files: {', '.join(trust_tier_result.triggering_files[:5]) or 'none'}.")
+
     langs = list(language_map.languages.keys())
     _plog("info", "discovery",
           f"Parsed {len(changed_files)} files across {len(langs)} language(s): {', '.join(langs)}. "
@@ -316,9 +327,18 @@ async def _run_pipeline(
                   f"Agent {ar.agent_name} raw response: {extras['raw_response_preview']}",
                   agent=ar.agent_name)
 
+    # Trust tier escalation (post-agents, one-way upward)
+    trust_tier_result = maybe_escalate_trust(
+        context.trust_tier_result, agent_results, config.trust_tiers,
+    )
+    context.trust_tier_result = trust_tier_result
+    if trust_tier_result.escalated:
+        _plog("warn", "trust_escalation",
+              f"Trust tier escalated: {' | '.join(trust_tier_result.escalation_reasons)}")
+
     # Stage 4: Decision
     await _update_stage("decision", "Computing final verdict")
-    result = decide(context, agent_results, triage_result.risk_tier, config)
+    result = decide(context, agent_results, triage_result.risk_tier, config, trust_tier_result)
     result.review_id = str(review_db_id) if review_db_id else ""
     result.mechanical_results = [_convert_mechanical(r) for r in mechanical_results]
     result.mechanical_passed = True
@@ -397,12 +417,19 @@ async def _post_results(
         if result.decision == Decision.AUTO_APPROVE:
             await adapter.approve_pr(pr)
             await adapter.set_status(pr, "success", "PR Guardian: Auto-approved")
+            # SPOT_CHECK: approved but request optional human glance
+            if result.trust_tier and result.trust_tier.value == "spot_check":
+                await adapter.request_reviewers(pr, config.human_review.reviewer_group)
         elif result.decision == Decision.REJECT:
             await adapter.request_changes(pr, comment)
             await adapter.set_status(pr, "failure", "PR Guardian: Changes requested")
         elif result.decision == Decision.HUMAN_REVIEW:
             await adapter.set_status(pr, "success", "PR Guardian: Human review required")
-            await adapter.request_reviewers(pr, config.human_review.reviewer_group)
+            reviewer_group = (
+                result.reviewer_group_override
+                or config.human_review.reviewer_group
+            )
+            await adapter.request_reviewers(pr, reviewer_group)
         elif result.decision == Decision.HARD_BLOCK:
             await adapter.set_status(pr, "failure", "PR Guardian: Blocked")
     except Exception as e:

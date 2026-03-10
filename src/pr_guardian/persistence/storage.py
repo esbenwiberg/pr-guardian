@@ -94,6 +94,13 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         now = datetime.now(timezone.utc)
         row.risk_tier = result.risk_tier.value
         row.repo_risk_class = result.repo_risk_class.value
+        row.trust_tier = result.trust_tier.value if result.trust_tier else ""
+        row.trust_tier_details = {
+            "reasons": result.trust_tier_reasons,
+            "files": result.trust_tier_files,
+            "reviewer_group_override": result.reviewer_group_override,
+            "escalated_from": result.escalated_from,
+        } if result.trust_tier else None
         row.combined_score = result.combined_score
         row.decision = result.decision.value
         row.mechanical_passed = result.mechanical_passed
@@ -580,6 +587,8 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "pr_url": row.pr_url,
         "risk_tier": row.risk_tier,
         "repo_risk_class": row.repo_risk_class,
+        "trust_tier": row.trust_tier,
+        "trust_tier_details": row.trust_tier_details,
         "combined_score": row.combined_score,
         "decision": row.decision,
         "mechanical_passed": row.mechanical_passed,
