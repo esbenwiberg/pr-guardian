@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 
 import structlog
@@ -38,11 +39,20 @@ class ReviewResponse(BaseModel):
     score: float | None = None
 
 
+async def _run_review_background(pr: PlatformPR, adapter, post_comment: bool, base_url: str) -> None:
+    """Run the review pipeline in the background, logging any errors."""
+    try:
+        await run_review(pr, adapter, post_comment=post_comment, base_url=base_url)
+    except Exception as e:
+        log.error("background_review_failed", pr_id=pr.pr_id, error=str(e))
+
+
 @router.post("/review", response_model=ReviewResponse)
 async def manual_review(req: ReviewRequest, request: Request):
-    """Manually trigger a review for a PR by URL.
+    """Trigger a review for a PR by URL.
 
-    Runs the full review pipeline synchronously and returns the result.
+    Validates the PR and starts the review pipeline in the background.
+    Returns immediately so the caller can track progress via the active reviews panel.
     """
     stub, platform_name = _parse_pr_url(req.pr_url)
     adapter = create_adapter(platform_name)
@@ -62,22 +72,14 @@ async def manual_review(req: ReviewRequest, request: Request):
 
     log.info("manual_review_started", platform=platform_name, pr_id=pr.pr_id, repo=pr.repo)
 
-    try:
-        base_url = str(request.base_url).rstrip("/")
-        result = await run_review(pr, adapter, post_comment=req.post_comment, base_url=base_url)
-    except Exception as e:
-        log.error("manual_review_failed", pr_id=pr.pr_id, error=str(e))
-        raise HTTPException(status_code=500, detail=f"Review failed: {e}")
+    base_url = str(request.base_url).rstrip("/")
+    asyncio.create_task(_run_review_background(pr, adapter, req.post_comment, base_url))
 
     return ReviewResponse(
-        status="completed",
+        status="queued",
         pr_id=pr.pr_id,
         repo=pr.repo,
         platform=platform_name,
-        decision=result.decision.value,
-        summary=result.summary,
-        risk_tier=result.risk_tier.value,
-        score=round(result.combined_score, 2),
     )
 
 

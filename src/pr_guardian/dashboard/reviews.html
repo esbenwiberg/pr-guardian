@@ -665,10 +665,9 @@ async function submitReview(e) {
       btn.textContent = 'Start Review';
       return;
     }
-    status.className = 'text-sm mr-auto text-emerald-400';
-    status.textContent = `Done — ${data.decision || data.status} (score: ${data.score ?? '-'})`;
-    btn.textContent = 'Done';
-    loadReviews();
+    closeReviewModal();
+    document.getElementById('review-form').reset();
+    loadActiveReviews();
   } catch (err) {
     status.className = 'text-sm mr-auto text-red-400';
     status.textContent = `Error: ${err.message}`;
