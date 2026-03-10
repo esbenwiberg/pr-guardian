@@ -15,48 +15,6 @@ from pr_guardian.persistence import storage
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 
 
-@router.get("/debug/db")
-async def debug_db():
-    """Temporary diagnostic: verify DB read/write works."""
-    import traceback
-    results = {}
-
-    # Test 1: Can we import storage?
-    try:
-        from pr_guardian.persistence import storage as st
-        results["import_storage"] = "ok"
-    except Exception as e:
-        results["import_storage"] = f"FAIL: {e}"
-        return results
-
-    # Test 2: Can we list reviews?
-    try:
-        reviews = await st.list_reviews(limit=5)
-        results["list_reviews"] = f"ok ({len(reviews)} reviews)"
-    except Exception as e:
-        results["list_reviews"] = f"FAIL: {e}\n{traceback.format_exc()}"
-
-    # Test 3: Can we list active reviews?
-    try:
-        active = await st.get_active_reviews()
-        results["active_reviews"] = f"ok ({len(active)} active)"
-    except Exception as e:
-        results["active_reviews"] = f"FAIL: {e}\n{traceback.format_exc()}"
-
-    # Test 4: Raw query count
-    try:
-        from pr_guardian.persistence.database import async_session
-        from pr_guardian.persistence.models import ReviewRow
-        from sqlalchemy import func, select
-        async with async_session() as session:
-            count = await session.scalar(select(func.count()).select_from(ReviewRow))
-            results["raw_count"] = f"ok ({count} rows in review table)"
-    except Exception as e:
-        results["raw_count"] = f"FAIL: {e}\n{traceback.format_exc()}"
-
-    return results
-
-
 @router.get("/stats")
 async def dashboard_stats():
     """Aggregate statistics for the dashboard overview."""
