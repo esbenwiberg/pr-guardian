@@ -21,6 +21,35 @@ router = APIRouter(prefix="/api/v1", tags=["v1"])
 
 
 # ---------------------------------------------------------------------------
+# Auth config (unauthenticated — needed by MSAL.js before login)
+# ---------------------------------------------------------------------------
+
+@router.get("/auth/config")
+async def auth_config():
+    """Return Entra ID configuration for the dashboard MSAL.js client.
+
+    This endpoint is intentionally unauthenticated — the browser needs the
+    client ID and tenant to *start* the login flow.
+    """
+    from pr_guardian.auth.entra import AUTH_ENABLED, _API_CLIENT_ID, _TENANT_ID
+
+    if not AUTH_ENABLED:
+        return {"enabled": False}
+
+    return {
+        "enabled": True,
+        "client_id": _API_CLIENT_ID,
+        "tenant_id": _TENANT_ID,
+        "scopes": [
+            f"api://{_API_CLIENT_ID}/Dashboard.Read",
+            f"api://{_API_CLIENT_ID}/Review.Execute",
+            f"api://{_API_CLIENT_ID}/Scan.Execute",
+            f"api://{_API_CLIENT_ID}/Settings.Write",
+        ],
+    }
+
+
+# ---------------------------------------------------------------------------
 # Review endpoints — require Review.Execute
 # ---------------------------------------------------------------------------
 

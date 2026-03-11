@@ -160,6 +160,7 @@
   </div>
 </div>
 
+<script src="/static/auth.js"></script>
 <script>
 const API = '/api/v1';
 const STAGES = ['queued', 'discovery', 'mechanical', 'triage', 'agents', 'decision', 'validation', 'complete'];
@@ -176,7 +177,7 @@ async function loadReviews() {
     const params = new URLSearchParams();
     if (currentFilter.decision) params.set('decision', currentFilter.decision);
     if (currentFilter.repo) params.set('repo', currentFilter.repo);
-    const resp = await fetch(`${API}/reviews?${params}`);
+    const resp = await authFetch(`${API}/reviews?${params}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const reviews = await resp.json();
     if (!Array.isArray(reviews) || !reviews.length) {
@@ -194,7 +195,7 @@ async function loadActiveReviews() {
   const container = document.getElementById('active-reviews');
   const tbody = document.getElementById('active-reviews-body');
   try {
-    const resp = await fetch(`${API}/active`);
+    const resp = await authFetch(`${API}/active`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const active = await resp.json();
     if (!Array.isArray(active) || !active.length) {
@@ -223,7 +224,7 @@ async function loadActiveReviews() {
 async function cancelReview(id) {
   if (!confirm('Cancel this review?')) return;
   try {
-    await fetch(`${API}/reviews/${id}`, { method: 'DELETE' });
+    await authFetch(`${API}/reviews/${id}`, { method: 'DELETE' });
     loadActiveReviews();
     loadReviews();
   } catch (e) {
@@ -255,7 +256,7 @@ let currentDetailReview = null;
 
 async function openDetail(id) {
   try {
-    const r = await fetch(`${API}/reviews/${id}`).then(res => res.json());
+    const r = await authFetch(`${API}/reviews/${id}`).then(res => res.json());
     if (r.error) { console.error('Review not found'); return; }
     renderDetailModal(r);
     document.getElementById('modal-overlay').classList.remove('hidden');
@@ -264,7 +265,7 @@ async function openDetail(id) {
     if (!TERMINAL_STAGES.includes(r.stage)) {
       activeDetailInterval = setInterval(async () => {
         try {
-          const updated = await fetch(`${API}/reviews/${id}`).then(res => res.json());
+          const updated = await authFetch(`${API}/reviews/${id}`).then(res => res.json());
           if (updated.error) return;
           renderDetailModal(updated);
           if (TERMINAL_STAGES.includes(updated.stage)) clearInterval(activeDetailInterval);
@@ -658,7 +659,7 @@ async function submitReview(e) {
   status.textContent = 'Submitting review request...';
 
   try {
-    const resp = await fetch('/api/v1/review', {
+    const resp = await authFetch('/api/v1/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pr_url: url, post_comment: postComment }),
@@ -761,11 +762,13 @@ function connectSSE() {
 }
 
 // ---- Init ----
-loadReviews();
-loadActiveReviews();
-connectSSE();
-setInterval(loadReviews, 30000);
-setInterval(loadActiveReviews, 5000);
+initAuth().then(() => {
+  loadReviews();
+  loadActiveReviews();
+  connectSSE();
+  setInterval(loadReviews, 30000);
+  setInterval(loadActiveReviews, 5000);
+});
 </script>
 </body>
 </html>

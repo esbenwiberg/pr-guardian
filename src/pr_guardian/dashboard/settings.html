@@ -160,6 +160,7 @@
 }
 </style>
 
+<script src="/static/auth.js"></script>
 <script>
 const API = '/api/v1';
 let currentProvider = 'anthropic';
@@ -167,7 +168,7 @@ let settingsData = null;
 
 async function loadSettings() {
   try {
-    const resp = await fetch(`${API}/settings`);
+    const resp = await authFetch(`${API}/settings`);
     settingsData = await resp.json();
     currentProvider = settingsData.active_provider || 'anthropic';
     renderProvider();
@@ -278,7 +279,7 @@ function showToast(msg, type) {
   setTimeout(() => el.classList.remove('show'), 4000);
 }
 
-loadSettings();
+initAuth().then(() => loadSettings());
 </script>
 </body>
 </html>

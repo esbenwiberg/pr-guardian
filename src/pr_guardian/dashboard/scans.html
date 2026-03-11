@@ -229,6 +229,7 @@
 
 <div class="pg-toast" id="toast"></div>
 
+<script src="/static/auth.js"></script>
 <script>
 const SCAN_ID = location.pathname.match(/\/scans\/([0-9a-f-]+)/)?.[1] || '';
 const AGENT_LABELS = {
@@ -258,7 +259,7 @@ function renderMarkdown(text) {
 // --- Stats ---
 async function loadStats() {
   try {
-    const resp = await fetch('/api/v1/scans/stats');
+    const resp = await authFetch('/api/v1/scans/stats');
     const data = await resp.json();
     document.getElementById('stats-row').innerHTML = `
       <div class="stat-card"><div class="stat-card-label">Total Scans</div><div class="stat-card-value">${data.total_scans || 0}</div></div>
@@ -276,7 +277,7 @@ async function loadScans() {
   if (typeFilter) params.set('scan_type', typeFilter);
 
   try {
-    const resp = await fetch(`/api/v1/scans?${params}`);
+    const resp = await authFetch(`/api/v1/scans?${params}`);
     const scans = await resp.json();
     document.getElementById('scan-list-loading').style.display = 'none';
 
@@ -313,7 +314,7 @@ async function loadScans() {
 // --- Detail ---
 async function loadDetail(id) {
   try {
-    const resp = await fetch(`/api/v1/scans/${id}`);
+    const resp = await authFetch(`/api/v1/scans/${id}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
@@ -791,7 +792,7 @@ async function startScan() {
       };
     }
 
-    const resp = await fetch(url, {
+    const resp = await authFetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -873,13 +874,15 @@ function connectSSE() {
 }
 
 // Init
-loadStats();
-if (SCAN_ID) {
-  loadDetail(SCAN_ID);
-} else {
-  loadScans();
-}
-connectSSE();
+initAuth().then(() => {
+  loadStats();
+  if (SCAN_ID) {
+    loadDetail(SCAN_ID);
+  } else {
+    loadScans();
+  }
+  connectSSE();
+});
 </script>
 </body>
 </html>

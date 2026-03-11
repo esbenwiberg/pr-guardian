@@ -66,6 +66,7 @@
 
 <div class="pg-toast" id="toast"></div>
 
+<script src="/static/auth.js"></script>
 <script>
 const API = '/api/v1';
 let promptData = null;
@@ -73,7 +74,7 @@ let activePromptAgent = null;
 
 async function loadPrompts() {
   try {
-    promptData = await fetch(`${API}/prompts`).then(r => r.json());
+    promptData = await authFetch(`${API}/prompts`).then(r => r.json());
     renderPromptSidebar();
     if (activePromptAgent) {
       const agent = promptData.agents.find(a => a.agent_name === activePromptAgent);
@@ -156,7 +157,7 @@ async function savePrompt(agentName) {
   status.textContent = 'Saving...';
   status.className = 'ml-auto text-xs text-slate-400';
   try {
-    const resp = await fetch(`${API}/prompts/${agentName}`, {
+    const resp = await authFetch(`${API}/prompts/${agentName}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ content }),
@@ -178,7 +179,7 @@ async function resetPrompt(agentName) {
   status.textContent = 'Resetting...';
   status.className = 'ml-auto text-xs text-slate-400';
   try {
-    const resp = await fetch(`${API}/prompts/${agentName}`, { method: 'DELETE' });
+    const resp = await authFetch(`${API}/prompts/${agentName}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error('Reset failed');
     status.textContent = 'Reset to default';
     status.className = 'ml-auto text-xs text-emerald-400';
@@ -218,7 +219,7 @@ function showToast(msg, type) {
 }
 
 // ---- Init ----
-loadPrompts();
+initAuth().then(() => loadPrompts());
 </script>
 </body>
 </html>

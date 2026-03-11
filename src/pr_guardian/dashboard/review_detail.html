@@ -126,6 +126,7 @@
   </div>
 </div>
 
+<script src="/static/auth.js"></script>
 <script>
 const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
 const DECISION_EMOJI = { auto_approve: '\u2705', human_review: '\ud83d\udc40', reject: '\u274c', hard_block: '\ud83d\udeab' };
@@ -145,7 +146,7 @@ let selectedFindings = new Set(); // "agentIdx-findingIdx"
 async function loadReview() {
   if (!REVIEW_ID) { showError('No review ID in URL.'); return; }
   try {
-    const resp = await fetch(`/api/v1/reviews/${REVIEW_ID}`);
+    const resp = await authFetch(`/api/v1/reviews/${REVIEW_ID}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
@@ -400,7 +401,7 @@ function buildExportText() {
 }
 
 // Init
-loadReview();
+initAuth().then(() => loadReview());
 </script>
 </body>
 </html>
