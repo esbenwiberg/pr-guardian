@@ -149,6 +149,18 @@ class PromptOverrideRow(Base):
     )
 
 
+class GlobalConfigRow(Base):
+    """Key-value settings configured via the dashboard (e.g. LLM provider)."""
+
+    __tablename__ = "global_config"
+
+    key: Mapped[str] = mapped_column(String(128), primary_key=True)
+    value: Mapped[str] = mapped_column(Text, default="")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Scan tables (recent changes + maintenance scans)
 # ---------------------------------------------------------------------------

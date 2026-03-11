@@ -168,6 +168,41 @@ class TrustTierConfig(BaseModel):
     escalation_min_severity: str = "medium"
 
 
+class SeverityFloorRule(BaseModel):
+    """A single suppression rule: suppress findings matching severity + certainty."""
+    severity: str  # low, medium, high, critical
+    certainty: str | None = None  # if set, both must match; if None, severity alone triggers
+
+
+class SeverityFloorConfig(BaseModel):
+    """Per-risk-tier filtering of low-value findings from review output.
+
+    Findings are suppressed from display/storage but the decision engine still
+    scores them — this only affects what the developer sees.
+    """
+    enabled: bool = True
+    # Rules per risk tier. Findings matching ANY rule are suppressed.
+    low_tier_suppress: list[SeverityFloorRule] = Field(
+        default_factory=lambda: [
+            SeverityFloorRule(severity="low"),
+        ]
+    )
+    medium_tier_suppress: list[SeverityFloorRule] = Field(
+        default_factory=lambda: [
+            SeverityFloorRule(severity="low", certainty="uncertain"),
+        ]
+    )
+    # HIGH tier: no suppression (empty list)
+    high_tier_suppress: list[SeverityFloorRule] = Field(default_factory=list)
+
+
+class ValidatorConfig(BaseModel):
+    """Adversarial validator that challenges agent findings before display."""
+    enabled: bool = True
+    min_findings_to_validate: int = 1
+    model_override: str | None = None  # e.g. use a cheaper model for validation
+
+
 class RecentChangesConfig(BaseModel):
     time_window_days: int = 7
     branch: str = "main"
@@ -207,5 +242,7 @@ class GuardianConfig(BaseModel):
     file_roles: FileRolesConfig = Field(default_factory=FileRolesConfig)
     security_surface: SecuritySurfaceConfig = Field(default_factory=SecuritySurfaceConfig)
     trust_tiers: TrustTierConfig = Field(default_factory=TrustTierConfig)
+    severity_floor: SeverityFloorConfig = Field(default_factory=SeverityFloorConfig)
+    validator: ValidatorConfig = Field(default_factory=ValidatorConfig)
     recent_changes: RecentChangesConfig = Field(default_factory=RecentChangesConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)

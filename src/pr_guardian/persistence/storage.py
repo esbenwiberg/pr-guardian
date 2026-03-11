@@ -16,6 +16,7 @@ from pr_guardian.persistence.database import async_session
 from pr_guardian.persistence.models import (
     AgentResultRow,
     FindingRow,
+    GlobalConfigRow,
     MechanicalResultRow,
     PromptOverrideRow,
     ReviewRow,
@@ -339,6 +340,53 @@ async def delete_prompt_override(agent_name: str) -> bool:
     """Delete a prompt override, reverting to the file default. Returns True if deleted."""
     async with async_session() as session:
         row = await session.get(PromptOverrideRow, agent_name)
+        if not row:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+# ---------------------------------------------------------------------------
+# Global config (dashboard settings)
+# ---------------------------------------------------------------------------
+
+
+async def get_global_config() -> dict[str, str]:
+    """Return all global config key-value pairs (secrets are decrypted)."""
+    from pr_guardian.persistence.crypto import SECRET_KEYS, decrypt
+
+    try:
+        async with async_session() as session:
+            rows = (await session.scalars(select(GlobalConfigRow))).all()
+            result: dict[str, str] = {}
+            for r in rows:
+                result[r.key] = decrypt(r.value) if r.key in SECRET_KEYS else r.value
+            return result
+    except Exception:
+        return {}
+
+
+async def set_global_config(key: str, value: str) -> None:
+    """Create or update a global config entry (secrets are encrypted)."""
+    from pr_guardian.persistence.crypto import SECRET_KEYS, encrypt
+
+    stored = encrypt(value) if key in SECRET_KEYS else value
+
+    async with async_session() as session:
+        row = await session.get(GlobalConfigRow, key)
+        if row:
+            row.value = stored
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(GlobalConfigRow(key=key, value=stored))
+        await session.commit()
+
+
+async def delete_global_config(key: str) -> bool:
+    """Delete a global config entry. Returns True if deleted."""
+    async with async_session() as session:
+        row = await session.get(GlobalConfigRow, key)
         if not row:
             return False
         await session.delete(row)

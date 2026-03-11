@@ -14,11 +14,13 @@ from pr_guardian.agents.hotspot import HotspotAgent
 from pr_guardian.agents.performance import PerformanceAgent
 from pr_guardian.agents.security_privacy import SecurityPrivacyAgent
 from pr_guardian.agents.test_quality import TestQualityAgent
-from pr_guardian.config.loader import load_repo_config
+from pr_guardian.config.loader import apply_global_settings, load_repo_config
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import build_summary_comment, get_review_labels
 from pr_guardian.decision.engine import decide
+from pr_guardian.decision.severity_filter import filter_findings
+from pr_guardian.decision.validator import validate_findings
 from pr_guardian.discovery.blast_radius import compute_blast_radius
 from pr_guardian.discovery.change_profile import build_change_profile
 from pr_guardian.discovery.dep_graph import build_dep_graph
@@ -178,6 +180,7 @@ async def _run_pipeline(
     # Stage 0: Discovery
     await _update_stage("discovery", "Parsing diff and building context")
     config = service_config or load_repo_config(repo_path)
+    config = await apply_global_settings(config)
 
     language_map = detect_languages(changed_files)
     security_surface = build_security_surface(config.security_surface, changed_files)
@@ -356,6 +359,49 @@ async def _run_pipeline(
               f"Estimated cost: ${total_cost:.4f}.")
     for reason in result.override_reasons:
         _plog("info", "decision", f"Override: {reason}")
+
+    # Stage 5: Post-decision noise reduction
+    # Severity floor: suppress low-value findings per risk tier (display only,
+    # scoring already happened on the full set inside decide()).
+    filtered_results, suppressed_count = filter_findings(
+        result.agent_results, triage_result.risk_tier, config,
+    )
+    result.agent_results = filtered_results
+    if suppressed_count:
+        _plog("info", "noise_reduction",
+              f"Severity floor suppressed {suppressed_count} finding(s) "
+              f"(risk tier: {triage_result.risk_tier.value}).")
+
+    # Validator: adversarial critic challenges remaining findings.
+    remaining_finding_count = sum(len(r.findings) for r in result.agent_results)
+    if remaining_finding_count > 0:
+        await _update_stage("validation", "Challenging findings with validator agent")
+        validated_results, validator_meta = await validate_findings(
+            result.agent_results, context, config,
+        )
+        result.agent_results = validated_results
+        if validator_meta.get("validator_ran"):
+            dismissed = validator_meta["dismissed"]
+            downgraded = validator_meta["downgraded"]
+            val_in = validator_meta.get("input_tokens", 0)
+            val_out = validator_meta.get("output_tokens", 0)
+            total_input_tokens += val_in
+            total_output_tokens += val_out
+            if val_in or val_out:
+                val_cost = _estimate_cost(
+                    config.validator.model_override or "", val_in, val_out,
+                )
+                total_cost += val_cost
+            result.total_input_tokens = total_input_tokens
+            result.total_output_tokens = total_output_tokens
+            result.cost_usd = round(total_cost, 6)
+            _plog("info", "noise_reduction",
+                  f"Validator: {dismissed} dismissed, {downgraded} downgraded "
+                  f"out of {remaining_finding_count} finding(s).")
+        if validator_meta.get("error"):
+            _plog("warn", "noise_reduction",
+                  f"Validator error (findings kept as-is): {validator_meta['error']}")
+
     result.pipeline_log = pipeline_log
 
     # Post results

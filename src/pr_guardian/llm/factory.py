@@ -30,15 +30,27 @@ def create_llm_client(
     return _build_client(provider_cfg)
 
 
+def _resolve_api_key(cfg: LLMProviderConfig) -> str:
+    """Resolve API key: cfg.api_key (DB/config) wins over env var."""
+    if cfg.api_key:
+        return cfg.api_key
+    if cfg.api_key_env:
+        return os.environ.get(cfg.api_key_env, "")
+    return ""
+
+
 def _build_client(cfg: LLMProviderConfig) -> LLMClient:
     if cfg.type == "anthropic":
-        api_key = os.environ.get(cfg.api_key_env, cfg.api_key) if cfg.api_key_env else cfg.api_key
-        return AnthropicClient(api_key=api_key, default_model=cfg.default_model)
+        return AnthropicClient(api_key=_resolve_api_key(cfg), default_model=cfg.default_model)
 
     if cfg.type == "azure-openai":
         endpoint = os.environ.get(cfg.endpoint_env, "") if cfg.endpoint_env else ""
-        api_key = os.environ.get(cfg.api_key_env, cfg.api_key) if cfg.api_key_env else cfg.api_key
-        return AzureFoundryClient(endpoint=endpoint, api_key=api_key, default_model=cfg.default_model)
+        return AzureFoundryClient(endpoint=endpoint, api_key=_resolve_api_key(cfg), default_model=cfg.default_model)
+
+    if cfg.type == "azure-ai-foundry":
+        return AnthropicClient(
+            api_key=_resolve_api_key(cfg), default_model=cfg.default_model, base_url=cfg.base_url,
+        )
 
     if cfg.type == "openai-compatible":
         return OpenAICompatClient(

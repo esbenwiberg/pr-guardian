@@ -1,6 +1,7 @@
 """Dashboard API: stats, review list, review detail, active reviews, and SSE stream."""
 from __future__ import annotations
 
+import os
 import uuid
 
 from fastapi import APIRouter, Query
@@ -147,3 +148,97 @@ async def reset_prompt(agent_name: str):
     """Delete a prompt override, reverting to the file default."""
     deleted = await storage.delete_prompt_override(agent_name)
     return {"status": "reset" if deleted else "no_override", "agent_name": agent_name}
+
+
+# ---------------------------------------------------------------------------
+# Settings (LLM provider)
+# ---------------------------------------------------------------------------
+
+
+def _mask_key(key: str | None) -> str:
+    """Return masked version of an API key for display, or empty string."""
+    if not key:
+        return ""
+    if len(key) <= 8:
+        return "****"
+    return key[:4] + "****" + key[-4:]
+
+
+@router.get("/settings")
+async def get_settings():
+    """Current LLM provider settings (API keys are masked)."""
+    try:
+        config = await storage.get_global_config()
+    except Exception:
+        config = {}
+
+    active = config.get("llm.active_provider", "anthropic")
+
+    # Anthropic key: DB override > env var
+    anthropic_db_key = config.get("llm.anthropic.api_key", "")
+    anthropic_env_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    anthropic_key = anthropic_db_key or anthropic_env_key
+
+    # Azure AI Foundry
+    azure_db_key = config.get("llm.azure_ai_foundry.api_key", "")
+    azure_env_key = os.environ.get("AZURE_AI_FOUNDRY_API_KEY", "")
+    azure_key = azure_db_key or azure_env_key
+    azure_endpoint = config.get("llm.azure_ai_foundry.endpoint_url", "")
+
+    return {
+        "active_provider": active,
+        "anthropic": {
+            "api_key_masked": _mask_key(anthropic_key),
+            "api_key_source": "settings" if anthropic_db_key else ("env" if anthropic_env_key else ""),
+        },
+        "azure_ai_foundry": {
+            "endpoint_url": azure_endpoint,
+            "api_key_masked": _mask_key(azure_key),
+            "api_key_source": "settings" if azure_db_key else ("env" if azure_env_key else ""),
+        },
+    }
+
+
+class SettingsUpdate(BaseModel):
+    active_provider: str  # "anthropic" or "azure-ai-foundry"
+    anthropic_api_key: str | None = None  # blank = keep existing
+    azure_endpoint_url: str | None = None
+    azure_api_key: str | None = None  # blank = keep existing
+
+
+@router.put("/settings")
+async def update_settings(body: SettingsUpdate):
+    """Update LLM provider settings."""
+    if body.active_provider not in ("anthropic", "azure-ai-foundry"):
+        return {"status": "error", "detail": "Invalid provider"}
+
+    # Validate: switching to azure requires endpoint + key
+    if body.active_provider == "azure-ai-foundry":
+        try:
+            existing = await storage.get_global_config()
+        except Exception:
+            existing = {}
+
+        has_endpoint = body.azure_endpoint_url or existing.get("llm.azure_ai_foundry.endpoint_url")
+        has_key = (
+            body.azure_api_key
+            or existing.get("llm.azure_ai_foundry.api_key")
+            or os.environ.get("AZURE_AI_FOUNDRY_API_KEY")
+        )
+        if not has_endpoint:
+            return {"status": "error", "detail": "Azure AI Foundry endpoint URL is required"}
+        if not has_key:
+            return {"status": "error", "detail": "Azure AI Foundry API key is required"}
+
+    await storage.set_global_config("llm.active_provider", body.active_provider)
+
+    if body.anthropic_api_key:
+        await storage.set_global_config("llm.anthropic.api_key", body.anthropic_api_key)
+
+    if body.azure_endpoint_url is not None:
+        await storage.set_global_config("llm.azure_ai_foundry.endpoint_url", body.azure_endpoint_url)
+
+    if body.azure_api_key:
+        await storage.set_global_config("llm.azure_ai_foundry.api_key", body.azure_api_key)
+
+    return {"status": "saved"}

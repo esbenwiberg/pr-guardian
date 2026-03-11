@@ -8,7 +8,7 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from pr_guardian.config.loader import load_service_defaults
+from pr_guardian.config.loader import apply_global_settings, load_service_defaults
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.maintenance import run_maintenance_scan
 from pr_guardian.core.recent_changes import run_recent_changes_scan
@@ -58,7 +58,7 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    config = GuardianConfig(**load_service_defaults())
+    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
 
     async def _run():
         try:
@@ -93,7 +93,7 @@ async def trigger_maintenance_scan(req: MaintenanceScanRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    config = GuardianConfig(**load_service_defaults())
+    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
 
     async def _run():
         try:

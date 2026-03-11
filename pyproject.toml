@@ -22,6 +22,7 @@ dependencies = [
     "jinja2",
     "anthropic",
     "openai",
+    "cryptography>=43.0",
 ]
 
 [project.optional-dependencies]

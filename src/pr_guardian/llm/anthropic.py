@@ -6,17 +6,26 @@ from pr_guardian.llm.protocol import LLMResponse
 
 
 class AnthropicClient:
-    """Anthropic Claude provider."""
+    """Anthropic Claude provider (direct API or Azure AI Foundry via base_url)."""
 
-    def __init__(self, api_key: str | None = None, default_model: str = "claude-sonnet-4-6"):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        default_model: str = "claude-sonnet-4-6",
+        base_url: str | None = None,
+    ):
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self._default_model = default_model
+        self._base_url = base_url or None
         self._client: object | None = None
 
     def _get_client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.AsyncAnthropic(api_key=self._api_key)
+            kwargs: dict = {"api_key": self._api_key}
+            if self._base_url:
+                kwargs["base_url"] = self._base_url
+            self._client = anthropic.AsyncAnthropic(**kwargs)
         return self._client
 
     async def complete(
@@ -49,4 +58,4 @@ class AnthropicClient:
 
     @property
     def provider_name(self) -> str:
-        return "anthropic"
+        return "azure-ai-foundry" if self._base_url else "anthropic"

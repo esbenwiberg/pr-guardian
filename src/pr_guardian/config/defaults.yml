@@ -9,6 +9,14 @@ llm:
         - claude-opus-4-6
         - claude-sonnet-4-6
         - claude-haiku-4-5
+    azure-ai-foundry:
+      type: azure-ai-foundry
+      api_key_env: AZURE_AI_FOUNDRY_API_KEY
+      base_url: ""
+      default_model: claude-sonnet-4-6
+      models:
+        - claude-sonnet-4-6
+        - claude-haiku-4-5
   max_tokens: 4096
   temperature: 0.1
   timeout_seconds: 120

@@ -30,6 +30,12 @@ IMPORTANT — EVIDENCE RULES:
 - Never infer file contents from filenames or common patterns. If you cannot cite a specific line or pattern from the visible diff, do not report a finding.
 - Findings that speculate about code you have not seen will be discarded.
 
+IMPORTANT — SCOPE RULES:
+- Only flag issues in lines the PR ADDS or MODIFIES (lines starting with `+` in the diff).
+- Do NOT flag pre-existing patterns, style issues, or code smells in context lines (lines starting with ` ` or `-`). These are handled by separate scheduled scans.
+- Exception: you MAY flag surrounding context if the NEW code in this PR creates a risk that did not exist before — e.g., new code that misuses an existing variable in an unsafe way. In that case, explain in the description why this is a NEW risk introduced by this change, not a pre-existing issue.
+- Findings about pre-existing code that is not affected by this change will be discarded.
+
 Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching this schema:
 {
   "verdict": "pass | warn | flag_human",
