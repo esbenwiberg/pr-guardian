@@ -52,12 +52,61 @@ async def lifespan(app: FastAPI):
         yield
 
 
+_ENTRA_TENANT_ID = os.environ.get("ENTRA_TENANT_ID", "")
+_ENTRA_API_CLIENT_ID = os.environ.get("ENTRA_API_CLIENT_ID", "")
+
+# OpenAPI security scheme (informational — tells generated clients about Bearer auth)
+_openapi_security: dict | list = []
+if _ENTRA_TENANT_ID and _ENTRA_API_CLIENT_ID:
+    _openapi_security = [{"EntraID": []}]
+
 app = FastAPI(
     title="PR Guardian",
-    description="Automated PR review pipeline",
+    description="Automated PR review pipeline with Entra ID auth",
     version="0.2.0",
     lifespan=lifespan,
+    swagger_ui_init_oauth={
+        "clientId": _ENTRA_API_CLIENT_ID,
+        "scopes": f"api://{_ENTRA_API_CLIENT_ID}/.default",
+    } if _ENTRA_API_CLIENT_ID else None,
 )
+
+# Add OAuth2 security scheme to OpenAPI spec when auth is configured
+if _ENTRA_TENANT_ID and _ENTRA_API_CLIENT_ID:
+    from fastapi.openapi.utils import get_openapi
+
+    def _custom_openapi():
+        if app.openapi_schema:
+            return app.openapi_schema
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
+        schema["components"] = schema.get("components", {})
+        schema["components"]["securitySchemes"] = {
+            "EntraID": {
+                "type": "oauth2",
+                "flows": {
+                    "authorizationCode": {
+                        "authorizationUrl": f"https://login.microsoftonline.com/{_ENTRA_TENANT_ID}/oauth2/v2.0/authorize",
+                        "tokenUrl": f"https://login.microsoftonline.com/{_ENTRA_TENANT_ID}/oauth2/v2.0/token",
+                        "scopes": {
+                            f"api://{_ENTRA_API_CLIENT_ID}/Review.Execute": "Trigger PR reviews",
+                            f"api://{_ENTRA_API_CLIENT_ID}/Scan.Execute": "Trigger scans",
+                            f"api://{_ENTRA_API_CLIENT_ID}/Dashboard.Read": "Read dashboard data",
+                            f"api://{_ENTRA_API_CLIENT_ID}/Settings.Write": "Modify settings",
+                        },
+                    },
+                },
+            },
+        }
+        schema["security"] = [{"EntraID": []}]
+        app.openapi_schema = schema
+        return schema
+
+    app.openapi = _custom_openapi
 
 # --- Versioned API (auth-protected) ---
 app.include_router(v1_router)

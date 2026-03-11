@@ -5,12 +5,16 @@ Health and webhook endpoints remain outside the versioned prefix (no auth).
 """
 from __future__ import annotations
 
+import csv
+import io
+import json
 import uuid
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 
 from pr_guardian.auth.permissions import require_permission
+from pr_guardian.persistence import storage
 
 # Re-use existing endpoint logic — import the handler internals
 from pr_guardian.api import dashboard as _dash
@@ -220,3 +224,104 @@ async def get_settings():
 )
 async def update_settings(body: _dash.SettingsUpdate):
     return await _dash.update_settings(body)
+
+
+# ---------------------------------------------------------------------------
+# Export endpoints — findings as JSON or CSV for CLI / integrations
+# ---------------------------------------------------------------------------
+
+@router.get(
+    "/reviews/{review_id}/export",
+    dependencies=[Depends(require_permission("Dashboard.Read"))],
+)
+async def export_review_findings(
+    review_id: uuid.UUID,
+    format: str = Query("json", regex="^(json|csv)$"),
+):
+    """Export review findings as JSON or CSV."""
+    row = await storage.get_review(review_id)
+    if not row:
+        return Response(status_code=404, content="Review not found")
+
+    findings = _extract_review_findings(row)
+
+    if format == "csv":
+        return _findings_to_csv(findings, f"review-{review_id}")
+    return findings
+
+
+@router.get(
+    "/scans/{scan_id}/export",
+    dependencies=[Depends(require_permission("Dashboard.Read"))],
+)
+async def export_scan_findings(
+    scan_id: uuid.UUID,
+    format: str = Query("json", regex="^(json|csv)$"),
+):
+    """Export scan findings as JSON or CSV."""
+    row = await storage.get_scan(scan_id)
+    if not row:
+        return Response(status_code=404, content="Scan not found")
+
+    findings = _extract_scan_findings(row)
+
+    if format == "csv":
+        return _findings_to_csv(findings, f"scan-{scan_id}")
+    return findings
+
+
+def _extract_review_findings(row: dict) -> list[dict]:
+    """Flatten agent results into a list of finding dicts."""
+    findings = []
+    agents = row.get("agent_results") or []
+    for agent in agents:
+        agent_name = agent.get("agent_name", "unknown")
+        for f in agent.get("findings", []):
+            findings.append({
+                "agent": agent_name,
+                "severity": f.get("severity", ""),
+                "category": f.get("category", ""),
+                "file": f.get("file", ""),
+                "line": f.get("line", ""),
+                "title": f.get("title", ""),
+                "description": f.get("description", ""),
+            })
+    return findings
+
+
+def _extract_scan_findings(row: dict) -> list[dict]:
+    """Flatten scan agent results into a list of finding dicts."""
+    findings = []
+    agents = row.get("agent_results") or []
+    for agent in agents:
+        agent_name = agent.get("agent_name", "unknown")
+        for f in agent.get("findings", []):
+            findings.append({
+                "agent": agent_name,
+                "severity": f.get("severity", ""),
+                "category": f.get("category", ""),
+                "file": f.get("file", ""),
+                "line": f.get("line", ""),
+                "title": f.get("title", ""),
+                "description": f.get("description", ""),
+            })
+    return findings
+
+
+def _findings_to_csv(findings: list[dict], filename: str) -> Response:
+    """Convert findings list to a CSV download response."""
+    if not findings:
+        cols = ["agent", "severity", "category", "file", "line", "title", "description"]
+    else:
+        cols = list(findings[0].keys())
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=cols)
+    writer.writeheader()
+    writer.writerows(findings)
+
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}.csv"'},
+    )
