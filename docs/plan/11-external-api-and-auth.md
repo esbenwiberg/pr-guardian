@@ -365,14 +365,16 @@ calls return 401 and the JS redirects to login.
 
 ```toml
 # pyproject.toml additions
-"msal",                  # Entra ID token acquisition (ADO SP, test tooling)
-"PyJWT>=2.0",            # GitHub App JWT signing
-"fastapi-azure-auth",    # JWT validation middleware
+"msal",                      # Entra ID token acquisition (ADO SP, test tooling)
+"PyJWT>=2.0",                # GitHub App JWT signing
+"fastapi-azure-auth",        # JWT validation middleware
+"azure-identity",            # DefaultAzureCredential (managed identity, CLI, etc.)
+"azure-keyvault-secrets",    # Key Vault SecretClient
 ```
 
 ```
 # Dashboard (CDN or vendored)
-@azure/msal-browser      # Browser-side auth for dashboard
+@azure/msal-browser          # Browser-side auth for dashboard
 ```
 
 ---
@@ -384,6 +386,13 @@ calls return 401 and the JS redirects to login.
 ```
 ENTRA_TENANT_ID          Entra ID tenant
 ENTRA_API_CLIENT_ID      API app registration client ID
+```
+
+### Key Vault (optional, recommended for production)
+
+```
+AZURE_KEYVAULT_URL       https://prguardian-dev-kv.vault.azure.net/
+                         (omit to disable — secrets fall back to env vars)
 ```
 
 ### Azure DevOps (choose one)
@@ -428,17 +437,19 @@ AZURE_AI_FOUNDRY_ENDPOINT
 
 ## 8  Implementation Order
 
-### Phase 1 — Auth Middleware + API Versioning
+### Phase 1 — Key Vault, Auth Middleware & API Versioning
 
 1. Add `src/pr_guardian/auth/` module:
+   - `keyvault.py` — Key Vault init + `get_secret()` with env-var fallback
    - `entra.py` — JWT validation dependency (fastapi-azure-auth config)
    - `permissions.py` — `require_permission()` dependency factory
-2. Create versioned router mount at `/api/v1/`
-3. Apply auth dependencies to all `/api/v1/*` routes
-4. Keep `/api/health` and `/api/webhooks/*` unauthenticated
-5. Add `ENTRA_TENANT_ID` and `ENTRA_API_CLIENT_ID` to config
-6. Feature flag: if Entra env vars are not set, skip auth (dev mode with
-   warning log)
+2. Wire Key Vault into `main.py` lifespan (before DB init)
+3. Create versioned router mount at `/api/v1/`
+4. Apply auth dependencies to all `/api/v1/*` routes
+5. Keep `/api/health` and `/api/webhooks/*` unauthenticated
+6. Add `ENTRA_TENANT_ID`, `ENTRA_API_CLIENT_ID`, `AZURE_KEYVAULT_URL` to config
+7. Feature flag: if Entra env vars are not set, skip auth (dev mode with
+   warning log). If Key Vault URL is not set, fall back to env vars.
 
 ### Phase 2 — ADO Service Principal
 
@@ -489,17 +500,114 @@ AZURE_AI_FOUNDRY_ENDPOINT
 
 ---
 
-## 10  Open Questions
+## 10  Decisions (Resolved)
 
-1. **Single vs separate app registrations for CLI and dashboard?** — A single
-   "PR Guardian" public client registration can serve both (device code for
-   CLI, auth code + PKCE for SPA). Simplifies management.
-2. **App roles on users?** — Should Entra ID users be assigned app roles to
-   control who can do what? Or is "any authenticated tenant member can do
-   everything" sufficient initially?
-3. **Multi-tenant?** — Current design is single-tenant. If PR Guardian is
-   offered to other orgs, switch to multi-tenant validation and add
-   tenant-allowlisting.
-4. **Key Vault integration** — Should the GitHub App private key be fetched
-   from Key Vault at startup (via managed identity), or is an env var
-   sufficient?
+1. **Single app registration for CLI and dashboard.** One public client
+   registration supports both device-code (CLI) and auth-code + PKCE
+   (dashboard SPA). Fewer moving parts, one client ID to configure. If
+   independent revocation is ever needed, handle it in API logic.
+
+2. **No role-based gating initially.** Any authenticated tenant user gets
+   full access. The permission names (`Review.Execute`, `Dashboard.Read`,
+   etc.) are defined in the Entra ID app and in the code structure, so
+   adding role checks later requires no refactoring — just enable the
+   checks. Identity is still captured (`oid` / `preferred_username` in the
+   token) for audit purposes.
+
+3. **Single-tenant only.** Authority is
+   `https://login.microsoftonline.com/{tenant-id}`. Multi-tenant (switching
+   to `/common` + tenant allowlist) is a straightforward migration if needed
+   later.
+
+4. **Azure Key Vault for all platform secrets.** The Container App's managed
+   identity fetches secrets at startup. This covers:
+   - GitHub App private key
+   - ADO service principal client secret (or certificate)
+   - Any future secrets (LLM keys could migrate here too)
+
+   Benefits: rotation without redeployment (restart picks up new version),
+   audit log on every secret access, no secrets in env vars or config.
+
+   Implementation: use `azure-identity` (`DefaultAzureCredential`) +
+   `azure-keyvault-secrets` (`SecretClient`). At startup, resolve configured
+   Key Vault secret names → inject into adapters. Env-var fallback for local
+   dev (when Key Vault is not available).
+
+---
+
+## 11  Key Vault Integration Detail
+
+### 11.1  Secret Layout
+
+```
+Key Vault: prguardian-dev-kv (or via AZURE_KEYVAULT_URL env var)
+
+Secrets:
+  github-app-private-key       PEM-encoded RSA private key
+  ado-client-secret            Entra ID SP client secret for ADO
+  guardian-secret-key           Fernet master key for DB encryption
+```
+
+### 11.2  Access Policy
+
+- Container App managed identity gets `Secret > Get, List` on the Key Vault
+- No other principals need secret access in normal operation
+- Rotation: update the secret in Key Vault, restart the Container App (or
+  implement background refresh on a timer)
+
+### 11.3  Code Pattern
+
+```python
+# src/pr_guardian/auth/keyvault.py
+from azure.identity import DefaultAzureCredential
+from azure.keyvault.secrets import SecretClient
+
+_client: SecretClient | None = None
+
+async def init_keyvault():
+    global _client
+    vault_url = os.environ.get("AZURE_KEYVAULT_URL")
+    if not vault_url:
+        log.info("keyvault_disabled", hint="Set AZURE_KEYVAULT_URL to enable")
+        return
+    _client = SecretClient(vault_url=vault_url, credential=DefaultAzureCredential())
+    log.info("keyvault_ready", vault=vault_url)
+
+def get_secret(name: str, fallback_env: str = "") -> str:
+    """Fetch from Key Vault, fall back to env var."""
+    if _client:
+        try:
+            return _client.get_secret(name).value or ""
+        except Exception:
+            log.warning("keyvault_secret_miss", name=name)
+    return os.environ.get(fallback_env, "")
+```
+
+### 11.4  Startup Integration
+
+In `main.py` lifespan:
+1. `await init_keyvault()` (if `AZURE_KEYVAULT_URL` is set)
+2. Resolve platform secrets via `get_secret()` with env-var fallbacks
+3. Pass resolved secrets to adapter factories
+
+### 11.5  New Dependencies
+
+```toml
+"azure-identity",           # DefaultAzureCredential (managed identity, CLI, etc.)
+"azure-keyvault-secrets",   # SecretClient
+```
+
+### 11.6  Environment Variables
+
+```
+AZURE_KEYVAULT_URL    https://prguardian-dev-kv.vault.azure.net/
+                      (omit to disable Key Vault, use env-var fallbacks)
+```
+
+### 11.7  Revised Implementation Order
+
+Phase 1 becomes:
+1. Key Vault module (`auth/keyvault.py`)
+2. Auth middleware (`auth/entra.py`, `auth/permissions.py`)
+3. API versioning (`/api/v1/`)
+4. Wire Key Vault into lifespan + adapter factories
