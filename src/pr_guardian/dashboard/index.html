@@ -135,8 +135,9 @@
 </div>
 </div>
 
+<script src="/static/auth.js"></script>
 <script>
-const API = '/api/dashboard';
+const API = '/api/v1';
 const STAGES = ['queued', 'discovery', 'mechanical', 'triage', 'agents', 'decision', 'validation', 'complete'];
 const TERMINAL_STAGES = ['complete', 'error'];
 const DECISION_COLORS = { auto_approve: '#00b894', human_review: '#fdcb6e', reject: '#e17055', hard_block: '#d63031' };
@@ -175,7 +176,7 @@ function handleEvent(evt) {
 // ---- Data Loading ----
 async function loadStats() {
   try {
-    const stats = await fetch(`${API}/stats`).then(r => r.json());
+    const stats = await authFetch(`${API}/stats`).then(r => r.json());
     document.getElementById('stat-total').textContent = stats.total_reviews;
     document.getElementById('stat-approved').textContent = stats.decision_counts.auto_approve || 0;
     document.getElementById('stat-human').textContent = stats.decision_counts.human_review || 0;
@@ -195,7 +196,7 @@ async function loadStats() {
 
 async function loadActive() {
   try {
-    const reviews = await fetch(`${API}/active`).then(r => r.json());
+    const reviews = await authFetch(`${API}/active`).then(r => r.json());
     const el = document.getElementById('active-list');
     const countEl = document.getElementById('active-count');
     countEl.textContent = `${reviews.length} active`;
@@ -212,7 +213,7 @@ async function loadActive() {
 async function cancelReview(id) {
   if (!confirm('Cancel this review?')) return;
   try {
-    await fetch(`${API}/reviews/${id}`, { method: 'DELETE' });
+    await authFetch(`${API}/reviews/${id}`, { method: 'DELETE' });
     loadActive();
     loadStats();
   } catch (e) {
@@ -358,13 +359,15 @@ function formatElapsed(iso) {
 }
 
 // ---- Init ----
-connectSSE();
-loadStats();
-loadActive();
+initAuth().then(() => {
+  connectSSE();
+  loadStats();
+  loadActive();
 
-// Periodic refresh
-setInterval(loadActive, 5000);
-setInterval(loadStats, 30000);
+  // Periodic refresh
+  setInterval(loadActive, 5000);
+  setInterval(loadStats, 30000);
+});
 </script>
 </body>
 </html>

@@ -29,23 +29,51 @@ def _unified_diff(old: str, new: str, path: str) -> str:
 
 
 class ADOAdapter:
-    """Azure DevOps platform adapter using REST API."""
+    """Azure DevOps platform adapter using REST API.
 
-    def __init__(self, pat: str = "", org_url: str = ""):
+    Supports two auth modes (auto-detected by factory):
+    - PAT: ``pat=<token>`` — Basic auth, user-scoped
+    - Service principal: ``sp_auth=<ADOServicePrincipalAuth>`` — Bearer auth,
+      org-scoped, auto-rotating via MSAL
+    """
+
+    def __init__(
+        self,
+        pat: str = "",
+        org_url: str = "",
+        sp_auth: object | None = None,  # ADOServicePrincipalAuth (optional import)
+    ):
         self._pat = pat
         self._org_url = org_url.rstrip("/")
+        self._sp_auth = sp_auth  # ADOServicePrincipalAuth | None
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            encoded = base64.b64encode(f":{self._pat}".encode()).decode()
-            self._client = httpx.AsyncClient(
-                headers={
-                    "Authorization": f"Basic {encoded}",
-                    "Content-Type": "application/json",
-                },
-                timeout=30.0,
-            )
+            if self._sp_auth is not None:
+                # Service principal: Bearer token (MSAL handles caching/refresh)
+                token = self._sp_auth.get_token()
+                self._client = httpx.AsyncClient(
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+            else:
+                # PAT: Basic auth
+                encoded = base64.b64encode(f":{self._pat}".encode()).decode()
+                self._client = httpx.AsyncClient(
+                    headers={
+                        "Authorization": f"Basic {encoded}",
+                        "Content-Type": "application/json",
+                    },
+                    timeout=30.0,
+                )
+        elif self._sp_auth is not None:
+            # Refresh token on existing client (MSAL caches, so this is cheap)
+            token = self._sp_auth.get_token()
+            self._client.headers["Authorization"] = f"Bearer {token}"
         return self._client
 
     @staticmethod
