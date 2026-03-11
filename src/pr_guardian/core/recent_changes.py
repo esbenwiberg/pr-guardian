@@ -14,6 +14,8 @@ from pr_guardian.agents.scan.integration_risk import IntegrationRiskAgent
 from pr_guardian.agents.scan.trend import TrendAgent
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
+from pr_guardian.decision.scan_severity_filter import filter_scan_findings
+from pr_guardian.decision.scan_validator import validate_scan_findings
 from pr_guardian.models.scan import ScanContext, ScanResult, ScanType
 from pr_guardian.platform.protocol import PlatformAdapter
 
@@ -278,10 +280,38 @@ async def _run_recent_pipeline(
         if ar.error:
             _plog("error", "analysis", f"Agent {ar.agent_name} error: {ar.error}")
 
+    # Stage 2b: Noise reduction — severity floor + adversarial validator
+    agent_results_list = list(agent_results)
+
+    agent_results_list, suppressed_count = filter_scan_findings(agent_results_list, config)
+    if suppressed_count:
+        _plog("info", "analysis", f"Severity floor suppressed {suppressed_count} finding(s).")
+        total_findings -= suppressed_count
+
+    validated_results, validator_meta = await validate_scan_findings(
+        agent_results_list, context, config,
+    )
+    if validator_meta.get("validator_ran"):
+        dismissed = validator_meta.get("dismissed", 0)
+        downgraded = validator_meta.get("downgraded", 0)
+        total_findings -= dismissed
+        _plog("info", "analysis",
+               f"Validator: {dismissed} dismissed, {downgraded} downgraded.")
+        # Track validator cost
+        v_in = validator_meta.get("input_tokens", 0)
+        v_out = validator_meta.get("output_tokens", 0)
+        total_input_tokens += v_in
+        total_output_tokens += v_out
+        if v_in or v_out:
+            total_cost += _estimate_cost(
+                config.validator.model_override or "", v_in, v_out,
+            )
+        agent_results_list = validated_results
+
     # Stage 3: Report
     await _update_stage("scan_report", "Building scan report")
 
-    summaries = [ar.summary for ar in agent_results if ar.summary]
+    summaries = [ar.summary for ar in agent_results_list if ar.summary]
     overall_summary = " | ".join(summaries) if summaries else "Scan complete."
 
     _plog("info", "report",
@@ -295,7 +325,7 @@ async def _run_recent_pipeline(
         started_at=started_at.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
         time_window_days=days,
-        agent_results=agent_results,
+        agent_results=agent_results_list,
         total_findings=total_findings,
         summary=overall_summary,
         pipeline_log=pipeline_log,

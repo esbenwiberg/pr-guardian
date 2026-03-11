@@ -5,6 +5,22 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PR Guardian — Scans</title>
 <link rel="stylesheet" href="/static/styles.css">
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  .prose { color: #94a3b8; font-size: 0.875rem; line-height: 1.75; }
+  .prose h1, .prose h2, .prose h3, .prose h4 { color: #e2e8f0; font-weight: 600; margin-top: 1.25em; margin-bottom: 0.5em; }
+  .prose h1 { font-size: 1.25rem; } .prose h2 { font-size: 1.1rem; } .prose h3 { font-size: 1rem; }
+  .prose p { margin-bottom: 0.75em; }
+  .prose ul, .prose ol { padding-left: 1.5em; margin-bottom: 0.75em; }
+  .prose li { margin-bottom: 0.25em; }
+  .prose strong { color: #cbd5e1; }
+  .prose em { color: #cbd5e1; font-style: italic; }
+  .prose code { background: rgba(30,41,59,.5); padding: .1em .35em; border-radius: .25rem; font-size: .85em; }
+  .prose blockquote { border-left: 3px solid #334155; padding-left: 1em; color: #64748b; margin: 0 0 .75em; }
+  .prose hr { border-color: #334155; margin: 1.25em 0; }
+  .prose a { color: #6ee7b7; text-decoration: underline; }
+  .prose > :first-child { margin-top: 0; } .prose > :last-child { margin-bottom: 0; }
+</style>
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
 
@@ -90,7 +106,25 @@
     </div>
 
     <div class="grid grid-cols-4 gap-3 mb-6" id="detail-stats"></div>
-    <div id="detail-summary" class="card card-body text-sm leading-relaxed text-slate-400 mb-6" style="display:none"></div>
+    <div id="detail-summary" class="card card-body mb-6" style="display:none">
+      <div id="detail-summary-content" class="prose"></div>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="flex items-center gap-2.5 mb-4 flex-wrap" id="toolbar" style="display:none">
+      <span class="text-sm text-slate-400" id="selection-count">0 selected</span>
+      <span class="text-slate-600 mx-1">|</span>
+      <span class="text-2xs text-slate-500 uppercase tracking-wide">Certainty:</span>
+      <button class="btn btn-sm btn-secondary certainty-btn active" data-certainty="detected,suspected" onclick="setCertaintyFilter('detected,suspected')">Detected + Suspected</button>
+      <button class="btn btn-sm btn-secondary certainty-btn" data-certainty="all" onclick="setCertaintyFilter('all')">All (incl. Uncertain)</button>
+      <span class="text-slate-600 mx-1 ml-auto">|</span>
+      <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high')">Select Critical + High</button>
+      <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high','medium')">+ Medium</button>
+      <button class="btn btn-sm btn-secondary" onclick="selectAll()">Select All</button>
+      <button class="btn btn-sm btn-secondary" onclick="deselectAll()">Deselect All</button>
+      <button class="btn btn-sm btn-primary" id="export-btn" onclick="openExport()" disabled>Export for Agent Fix</button>
+    </div>
+
     <div id="detail-agents"></div>
   </div>
 </div>
@@ -173,6 +207,26 @@
   </div>
 </div>
 
+<!-- Export modal -->
+<div id="export-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeExport()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-3xl">
+      <div class="dialog-header">
+        <h2 class="text-base font-semibold">Export Findings for Agent Fix</h2>
+        <button class="btn btn-ghost btn-sm" onclick="closeExport()">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <textarea id="export-text" class="form-textarea font-mono text-xs min-h-[300px]" readonly></textarea>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary" onclick="closeExport()">Close</button>
+        <button class="btn btn-primary" id="copy-btn" onclick="copyExport()">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="pg-toast" id="toast"></div>
 
 <script>
@@ -189,7 +243,17 @@ const AGENT_LABELS = {
 };
 const TYPE_LABELS = { recent_changes: 'Recent Changes', maintenance: 'Maintenance' };
 
+let scanData = null;
+let selectedFindings = new Set(); // "agentIdx-findingIdx"
+let certaintyFilter = 'detected,suspected'; // default: hide uncertain
+
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function renderMarkdown(text) {
+  // Convert pipe-separated sections to paragraph breaks for readability
+  const processed = text.replace(/ \| /g, '\n\n');
+  return marked.parse(processed);
+}
 
 // --- Stats ---
 async function loadStats() {
@@ -261,6 +325,9 @@ async function loadDetail(id) {
 }
 
 function renderDetail(d) {
+  scanData = d;
+  selectedFindings.clear();
+
   document.getElementById('list-view').classList.add('hidden');
   document.getElementById('detail-view').classList.remove('hidden');
 
@@ -279,40 +346,50 @@ function renderDetail(d) {
 
   if (d.summary) {
     document.getElementById('detail-summary').style.display = '';
-    document.getElementById('detail-summary').textContent = d.summary;
+    document.getElementById('detail-summary-content').innerHTML = renderMarkdown(d.summary);
   } else {
     document.getElementById('detail-summary').style.display = 'none';
   }
 
   const agents = d.agent_results || [];
+  const hasFindings = agents.some(a => (a.findings || []).length > 0);
+  document.getElementById('toolbar').style.display = hasFindings ? '' : 'none';
+
   if (agents.length) {
     document.getElementById('detail-agents').innerHTML = agents.map((agent, ai) => {
       const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
       const findings = agent.findings || [];
+      const agentHasFindings = findings.length > 0;
       return `
-        <div class="card mb-4 overflow-hidden">
+        <div class="card mb-4 overflow-hidden" data-agent-idx="${ai}">
           <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/30 transition-colors" onclick="toggleAgent(${ai})">
             <span class="text-xs text-slate-400 transition-transform duration-150" id="toggle-${ai}">&#x25b6;</span>
             <span class="font-semibold text-sm">${esc(label)}</span>
             <span class="verdict-${agent.verdict} text-2xs font-semibold uppercase px-2 py-0.5 rounded">${agent.verdict}</span>
             <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
+            ${agentHasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
           <div class="border-t border-slate-700/50 hidden" id="findings-${ai}">
             ${agent.summary ? `<div class="px-5 py-2.5 text-xs text-slate-400 border-b border-slate-700/50">${esc(agent.summary)}</div>` : ''}
-            ${findings.map(f => renderFinding(f)).join('')}
+            ${findings.map((f, fi) => renderFinding(ai, fi, f)).join('')}
           </div>
         </div>`;
     }).join('');
   } else {
     document.getElementById('detail-agents').innerHTML = '<div class="empty-state py-10"><p class="empty-state-text">No agent results available.</p></div>';
   }
+
+  updateSelectionCount();
+  applyCertaintyFilter();
 }
 
-function renderFinding(f) {
+function renderFinding(ai, fi, f) {
+  const key = `${ai}-${fi}`;
   const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
   const effortClass = f.effort_estimate ? `effort-${f.effort_estimate}` : '';
   return `
-    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0">
+    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0" data-key="${key}">
+      <input type="checkbox" class="form-checkbox f-check mt-0.5 shrink-0" data-key="${key}" onchange="toggleFinding('${key}')">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
           <span class="sev-badge sev-${f.severity}">${f.severity}</span>
@@ -343,9 +420,189 @@ function toggleAgent(ai) {
 }
 
 function showList() {
+  scanData = null;
+  selectedFindings.clear();
   document.getElementById('list-view').classList.remove('hidden');
   document.getElementById('detail-view').classList.add('hidden');
   history.pushState(null, '', '/scans');
+}
+
+// --- Selection logic ---
+
+function toggleFinding(key) {
+  if (selectedFindings.has(key)) selectedFindings.delete(key);
+  else selectedFindings.add(key);
+  syncCheckboxes();
+  updateSelectionCount();
+}
+
+function toggleGroupCheck(e, ai) {
+  e.stopPropagation();
+  const checked = e.target.checked;
+  const findings = scanData.agent_results[ai].findings || [];
+  findings.forEach((_, fi) => {
+    const key = `${ai}-${fi}`;
+    if (checked) selectedFindings.add(key); else selectedFindings.delete(key);
+  });
+  syncCheckboxes();
+  updateSelectionCount();
+}
+
+function selectBySeverity(...sevs) {
+  const agents = scanData.agent_results || [];
+  agents.forEach((agent, ai) => {
+    (agent.findings || []).forEach((f, fi) => {
+      if (sevs.includes(f.severity)) selectedFindings.add(`${ai}-${fi}`);
+    });
+  });
+  syncCheckboxes();
+  updateSelectionCount();
+}
+
+function selectAll() {
+  const agents = scanData.agent_results || [];
+  agents.forEach((agent, ai) => {
+    (agent.findings || []).forEach((_, fi) => selectedFindings.add(`${ai}-${fi}`));
+  });
+  syncCheckboxes();
+  updateSelectionCount();
+}
+
+function deselectAll() {
+  selectedFindings.clear();
+  syncCheckboxes();
+  updateSelectionCount();
+}
+
+function setCertaintyFilter(value) {
+  certaintyFilter = value;
+  document.querySelectorAll('.certainty-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.certainty === value);
+  });
+  applyCertaintyFilter();
+}
+
+function applyCertaintyFilter() {
+  if (!scanData) return;
+  const showAll = certaintyFilter === 'all';
+  const allowed = showAll ? null : new Set(certaintyFilter.split(','));
+  let hiddenCount = 0;
+
+  const agents = scanData.agent_results || [];
+  agents.forEach((agent, ai) => {
+    (agent.findings || []).forEach((f, fi) => {
+      const key = `${ai}-${fi}`;
+      const row = document.querySelector(`[data-key="${key}"]`);
+      if (!row) return;
+      const visible = showAll || allowed.has(f.certainty);
+      row.style.display = visible ? '' : 'none';
+      if (!visible) {
+        hiddenCount++;
+        // Deselect hidden findings
+        if (selectedFindings.has(key)) {
+          selectedFindings.delete(key);
+        }
+      }
+    });
+  });
+
+  syncCheckboxes();
+  updateSelectionCount();
+
+  // Update toolbar hint
+  const countEl = document.getElementById('selection-count');
+  if (hiddenCount > 0) {
+    countEl.textContent = `${selectedFindings.size} selected (${hiddenCount} hidden by filter)`;
+  } else {
+    countEl.textContent = `${selectedFindings.size} selected`;
+  }
+}
+
+function syncCheckboxes() {
+  document.querySelectorAll('.f-check').forEach(cb => {
+    cb.checked = selectedFindings.has(cb.dataset.key);
+  });
+  (scanData.agent_results || []).forEach((agent, ai) => {
+    const groupCb = document.querySelector(`[data-agent-idx="${ai}"] .group-check`);
+    if (!groupCb) return;
+    const findings = agent.findings || [];
+    const allSelected = findings.length > 0 && findings.every((_, fi) => selectedFindings.has(`${ai}-${fi}`));
+    const someSelected = findings.some((_, fi) => selectedFindings.has(`${ai}-${fi}`));
+    groupCb.checked = allSelected;
+    groupCb.indeterminate = someSelected && !allSelected;
+  });
+}
+
+function updateSelectionCount() {
+  const n = selectedFindings.size;
+  document.getElementById('selection-count').textContent = `${n} selected`;
+  document.getElementById('export-btn').disabled = n === 0;
+}
+
+// --- Export ---
+
+function openExport() {
+  if (!selectedFindings.size) return;
+  const text = buildExportText();
+  document.getElementById('export-text').value = text;
+  document.getElementById('export-modal').classList.remove('hidden');
+}
+
+function closeExport() {
+  document.getElementById('export-modal').classList.add('hidden');
+}
+
+function copyExport() {
+  const textarea = document.getElementById('export-text');
+  navigator.clipboard.writeText(textarea.value).then(() => {
+    const btn = document.getElementById('copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 2000);
+  });
+}
+
+function buildExportText() {
+  const d = scanData;
+  const lines = [];
+  const typeLabel = TYPE_LABELS[d.scan_type] || d.scan_type;
+  lines.push(`# PR Guardian Scan Findings — ${d.repo}`);
+  lines.push('');
+  lines.push(`Scan Type: ${typeLabel}`);
+  if (d.scan_type === 'recent_changes') {
+    lines.push(`Time Window: ${d.time_window_days} days`);
+  } else {
+    lines.push(`Staleness Threshold: ${d.staleness_months} months`);
+  }
+  lines.push('');
+  lines.push('## Findings to Address');
+  lines.push('');
+
+  const agents = d.agent_results || [];
+  let idx = 0;
+  agents.forEach((agent, ai) => {
+    const agentFindings = [];
+    (agent.findings || []).forEach((f, fi) => {
+      if (selectedFindings.has(`${ai}-${fi}`)) agentFindings.push(f);
+    });
+    if (!agentFindings.length) return;
+
+    const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
+    lines.push(`### ${label}`);
+    lines.push('');
+    agentFindings.forEach(f => {
+      idx++;
+      const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : 'unknown location';
+      lines.push(`**${idx}. [${f.severity.toUpperCase()}] ${f.category || 'Issue'}** — \`${loc}\``);
+      if (f.description) lines.push(`   ${f.description}`);
+      if (f.suggestion) lines.push(`   Suggestion: ${f.suggestion}`);
+      lines.push('');
+    });
+  });
+
+  lines.push('---');
+  lines.push('Please address the above findings. For each one, show the current code and your proposed fix.');
+
+  return lines.join('\n');
 }
 
 // --- Modal ---
@@ -371,6 +628,9 @@ function openModal() {
   document.getElementById('modal-form').classList.remove('hidden');
   document.getElementById('modal-progress').classList.add('hidden');
   document.getElementById('modal-title').textContent = 'Start New Scan';
+  const btn = document.getElementById('btn-start');
+  btn.disabled = false;
+  switchTab(currentTab);
   document.getElementById('scan-modal').classList.remove('hidden');
   document.getElementById('scan-repo').focus();
 }
@@ -555,8 +815,10 @@ async function startScan() {
   }
 }
 
-// Close modal on Escape
-document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+// Close modals on Escape
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') { closeModal(); closeExport(); }
+});
 
 function showToast(msg, type) {
   const el = document.getElementById('toast');

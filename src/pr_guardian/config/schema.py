@@ -194,11 +194,18 @@ class SeverityFloorConfig(BaseModel):
     )
     # HIGH tier: no suppression (empty list)
     high_tier_suppress: list[SeverityFloorRule] = Field(default_factory=list)
+    # Scan findings: suppress low+uncertain by default (scans have no risk tiers)
+    scan_suppress: list[SeverityFloorRule] = Field(
+        default_factory=lambda: [
+            SeverityFloorRule(severity="low", certainty="uncertain"),
+        ]
+    )
 
 
 class ValidatorConfig(BaseModel):
     """Adversarial validator that challenges agent findings before display."""
     enabled: bool = True
+    scan_enabled: bool = True
     min_findings_to_validate: int = 1
     model_override: str | None = None  # e.g. use a cheaper model for validation
 
