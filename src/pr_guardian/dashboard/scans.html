@@ -102,51 +102,73 @@
   <div class="dialog">
     <div class="dialog-panel max-w-md">
       <div class="dialog-header">
-        <h3 class="text-base font-semibold">Start New Scan</h3>
+        <h3 class="text-base font-semibold" id="modal-title">Start New Scan</h3>
       </div>
-      <div class="dialog-body space-y-4">
-        <div class="tabs-pills">
-          <button class="tab-pill active flex-1 text-center" id="tab-recent" onclick="switchTab('recent')">Recent Changes</button>
-          <button class="tab-pill flex-1 text-center" id="tab-maintenance" onclick="switchTab('maintenance')">Maintenance</button>
-        </div>
 
-        <div>
-          <label class="form-label" for="scan-repo">Repository</label>
-          <input id="scan-repo" type="text" class="form-input" placeholder="owner/repo" spellcheck="false">
-        </div>
+      <!-- Form view -->
+      <div id="modal-form">
+        <div class="dialog-body space-y-4">
+          <div class="tabs-pills">
+            <button class="tab-pill active flex-1 text-center" id="tab-recent" onclick="switchTab('recent')">Recent Changes</button>
+            <button class="tab-pill flex-1 text-center" id="tab-maintenance" onclick="switchTab('maintenance')">Maintenance</button>
+          </div>
 
-        <div>
-          <label class="form-label" for="scan-platform">Platform</label>
-          <select id="scan-platform" class="form-select">
-            <option value="github">GitHub</option>
-            <option value="ado">Azure DevOps</option>
-          </select>
-        </div>
+          <div>
+            <label class="form-label" for="scan-repo">Repository</label>
+            <input id="scan-repo" type="text" class="form-input" placeholder="owner/repo" spellcheck="false">
+            <p class="text-2xs text-slate-500 mt-1" id="repo-hint">GitHub: owner/repo &mdash; ADO: project/repo</p>
+          </div>
 
-        <!-- Recent Changes options -->
-        <div id="section-recent">
-          <label class="form-label" for="scan-days">Time Window (days)</label>
-          <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
-        </div>
+          <div>
+            <label class="form-label" for="scan-platform">Platform</label>
+            <select id="scan-platform" class="form-select" onchange="updateRepoHint()">
+              <option value="github">GitHub</option>
+              <option value="ado">Azure DevOps</option>
+            </select>
+          </div>
 
-        <!-- Maintenance options -->
-        <div id="section-maintenance" class="hidden">
-          <div class="space-y-4">
-            <div>
-              <label class="form-label" for="scan-staleness">Staleness Threshold (months)</label>
-              <input id="scan-staleness" type="number" class="form-input" value="6" min="1" max="36">
-            </div>
-            <div>
-              <label class="form-label" for="scan-max-files">Max Files</label>
-              <input id="scan-max-files" type="number" class="form-input" value="50" min="1" max="200">
+          <!-- Recent Changes options -->
+          <div id="section-recent">
+            <label class="form-label" for="scan-days">Time Window (days)</label>
+            <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
+          </div>
+
+          <!-- Maintenance options -->
+          <div id="section-maintenance" class="hidden">
+            <div class="space-y-4">
+              <div>
+                <label class="form-label" for="scan-staleness">Staleness Threshold (months)</label>
+                <input id="scan-staleness" type="number" class="form-input" value="6" min="1" max="36">
+              </div>
+              <div>
+                <label class="form-label" for="scan-max-files">Max Files</label>
+                <input id="scan-max-files" type="number" class="form-input" value="50" min="1" max="200">
+              </div>
             </div>
           </div>
         </div>
+        <div class="dialog-footer">
+          <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-primary btn-sm" id="btn-start" onclick="startScan()">Start Scan</button>
+        </div>
       </div>
-      <div class="dialog-footer">
-        <button class="btn btn-secondary btn-sm" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-primary btn-sm" id="btn-start" onclick="startScan()">Start Scan</button>
+
+      <!-- Progress view (shown after scan starts) -->
+      <div id="modal-progress" class="hidden">
+        <div class="dialog-body space-y-4">
+          <p class="text-sm text-slate-400" id="progress-repo"></p>
+          <ol class="space-y-2" id="progress-stages"></ol>
+          <div id="progress-error" class="hidden rounded bg-red-500/10 border border-red-500/30 px-3 py-2 mt-3">
+            <p class="text-xs font-semibold text-red-400 mb-1">Error</p>
+            <p class="text-xs text-red-300 break-words" id="progress-error-msg"></p>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <button class="btn btn-secondary btn-sm" id="btn-progress-close" onclick="closeModal()">Close</button>
+          <button class="btn btn-primary btn-sm hidden" id="btn-view-detail" onclick="viewScanFromModal()">View Detail</button>
+        </div>
       </div>
+
     </div>
   </div>
 </div>
@@ -207,7 +229,10 @@ async function loadScans() {
         <td><span class="type-badge type-${s.scan_type}">${TYPE_LABELS[s.scan_type] || s.scan_type}</span></td>
         <td><a class="text-emerald-400 hover:text-emerald-300 cursor-pointer transition-colors" onclick="loadDetail('${s.id}')">${esc(s.repo)}</a></td>
         <td>${s.total_findings}</td>
-        <td><span class="scan-stage-badge scan-stage-${s.stage}">${s.stage}</span></td>
+        <td>
+          <span class="scan-stage-badge scan-stage-${s.stage}">${s.stage}</span>
+          ${s.stage === 'error' && s.stage_detail ? `<div class="text-2xs text-red-400 mt-1 truncate max-w-[250px]" title="${esc(s.stage_detail)}">${esc(s.stage_detail.substring(0, 100))}${s.stage_detail.length > 100 ? '...' : ''}</div>` : ''}
+        </td>
         <td>${s.cost_usd ? '$' + s.cost_usd.toFixed(4) : '-'}</td>
         <td>${s.started_at ? new Date(s.started_at).toLocaleDateString() : '-'}</td>
         <td>${s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + 's' : '-'}</td>
@@ -325,14 +350,43 @@ function showList() {
 
 // --- Modal ---
 let currentTab = 'recent';
+let activeScanId = null;  // scan_id of in-progress scan triggered from dialog
+
+const STAGE_DEFS = {
+  recent: [
+    { key: 'scan_discovery', label: 'Discovery' },
+    { key: 'scan_analysis', label: 'Analysis' },
+    { key: 'scan_report', label: 'Report' },
+  ],
+  maintenance: [
+    { key: 'scan_discovery', label: 'Discovery' },
+    { key: 'scan_sampling', label: 'Sampling' },
+    { key: 'scan_analysis', label: 'Analysis' },
+    { key: 'scan_report', label: 'Report' },
+  ],
+};
 
 function openModal() {
+  // Reset to form view
+  document.getElementById('modal-form').classList.remove('hidden');
+  document.getElementById('modal-progress').classList.add('hidden');
+  document.getElementById('modal-title').textContent = 'Start New Scan';
   document.getElementById('scan-modal').classList.remove('hidden');
   document.getElementById('scan-repo').focus();
 }
 
 function closeModal() {
   document.getElementById('scan-modal').classList.add('hidden');
+  activeScanId = null;
+}
+
+function updateRepoHint() {
+  const platform = document.getElementById('scan-platform').value;
+  const hint = document.getElementById('repo-hint');
+  hint.textContent = platform === 'ado'
+    ? 'Format: project/repo (org comes from server config)'
+    : 'Format: owner/repo';
+  document.getElementById('scan-repo').placeholder = platform === 'ado' ? 'project/repo' : 'owner/repo';
 }
 
 function switchTab(tab) {
@@ -350,6 +404,101 @@ function switchTab(tab) {
 }
 // init button label
 switchTab('recent');
+
+function showProgressView(repo, scanType) {
+  document.getElementById('modal-form').classList.add('hidden');
+  document.getElementById('modal-progress').classList.remove('hidden');
+  document.getElementById('modal-title').textContent = 'Scan in Progress';
+  document.getElementById('progress-repo').textContent = repo;
+  document.getElementById('progress-error').classList.add('hidden');
+  document.getElementById('btn-view-detail').classList.add('hidden');
+
+  const stages = STAGE_DEFS[scanType === 'maintenance' ? 'maintenance' : 'recent'];
+  document.getElementById('progress-stages').innerHTML = stages.map((s, i) => `
+    <li class="flex items-center gap-3" id="pstage-${s.key}">
+      <span class="w-5 h-5 rounded-full border-2 flex items-center justify-center text-xs shrink-0
+        ${i === 0 ? 'border-emerald-400 text-emerald-400' : 'border-slate-600 text-slate-600'}"
+        id="pstage-icon-${s.key}">
+        ${i === 0 ? '<span class="animate-pulse">&#9679;</span>' : '&#9675;'}
+      </span>
+      <span class="text-sm ${i === 0 ? 'text-slate-200' : 'text-slate-500'}" id="pstage-label-${s.key}">${s.label}</span>
+      <span class="text-2xs text-slate-500 ml-auto" id="pstage-detail-${s.key}"></span>
+    </li>
+  `).join('');
+}
+
+function updateProgressStage(stage, detail) {
+  if (!activeScanId) return;
+  const scanType = currentTab === 'maintenance' ? 'maintenance' : 'recent';
+  const stages = STAGE_DEFS[scanType];
+  const activeIdx = stages.findIndex(s => s.key === stage);
+  if (activeIdx === -1) return;
+
+  stages.forEach((s, i) => {
+    const icon = document.getElementById(`pstage-icon-${s.key}`);
+    const label = document.getElementById(`pstage-label-${s.key}`);
+    const det = document.getElementById(`pstage-detail-${s.key}`);
+    if (!icon) return;
+
+    if (i < activeIdx) {
+      // Completed
+      icon.className = 'w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-xs shrink-0 text-white';
+      icon.innerHTML = '&#10003;';
+      label.className = 'text-sm text-slate-300';
+    } else if (i === activeIdx) {
+      // Active
+      icon.className = 'w-5 h-5 rounded-full border-2 border-emerald-400 flex items-center justify-center text-xs shrink-0 text-emerald-400';
+      icon.innerHTML = '<span class="animate-pulse">&#9679;</span>';
+      label.className = 'text-sm text-slate-200';
+      if (detail && det) det.textContent = detail;
+    } else {
+      // Pending
+      icon.className = 'w-5 h-5 rounded-full border-2 border-slate-600 flex items-center justify-center text-xs shrink-0 text-slate-600';
+      icon.innerHTML = '&#9675;';
+      label.className = 'text-sm text-slate-500';
+    }
+  });
+}
+
+function markProgressComplete() {
+  document.getElementById('modal-title').textContent = 'Scan Complete';
+  const scanType = currentTab === 'maintenance' ? 'maintenance' : 'recent';
+  const stages = STAGE_DEFS[scanType];
+  stages.forEach(s => {
+    const icon = document.getElementById(`pstage-icon-${s.key}`);
+    const label = document.getElementById(`pstage-label-${s.key}`);
+    if (!icon) return;
+    icon.className = 'w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center text-xs shrink-0 text-white';
+    icon.innerHTML = '&#10003;';
+    label.className = 'text-sm text-slate-300';
+  });
+  if (activeScanId) {
+    document.getElementById('btn-view-detail').classList.remove('hidden');
+  }
+}
+
+function markProgressError(errorMsg) {
+  document.getElementById('modal-title').textContent = 'Scan Failed';
+  document.getElementById('progress-error').classList.remove('hidden');
+  document.getElementById('progress-error-msg').textContent = errorMsg;
+  // Mark current active stage as errored
+  const scanType = currentTab === 'maintenance' ? 'maintenance' : 'recent';
+  const stages = STAGE_DEFS[scanType];
+  for (const s of stages) {
+    const icon = document.getElementById(`pstage-icon-${s.key}`);
+    if (icon && icon.innerHTML.includes('pulse')) {
+      icon.className = 'w-5 h-5 rounded-full bg-red-500 flex items-center justify-center text-xs shrink-0 text-white';
+      icon.innerHTML = '&#10007;';
+      break;
+    }
+  }
+}
+
+function viewScanFromModal() {
+  const id = activeScanId;
+  closeModal();
+  if (id) loadDetail(id);
+}
 
 async function startScan() {
   const repo = document.getElementById('scan-repo').value.trim();
@@ -393,15 +542,16 @@ async function startScan() {
       throw new Error(errData.detail || `HTTP ${resp.status}`);
     }
 
-    closeModal();
-    showToast(`Scan started for ${repo}`, 'success');
-    // Refresh list after a short delay to let the scan record appear
-    setTimeout(loadScans, 2000);
+    const data = await resp.json();
+    activeScanId = data.scan_id || null;
+
+    // Switch to progress view
+    showProgressView(data.repo || repo, data.scan_type);
+    loadScans();
   } catch (e) {
     showToast('Failed: ' + e.message, 'error');
-  } finally {
     btn.disabled = false;
-    switchTab(currentTab); // restore button text
+    switchTab(currentTab);
   }
 }
 
@@ -424,17 +574,32 @@ function connectSSE() {
       if (data.type === 'connected') return;
       const scanType = data.extra?.scan_type;
       if (!scanType) return;
-      // A scan event — refresh the list and stats
+
+      // Update dialog progress if this event matches the active scan
+      const isActiveScan = activeScanId && data.review_id === activeScanId;
+      if (isActiveScan) {
+        if (data.stage === 'scan_complete') {
+          markProgressComplete();
+        } else if (data.stage === 'scan_error') {
+          markProgressError(data.detail || 'Unknown error');
+        } else {
+          updateProgressStage(data.stage, data.detail || '');
+        }
+      }
+
+      // Refresh list/stats on terminal events; refresh list on progress
       if (data.stage === 'scan_complete' || data.stage === 'scan_error') {
         loadScans();
         loadStats();
-        if (data.stage === 'scan_complete') {
-          showToast(`Scan complete: ${data.repo} (${data.extra.scan_type})`, 'success');
-        } else {
-          showToast(`Scan failed: ${data.repo} — ${data.detail}`, 'error');
+        if (!isActiveScan) {
+          // Only show toast for scans not tracked in the dialog
+          if (data.stage === 'scan_complete') {
+            showToast(`Scan complete: ${data.repo} (${scanType})`, 'success');
+          } else {
+            showToast(`Scan failed: ${data.repo} — ${data.detail}`, 'error');
+          }
         }
       } else {
-        // In-progress update — refresh list to show stage changes
         loadScans();
       }
     } catch {}

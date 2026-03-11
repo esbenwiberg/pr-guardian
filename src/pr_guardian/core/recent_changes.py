@@ -100,16 +100,17 @@ async def run_recent_changes_scan(
     *,
     time_window_days: int | None = None,
     since: str | None = None,
+    scan_db_id: uuid.UUID | None = None,
 ) -> ScanResult:
     """Run a recent changes scan: Discovery → Analysis → Report."""
     log.info("recent_changes_scan_started", repo=repo)
 
     storage = _try_import_storage()
     days = time_window_days or config.recent_changes.time_window_days
-    scan_id = str(uuid.uuid4())
-    scan_db_id: uuid.UUID | None = None
+    scan_id = str(scan_db_id) if scan_db_id else str(uuid.uuid4())
 
-    if storage:
+    # Create DB record if not pre-created by the API layer
+    if storage and not scan_db_id:
         try:
             scan_db_id = await storage.create_scan_record(
                 scan_type=ScanType.RECENT_CHANGES.value,

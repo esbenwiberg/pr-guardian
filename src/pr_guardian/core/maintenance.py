@@ -102,6 +102,7 @@ async def run_maintenance_scan(
     *,
     staleness_months: int | None = None,
     max_files: int | None = None,
+    scan_db_id: uuid.UUID | None = None,
 ) -> ScanResult:
     """Run a maintenance scan: Discovery → Sampling → Analysis → Report."""
     log.info("maintenance_scan_started", repo=repo)
@@ -109,10 +110,10 @@ async def run_maintenance_scan(
     storage = _try_import_storage()
     months = staleness_months or config.maintenance.staleness_months
     file_limit = max_files or config.maintenance.max_files
-    scan_id = str(uuid.uuid4())
-    scan_db_id: uuid.UUID | None = None
+    scan_id = str(scan_db_id) if scan_db_id else str(uuid.uuid4())
 
-    if storage:
+    # Create DB record if not pre-created by the API layer
+    if storage and not scan_db_id:
         try:
             scan_db_id = await storage.create_scan_record(
                 scan_type=ScanType.MAINTENANCE.value,
