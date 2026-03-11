@@ -145,7 +145,7 @@ let selectedFindings = new Set(); // "agentIdx-findingIdx"
 async function loadReview() {
   if (!REVIEW_ID) { showError('No review ID in URL.'); return; }
   try {
-    const resp = await fetch(`/api/dashboard/reviews/${REVIEW_ID}`);
+    const resp = await fetch(`/api/v1/reviews/${REVIEW_ID}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);

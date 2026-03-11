@@ -258,7 +258,7 @@ function renderMarkdown(text) {
 // --- Stats ---
 async function loadStats() {
   try {
-    const resp = await fetch('/api/dashboard/scan-stats');
+    const resp = await fetch('/api/v1/scans/stats');
     const data = await resp.json();
     document.getElementById('stats-row').innerHTML = `
       <div class="stat-card"><div class="stat-card-label">Total Scans</div><div class="stat-card-value">${data.total_scans || 0}</div></div>
@@ -276,7 +276,7 @@ async function loadScans() {
   if (typeFilter) params.set('scan_type', typeFilter);
 
   try {
-    const resp = await fetch(`/api/dashboard/scans?${params}`);
+    const resp = await fetch(`/api/v1/scans?${params}`);
     const scans = await resp.json();
     document.getElementById('scan-list-loading').style.display = 'none';
 
@@ -313,7 +313,7 @@ async function loadScans() {
 // --- Detail ---
 async function loadDetail(id) {
   try {
-    const resp = await fetch(`/api/dashboard/scans/${id}`);
+    const resp = await fetch(`/api/v1/scans/${id}`);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
@@ -775,14 +775,14 @@ async function startScan() {
   try {
     let url, body;
     if (currentTab === 'recent') {
-      url = '/api/scan/recent';
+      url = '/api/v1/scan/recent';
       body = {
         repo,
         platform,
         time_window_days: parseInt(document.getElementById('scan-days').value) || 7,
       };
     } else {
-      url = '/api/scan/maintenance';
+      url = '/api/v1/scan/maintenance';
       body = {
         repo,
         platform,
@@ -829,7 +829,7 @@ function showToast(msg, type) {
 
 // --- SSE: live progress ---
 function connectSSE() {
-  const es = new EventSource('/api/dashboard/events');
+  const es = new EventSource('/api/v1/events');
   es.onmessage = (e) => {
     try {
       const data = JSON.parse(e.data);

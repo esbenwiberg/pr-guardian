@@ -161,7 +161,7 @@
 </div>
 
 <script>
-const API = '/api/dashboard';
+const API = '/api/v1';
 const STAGES = ['queued', 'discovery', 'mechanical', 'triage', 'agents', 'decision', 'validation', 'complete'];
 const TERMINAL_STAGES = ['complete', 'error'];
 const DECISION_COLORS = { auto_approve: '#00b894', human_review: '#fdcb6e', reject: '#e17055', hard_block: '#d63031' };
@@ -658,7 +658,7 @@ async function submitReview(e) {
   status.textContent = 'Submitting review request...';
 
   try {
-    const resp = await fetch('/api/review', {
+    const resp = await fetch('/api/v1/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pr_url: url, post_comment: postComment }),
