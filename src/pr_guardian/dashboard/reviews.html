@@ -103,10 +103,11 @@
               <th>Cost</th>
               <th>Duration</th>
               <th>Time</th>
+              <th></th>
             </tr>
           </thead>
           <tbody id="reviews-body">
-            <tr><td colspan="9" class="empty-state">Loading...</td></tr>
+            <tr><td colspan="10" class="empty-state">Loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -179,13 +180,13 @@ async function loadReviews() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const reviews = await resp.json();
     if (!Array.isArray(reviews) || !reviews.length) {
-      el.innerHTML = '<tr><td colspan="9" class="empty-state">No reviews found</td></tr>';
+      el.innerHTML = '<tr><td colspan="10" class="empty-state">No reviews found</td></tr>';
       return;
     }
     el.innerHTML = reviews.map(r => renderReviewRow(r)).join('');
   } catch (e) {
     console.error('Failed to load reviews', e);
-    el.innerHTML = '<tr><td colspan="9" class="empty-state text-red-400">Failed to load reviews — check database connection</td></tr>';
+    el.innerHTML = '<tr><td colspan="10" class="empty-state text-red-400">Failed to load reviews — check database connection</td></tr>';
   }
 }
 
@@ -243,6 +244,7 @@ function renderReviewRow(r) {
       <td class="text-xs text-emerald-400">${formatCost(r.cost_usd)}</td>
       <td>${formatDuration(r.duration_ms)}</td>
       <td class="text-xs text-slate-400">${formatTime(r.started_at)}</td>
+      <td><a href="/reviews/${r.id}" onclick="event.stopPropagation()" class="text-blue-400 hover:text-blue-300" title="Open full review page">&#8599;</a></td>
     </tr>
   `;
 }
