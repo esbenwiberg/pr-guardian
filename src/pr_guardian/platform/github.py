@@ -12,10 +12,20 @@ log = structlog.get_logger()
 
 
 class GitHubAdapter:
-    """GitHub platform adapter using REST API."""
+    """GitHub platform adapter using REST API.
 
-    def __init__(self, token: str = "", app_id: str = "", private_key: str = ""):
+    Supports two auth modes (auto-detected by factory):
+    - PAT: ``token=<pat>`` — simple, user-scoped
+    - GitHub App: ``app_auth=<GitHubAppAuth>`` — org-scoped, auto-rotating
+    """
+
+    def __init__(
+        self,
+        token: str = "",
+        app_auth: object | None = None,  # GitHubAppAuth (optional import)
+    ):
         self._token = token
+        self._app_auth = app_auth  # GitHubAppAuth | None
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
@@ -30,6 +40,16 @@ class GitHubAdapter:
                 timeout=30.0,
             )
         return self._client
+
+    async def _get_authed_client(self) -> httpx.AsyncClient:
+        """Return an HTTP client with a valid token (refreshes if using App auth)."""
+        client = self._get_client()
+        if self._app_auth is not None:
+            new_token = await self._app_auth.get_token(client)
+            if new_token != self._token:
+                self._token = new_token
+                client.headers["Authorization"] = f"token {new_token}"
+        return client
 
     @staticmethod
     def normalize_webhook(payload: WebhookPayload) -> PlatformPR | None:
@@ -57,7 +77,7 @@ class GitHubAdapter:
         )
 
     async def fetch_diff(self, pr: PlatformPR) -> Diff:
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.get(
             f"/repos/{pr.repo}/pulls/{pr.pr_id}/files",
             params={"per_page": 300},
@@ -82,7 +102,7 @@ class GitHubAdapter:
         return Diff(files=diff_files)
 
     async def post_comment(self, pr: PlatformPR, body: str) -> None:
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.post(
             f"/repos/{pr.repo}/issues/{pr.pr_id}/comments",
             json={"body": body},
@@ -90,7 +110,7 @@ class GitHubAdapter:
         resp.raise_for_status()
 
     async def approve_pr(self, pr: PlatformPR) -> None:
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.post(
             f"/repos/{pr.repo}/pulls/{pr.pr_id}/reviews",
             json={"event": "APPROVE", "body": "PR Guardian: Auto-approved."},
@@ -98,7 +118,7 @@ class GitHubAdapter:
         resp.raise_for_status()
 
     async def request_changes(self, pr: PlatformPR, body: str) -> None:
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.post(
             f"/repos/{pr.repo}/pulls/{pr.pr_id}/reviews",
             json={"event": "REQUEST_CHANGES", "body": body},
@@ -106,7 +126,7 @@ class GitHubAdapter:
         resp.raise_for_status()
 
     async def add_label(self, pr: PlatformPR, label: str) -> None:
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.post(
             f"/repos/{pr.repo}/issues/{pr.pr_id}/labels",
             json={"labels": [label]},
@@ -116,7 +136,7 @@ class GitHubAdapter:
     async def set_status(
         self, pr: PlatformPR, state: str, description: str, context: str = "pr-guardian"
     ) -> None:
-        client = self._get_client()
+        client = await self._get_authed_client()
         state_map = {"success": "success", "failure": "failure", "pending": "pending"}
         resp = await client.post(
             f"/repos/{pr.repo}/statuses/{pr.head_commit_sha}",
@@ -129,7 +149,7 @@ class GitHubAdapter:
         resp.raise_for_status()
 
     async def request_reviewers(self, pr: PlatformPR, group: str) -> None:
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.post(
             f"/repos/{pr.repo}/pulls/{pr.pr_id}/requested_reviewers",
             json={"team_reviewers": [group]},
@@ -142,7 +162,7 @@ class GitHubAdapter:
         self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
     ) -> list[dict]:
         """Fetch commits on branch since a date (ISO 8601)."""
-        client = self._get_client()
+        client = await self._get_authed_client()
         params: dict = {"sha": branch, "since": since, "per_page": per_page}
         if until:
             params["until"] = until
@@ -166,7 +186,7 @@ class GitHubAdapter:
         self, repo: str, since: str, base: str = "main",
     ) -> list[dict]:
         """Fetch recently merged PRs (closed + merged_at >= since)."""
-        client = self._get_client()
+        client = await self._get_authed_client()
         params: dict = {
             "state": "closed",
             "base": base,
@@ -190,7 +210,7 @@ class GitHubAdapter:
         self, repo: str, path: str, ref: str = "HEAD",
     ) -> str:
         """Fetch file content from the repo."""
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.get(
             f"/repos/{repo}/contents/{path}",
             params={"ref": ref},
@@ -206,7 +226,7 @@ class GitHubAdapter:
         self, repo: str, ref: str = "HEAD", path: str = "",
     ) -> list[str]:
         """List files in repo (recursive tree)."""
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.get(
             f"/repos/{repo}/git/trees/{ref}",
             params={"recursive": "1"},
@@ -219,7 +239,7 @@ class GitHubAdapter:
         self, repo: str, pr_id: int | str, project: str = "",
     ) -> list[dict]:
         """Fetch changed files for a PR."""
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.get(
             f"/repos/{repo}/pulls/{pr_id}/files",
             params={"per_page": 100},
@@ -231,7 +251,7 @@ class GitHubAdapter:
         self, repo: str, path: str, per_page: int = 1, project: str = "",
     ) -> list[dict]:
         """Fetch recent commits touching a specific file."""
-        client = self._get_client()
+        client = await self._get_authed_client()
         resp = await client.get(
             f"/repos/{repo}/commits",
             params={"path": path, "per_page": per_page},
