@@ -23,6 +23,11 @@ dependencies = [
     "anthropic",
     "openai",
     "cryptography>=43.0",
+    "msal",
+    "PyJWT>=2.0",
+    "fastapi-azure-auth",
+    "azure-identity",
+    "azure-keyvault-secrets",
 ]
 
 [project.optional-dependencies]
