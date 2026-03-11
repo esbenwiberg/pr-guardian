@@ -13,16 +13,22 @@ class AnthropicClient:
         api_key: str | None = None,
         default_model: str = "claude-sonnet-4-6",
         base_url: str | None = None,
+        timeout_seconds: int = 120,
     ):
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
         self._default_model = default_model
         self._base_url = base_url or None
+        self._timeout_seconds = timeout_seconds
         self._client: object | None = None
 
     def _get_client(self):
         if self._client is None:
             import anthropic
-            kwargs: dict = {"api_key": self._api_key}
+            import httpx
+            kwargs: dict = {
+                "api_key": self._api_key,
+                "timeout": httpx.Timeout(self._timeout_seconds, connect=10.0),
+            }
             if self._base_url:
                 kwargs["base_url"] = self._base_url
             self._client = anthropic.AsyncAnthropic(**kwargs)

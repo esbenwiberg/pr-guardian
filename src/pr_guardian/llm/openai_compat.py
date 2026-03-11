@@ -13,18 +13,22 @@ class OpenAICompatClient:
         base_url: str = "",
         api_key: str = "not-needed",
         default_model: str = "llama3.3:70b",
+        timeout_seconds: int = 120,
     ):
         self._base_url = base_url
         self._api_key = api_key
         self._default_model = default_model
+        self._timeout_seconds = timeout_seconds
         self._client: object | None = None
 
     def _get_client(self):
         if self._client is None:
+            import httpx
             import openai
             self._client = openai.AsyncOpenAI(
                 base_url=self._base_url,
                 api_key=self._api_key,
+                timeout=httpx.Timeout(self._timeout_seconds, connect=10.0),
             )
         return self._client
 

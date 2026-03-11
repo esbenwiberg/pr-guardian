@@ -13,19 +13,23 @@ class AzureFoundryClient:
         endpoint: str = "",
         api_key: str = "",
         default_model: str = "gpt-4o",
+        timeout_seconds: int = 120,
     ):
         self._endpoint = endpoint or os.environ.get("AZURE_OPENAI_ENDPOINT", "")
         self._api_key = api_key or os.environ.get("AZURE_OPENAI_KEY", "")
         self._default_model = default_model
+        self._timeout_seconds = timeout_seconds
         self._client: object | None = None
 
     def _get_client(self):
         if self._client is None:
+            import httpx
             import openai
             self._client = openai.AsyncAzureOpenAI(
                 azure_endpoint=self._endpoint,
                 api_key=self._api_key,
                 api_version="2024-06-01",
+                timeout=httpx.Timeout(self._timeout_seconds, connect=10.0),
             )
         return self._client
 

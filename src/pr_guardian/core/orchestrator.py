@@ -427,6 +427,16 @@ async def _save_result(storage, review_db_id, result, _emit) -> None:
             await storage.save_review_result(review_db_id, result)
         except Exception as e:
             log.error("db_save_failed", error=str(e))
+            # Fallback: at least mark the review as finished so it doesn't
+            # appear stuck in the dashboard forever.
+            try:
+                await storage.mark_review_failed(
+                    review_db_id,
+                    f"Review completed ({result.decision.value}) but save failed: {e}",
+                    pipeline_log=result.pipeline_log,
+                )
+            except Exception as fallback_err:
+                log.error("db_fallback_mark_failed", error=str(fallback_err))
     _emit("complete", f"Decision: {result.decision.value}", score=result.combined_score)
 
 

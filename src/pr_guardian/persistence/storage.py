@@ -131,8 +131,8 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         for ar in result.agent_results:
             ar_row = AgentResultRow(
                 review_id=review_id,
-                agent_name=ar.agent_name,
-                verdict=ar.verdict.value,
+                agent_name=ar.agent_name[:64],
+                verdict=ar.verdict.value[:16],
                 languages_reviewed=ar.languages_reviewed,
                 error=ar.error,
             )
@@ -142,15 +142,15 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
             for f in ar.findings:
                 session.add(FindingRow(
                     agent_result_id=ar_row.id,
-                    severity=f.severity.value,
-                    certainty=f.certainty.value,
-                    category=f.category,
-                    language=f.language,
+                    severity=f.severity.value[:16],
+                    certainty=f.certainty.value[:16],
+                    category=f.category[:128],
+                    language=f.language[:32],
                     file=f.file,
                     line=f.line,
                     description=f.description,
                     suggestion=f.suggestion,
-                    cwe=f.cwe,
+                    cwe=f.cwe[:32] if f.cwe else None,
                 ))
 
         await session.commit()

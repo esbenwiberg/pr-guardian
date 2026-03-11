@@ -30,11 +30,10 @@ def _detail_url(review_id: str, base_url: str = "") -> str | None:
 
 
 def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
-    """Build a slim PR comment with per-area verdicts/summaries and a detail link.
+    """Build a compact PR comment: decision, key metrics, and a link to the full review.
 
-    The comment is for humans — short category labels per area so a dev can
-    scan in seconds.  Structured data lives on the detail-page API; we only
-    embed a tiny metadata tag (decision + detail URL) for downstream tooling.
+    All detailed findings live on the review detail page — the PR comment is
+    deliberately short so it never hits platform comment size limits.
     """
     lines: list[str] = []
 
@@ -57,72 +56,36 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     )
     lines.append(metrics)
 
-    # ── Trust tier line ──────────────────────────────────────────
+    # ── Trust tier ──────────────────────────────────────────────────
     if result.trust_tier:
         trust_display = _trust_tier_display(result)
         if trust_display:
             lines.append(trust_display)
 
-    lines.append("")
-
-    # ── Per-area verdicts with short category summaries ─────────────
-    if result.agent_results:
-        verdict_tag = {
-            "pass": "\u2705 Pass",
-            "warn": "\u26a0\ufe0f Warn",
-            "flag_human": "\U0001f50d Review",
-        }
-        sev_rank = {"critical": 0, "high": 1, "medium": 2}
-
+    # ── Finding counts ──────────────────────────────────────────────
+    total_findings = sum(len(a.findings) for a in result.agent_results)
+    if total_findings:
+        sev_counts: dict[str, int] = {}
         for agent in result.agent_results:
-            area = _AGENT_LABELS.get(agent.agent_name, agent.agent_name)
-            tag = verdict_tag.get(agent.verdict.value, "\u2753")
-
-            # Collect notable findings (medium+) sorted by severity
-            notable = [
-                f for f in agent.findings
-                if f.severity.value in sev_rank
-            ]
-            notable.sort(key=lambda f: sev_rank[f.severity.value])
-
-            if not notable:
-                lines.append(f"- **{area}** \u2014 {tag}")
-            else:
-                # Use category labels (short) — deduplicate to avoid repetition
-                categories = list(dict.fromkeys(f.category for f in notable))
-                summary = "; ".join(categories[:3])
-                if len(categories) > 3:
-                    summary += f" (+{len(categories) - 3} more)"
-                lines.append(f"- **{area}** \u2014 {tag}")
-                lines.append(f"  {summary}")
-
+            for f in agent.findings:
+                sev_counts[f.severity.value] = sev_counts.get(f.severity.value, 0) + 1
+        parts = []
+        for sev in ("critical", "high", "medium", "low"):
+            count = sev_counts.get(sev, 0)
+            if count:
+                parts.append(f"{count} {sev}")
         lines.append("")
-
-    # ── Escalation reasons ──────────────────────────────────────────
-    if result.override_reasons:
-        lines.append(
-            "**Escalated:** "
-            + " \u00b7 ".join(result.override_reasons)
-        )
-        lines.append("")
+        lines.append(f"**{total_findings} finding(s):** {', '.join(parts)}")
 
     # ── Detail page link ────────────────────────────────────────────
     detail_url = _detail_url(result.review_id, base_url)
     if detail_url:
-        lines.append(
-            f"[\U0001f50e Full findings & export for fix \u2192]({detail_url})"
-        )
         lines.append("")
-
-    # ── Escalation notice (trust tier escalated by agent findings) ──
-    if result.escalated_from:
         lines.append(
-            f"> **Trust tier escalated** from {result.escalated_from.upper()} "
-            f"to {result.trust_tier.value.upper() if result.trust_tier else '?'} "
-            f"based on agent findings."
+            f"[\U0001f50e View full findings \u2192]({detail_url})"
         )
-        lines.append("")
 
+    lines.append("")
     lines.append("---")
     lines.append("*PR Guardian \u2014 automated review*")
 

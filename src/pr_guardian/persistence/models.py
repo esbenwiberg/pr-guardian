@@ -126,7 +126,7 @@ class FindingRow(Base):
     )
     severity: Mapped[str] = mapped_column(String(16))
     certainty: Mapped[str] = mapped_column(String(16))
-    category: Mapped[str] = mapped_column(String(64))
+    category: Mapped[str] = mapped_column(String(128))
     language: Mapped[str] = mapped_column(String(32))
     file: Mapped[str] = mapped_column(Text)
     line: Mapped[int | None] = mapped_column(Integer, nullable=True)

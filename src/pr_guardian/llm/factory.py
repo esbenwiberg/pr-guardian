@@ -27,7 +27,7 @@ def create_llm_client(
         if not provider_cfg:
             raise ValueError(f"No LLM provider configured: {config.llm.default_provider}")
 
-    return _build_client(provider_cfg)
+    return _build_client(provider_cfg, timeout_seconds=config.llm.timeout_seconds)
 
 
 def _resolve_api_key(cfg: LLMProviderConfig) -> str:
@@ -39,17 +39,24 @@ def _resolve_api_key(cfg: LLMProviderConfig) -> str:
     return ""
 
 
-def _build_client(cfg: LLMProviderConfig) -> LLMClient:
+def _build_client(cfg: LLMProviderConfig, timeout_seconds: int = 120) -> LLMClient:
     if cfg.type == "anthropic":
-        return AnthropicClient(api_key=_resolve_api_key(cfg), default_model=cfg.default_model)
+        return AnthropicClient(
+            api_key=_resolve_api_key(cfg), default_model=cfg.default_model,
+            timeout_seconds=timeout_seconds,
+        )
 
     if cfg.type == "azure-openai":
         endpoint = os.environ.get(cfg.endpoint_env, "") if cfg.endpoint_env else ""
-        return AzureFoundryClient(endpoint=endpoint, api_key=_resolve_api_key(cfg), default_model=cfg.default_model)
+        return AzureFoundryClient(
+            endpoint=endpoint, api_key=_resolve_api_key(cfg),
+            default_model=cfg.default_model, timeout_seconds=timeout_seconds,
+        )
 
     if cfg.type == "azure-ai-foundry":
         return AnthropicClient(
-            api_key=_resolve_api_key(cfg), default_model=cfg.default_model, base_url=cfg.base_url,
+            api_key=_resolve_api_key(cfg), default_model=cfg.default_model,
+            base_url=cfg.base_url, timeout_seconds=timeout_seconds,
         )
 
     if cfg.type == "openai-compatible":
@@ -57,6 +64,7 @@ def _build_client(cfg: LLMProviderConfig) -> LLMClient:
             base_url=cfg.base_url,
             api_key=cfg.api_key or "not-needed",
             default_model=cfg.default_model,
+            timeout_seconds=timeout_seconds,
         )
 
     raise ValueError(f"Unknown LLM provider type: {cfg.type}")
