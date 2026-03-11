@@ -65,6 +65,9 @@ app = FastAPI(
     description="Automated PR review pipeline with Entra ID auth",
     version="0.2.0",
     lifespan=lifespan,
+    openapi_url="/api/v1/openapi.json",
+    docs_url="/api/v1/docs",
+    redoc_url="/api/v1/redoc",
     swagger_ui_init_oauth={
         "clientId": _ENTRA_API_CLIENT_ID,
         "scopes": f"api://{_ENTRA_API_CLIENT_ID}/.default",
