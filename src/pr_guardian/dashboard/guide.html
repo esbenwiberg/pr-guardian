@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — Guide</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">G</div>
+    <span class="text-sm font-semibold text-slate-50 hidden lg:block">PR Guardian</span>
+    <span class="ml-auto text-2xs font-mono text-slate-500 hidden lg:block">v0.1</span>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/dashboard" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"/></svg>
+      <span class="hidden lg:block">Dashboard</span>
+    </a>
+    <a href="/reviews" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z"/></svg>
+      <span class="hidden lg:block">Reviews</span>
+    </a>
+    <a href="/scans" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+      <span class="hidden lg:block">Scans</span>
+    </a>
+    <a href="/prompts" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+      <span class="hidden lg:block">Prompts</span>
+    </a>
+    <a href="/settings" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.248a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+      <span class="hidden lg:block">Settings</span>
+    </a>
+    <a href="/guide" class="sidebar-item active">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/></svg>
+      <span class="hidden lg:block">Guide</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer hidden lg:block">
+    <div class="text-2xs text-slate-500 px-3 py-2">PR Guardian v0.1</div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <h1 class="text-sm font-semibold text-slate-50">Guide</h1>
+  </header>
+
+  <div class="max-w-[800px] mx-auto px-6 py-6 space-y-6">
+
+    <!-- Intro -->
+    <div class="card p-6">
+      <p class="text-sm text-slate-300 leading-relaxed">
+        PR Guardian reviews pull requests automatically using specialist AI agents. It reads the diff, classifies the risk,
+        runs the right agents in parallel, scores the findings, and posts a decision &mdash; all within seconds of a PR being opened.
+      </p>
+      <p class="text-sm text-slate-400 mt-3 leading-relaxed">
+        You can customise its behaviour per-repository with two optional files committed to the repo root.
+      </p>
+    </div>
+
+    <!-- ──────────────────────────────────────────── -->
+    <!-- REPO FILES -->
+    <!-- ──────────────────────────────────────────── -->
+
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">Repository files</h2>
+      <p class="text-xs text-slate-400 mb-5">Both files are optional. If neither exists, PR Guardian uses sensible defaults for everything.</p>
+
+      <!-- review.yml -->
+      <div class="border border-slate-700/50 rounded-lg p-5 mb-5">
+        <div class="flex items-center gap-2 mb-2">
+          <code class="text-sm font-mono font-semibold text-emerald-400">review.yml</code>
+          <span class="badge badge-sm bg-slate-700 text-slate-300">YAML</span>
+        </div>
+        <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+          Structured configuration that controls how PR Guardian behaves for this repository.
+          Place it at the repo root. Values are merged on top of the service defaults &mdash;
+          you only need to include the keys you want to override.
+        </p>
+
+        <h4 class="text-xs font-semibold text-slate-300 mb-2">Key sections</h4>
+        <div class="overflow-x-auto">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="border-b border-slate-700/50">
+                <th class="text-left py-2 pr-4 text-slate-400 font-medium">Section</th>
+                <th class="text-left py-2 text-slate-400 font-medium">What it controls</th>
+              </tr>
+            </thead>
+            <tbody class="text-slate-300">
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">repo_risk_class</td>
+                <td class="py-2"><code class="text-slate-400">standard</code> | <code class="text-slate-400">elevated</code> | <code class="text-slate-400">critical</code> &mdash; raises the baseline risk for all PRs in this repo</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">auto_approve</td>
+                <td class="py-2">Enable/disable auto-approval, set allowed and blocked target branches</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">thresholds</td>
+                <td class="py-2">Score boundaries for auto-approve (&le;4), human-review (&ge;4), and hard-block (&ge;8)</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">weights</td>
+                <td class="py-2">How much each agent's score matters in the combined score (e.g. security = 3&times;, code quality = 1&times;)</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">trust_tiers</td>
+                <td class="py-2">Path-based governance rules &mdash; which files need human sign-off vs. full AI autonomy</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">path_risk</td>
+                <td class="py-2">Mark paths as critical (always escalate) or safe (lower risk tier ceiling)</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">security_surface</td>
+                <td class="py-2">Glob patterns that flag files as security-critical, input-handling, data-access, config, or infra</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">file_roles</td>
+                <td class="py-2">Patterns to classify files as test, docs, generated, or build (affects triage)</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">privacy</td>
+                <td class="py-2">Compliance frameworks (GDPR, HIPAA, SOX, PCI-DSS) and data classification file path</td>
+              </tr>
+              <tr class="border-b border-slate-700/30">
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">severity_floor</td>
+                <td class="py-2">Per-risk-tier rules for suppressing low-value findings from the review output</td>
+              </tr>
+              <tr>
+                <td class="py-2 pr-4 font-mono text-emerald-400/80">validator</td>
+                <td class="py-2">Enable/disable the adversarial validator that challenges agent findings before display</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <h4 class="text-xs font-semibold text-slate-300 mt-5 mb-2">Example</h4>
+        <pre class="bg-slate-900/60 border border-slate-700/30 rounded-md p-4 text-xs text-slate-300 font-mono overflow-x-auto leading-relaxed"><code># review.yml &mdash; repo root
+repo_risk_class: elevated
+
+auto_approve:
+  enabled: true
+  blocked_target_branches:
+    - main
+    - release/*
+
+weights:
+  security_privacy: 4.0    # boost security weight
+  test_quality: 3.0
+
+trust_tiers:
+  default_tier: spot_check
+  rules:
+    - tier: mandatory_human
+      patterns: ["src/auth/**", "src/crypto/**"]
+      reason: Security-critical code requires human review
+
+path_risk:
+  critical_paths:
+    - pattern: "src/billing/**"
+      reason: Payment processing &mdash; always escalate
+
+security_surface:
+  security_critical:
+    - "**/auth/**"
+    - "**/middleware/verify*"
+  data_access:
+    - "**/repositories/**"
+    - "**/dal/**"</code></pre>
+      </div>
+
+      <!-- review.md -->
+      <div class="border border-slate-700/50 rounded-lg p-5">
+        <div class="flex items-center gap-2 mb-2">
+          <code class="text-sm font-mono font-semibold text-emerald-400">review.md</code>
+          <span class="badge badge-sm bg-slate-700 text-slate-300">Markdown</span>
+        </div>
+        <p class="text-xs text-slate-300 mb-4 leading-relaxed">
+          Free-form review guidelines written by your team. This is your voice &mdash; whatever matters to your project that
+          the default agents wouldn't know.
+        </p>
+        <p class="text-xs text-slate-400 mb-4 leading-relaxed">
+          The content is injected into every agent's system prompt under a
+          <strong class="text-slate-300">Repository Review Guidelines</strong> section. Agents treat these as
+          additional review criteria alongside their built-in expertise.
+        </p>
+
+        <h4 class="text-xs font-semibold text-slate-300 mb-2">Example</h4>
+        <pre class="bg-slate-900/60 border border-slate-700/30 rounded-md p-4 text-xs text-slate-300 font-mono overflow-x-auto leading-relaxed"><code># Review Guidelines
+
+## Architecture
+- All database access goes through the repository layer.
+  Direct SQL in controllers is a hard no.
+- New API endpoints must have an OpenAPI schema in /docs/api.
+
+## Testing
+- Service-layer changes need integration tests, not just unit tests.
+- Mock the HTTP client, never the database.
+
+## Security
+- Never log PII fields (email, phone, SSN). Use the sanitizer.
+- All new endpoints require auth middleware &mdash; no exceptions.
+
+## Style
+- Prefer explicit error returns over panic/throw in Go services.
+- Keep functions under 50 lines. Extract helpers early.</code></pre>
+
+        <div class="mt-4 p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+          <p class="text-2xs text-slate-400 leading-relaxed">
+            <strong class="text-slate-300">Tip:</strong> Be specific and opinionated.
+            Generic advice like "write clean code" doesn't help &mdash; the agents already optimise for that.
+            Focus on rules unique to your project that an outsider wouldn't know.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ──────────────────────────────────────────── -->
+    <!-- HOW REVIEWS WORK -->
+    <!-- ──────────────────────────────────────────── -->
+
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">How reviews work</h2>
+      <p class="text-xs text-slate-400 mb-5">When a PR is opened or updated, the pipeline runs these stages in order.</p>
+
+      <div class="space-y-4">
+        <!-- Stage: Discovery -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">1</div>
+            <div class="w-px flex-1 bg-slate-700/50 mt-1"></div>
+          </div>
+          <div class="pb-4">
+            <h3 class="text-sm font-semibold text-slate-200">Discovery</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              Parses the diff and builds a rich context: languages, security surface, dependency graph, blast radius,
+              change profile, hotspots. Loads <code class="text-slate-300">review.yml</code> and <code class="text-slate-300">review.md</code> from the repo.
+            </p>
+          </div>
+        </div>
+
+        <!-- Stage: Mechanical Gates -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">2</div>
+            <div class="w-px flex-1 bg-slate-700/50 mt-1"></div>
+          </div>
+          <div class="pb-4">
+            <h3 class="text-sm font-semibold text-slate-200">Mechanical gates</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              Runs non-AI checks (linters, type checkers) to fail fast. If a gate fails the PR is hard-blocked immediately &mdash;
+              no point running AI agents on code that won't compile.
+            </p>
+          </div>
+        </div>
+
+        <!-- Stage: Triage -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">3</div>
+            <div class="w-px flex-1 bg-slate-700/50 mt-1"></div>
+          </div>
+          <div class="pb-4">
+            <h3 class="text-sm font-semibold text-slate-200">Triage</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              Classifies the PR into a <strong class="text-slate-300">risk tier</strong> and selects which agents to run.
+              Docs-only or generated-code PRs are marked trivial and skip AI entirely.
+              Cross-stack changes, security surface touches, and new dependencies boost the tier upward.
+            </p>
+          </div>
+        </div>
+
+        <!-- Stage: AI Agents -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">4</div>
+            <div class="w-px flex-1 bg-slate-700/50 mt-1"></div>
+          </div>
+          <div class="pb-4">
+            <h3 class="text-sm font-semibold text-slate-200">AI agents (parallel)</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              Up to six specialist agents review the diff simultaneously, each through their own lens.
+              Every agent returns a verdict (pass, warn, or flag-human) and a list of findings with severity and certainty levels.
+            </p>
+            <div class="grid grid-cols-2 sm:grid-cols-3 gap-2 mt-3">
+              <div class="rounded-md bg-slate-800/50 border border-slate-700/30 px-3 py-2">
+                <div class="text-xs font-medium text-slate-200">Security &amp; Privacy</div>
+                <div class="text-2xs text-slate-500 mt-0.5">Auth, injection, data leaks, compliance</div>
+              </div>
+              <div class="rounded-md bg-slate-800/50 border border-slate-700/30 px-3 py-2">
+                <div class="text-xs font-medium text-slate-200">Test Quality</div>
+                <div class="text-2xs text-slate-500 mt-0.5">Coverage, assertion quality, brittleness</div>
+              </div>
+              <div class="rounded-md bg-slate-800/50 border border-slate-700/30 px-3 py-2">
+                <div class="text-xs font-medium text-slate-200">Architecture &amp; Intent</div>
+                <div class="text-2xs text-slate-500 mt-0.5">Design coherence, coupling, violations</div>
+              </div>
+              <div class="rounded-md bg-slate-800/50 border border-slate-700/30 px-3 py-2">
+                <div class="text-xs font-medium text-slate-200">Performance</div>
+                <div class="text-2xs text-slate-500 mt-0.5">Bottlenecks, resource waste, N+1s</div>
+              </div>
+              <div class="rounded-md bg-slate-800/50 border border-slate-700/30 px-3 py-2">
+                <div class="text-xs font-medium text-slate-200">Hotspot</div>
+                <div class="text-2xs text-slate-500 mt-0.5">Files with a history of bugs</div>
+              </div>
+              <div class="rounded-md bg-slate-800/50 border border-slate-700/30 px-3 py-2">
+                <div class="text-xs font-medium text-slate-200">Code Quality</div>
+                <div class="text-2xs text-slate-500 mt-0.5">Patterns, logging, maintainability</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stage: Scoring & Decision -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">5</div>
+            <div class="w-px flex-1 bg-slate-700/50 mt-1"></div>
+          </div>
+          <div class="pb-4">
+            <h3 class="text-sm font-semibold text-slate-200">Scoring &amp; decision</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              Each finding is scored by severity &times; certainty, then agent scores are combined using your configured weights.
+              The decision engine cross-references the combined score, risk tier, repo risk class, and trust tier to choose the outcome.
+            </p>
+          </div>
+        </div>
+
+        <!-- Stage: Noise Reduction -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">6</div>
+            <div class="w-px flex-1 bg-slate-700/50 mt-1"></div>
+          </div>
+          <div class="pb-4">
+            <h3 class="text-sm font-semibold text-slate-200">Noise reduction</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              After scoring, findings go through three filters: cross-agent deduplication, severity floor (suppresses
+              low-value findings by risk tier), and an adversarial validator that challenges each finding against the full diff.
+              If this removes the evidence that triggered a reject, the decision is downgraded to human-review.
+            </p>
+          </div>
+        </div>
+
+        <!-- Stage: Post -->
+        <div class="flex gap-4">
+          <div class="flex flex-col items-center">
+            <div class="w-7 h-7 rounded-full bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-xs font-semibold text-emerald-400 shrink-0">7</div>
+          </div>
+          <div>
+            <h3 class="text-sm font-semibold text-slate-200">Post result</h3>
+            <p class="text-xs text-slate-400 mt-1 leading-relaxed">
+              Posts a review comment with the decision, summary, and surviving findings.
+              Sets the commit status, adds labels, and requests reviewers if human review is needed.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ──────────────────────────────────────────── -->
+    <!-- DECISIONS -->
+    <!-- ──────────────────────────────────────────── -->
+
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">Decisions</h2>
+      <p class="text-xs text-slate-400 mb-5">Every review ends with one of four outcomes.</p>
+
+      <div class="space-y-3">
+        <div class="flex gap-3 items-start p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+          <span class="badge badge-sm bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0 mt-0.5">Auto-approve</span>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Low risk, all agents pass. PR is approved automatically and the commit status is set to success.
+            If the trust tier is <em>spot-check</em>, a human reviewer is also requested for an optional glance.
+          </p>
+        </div>
+        <div class="flex gap-3 items-start p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+          <span class="badge badge-sm bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0 mt-0.5">Human review</span>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Score is borderline, agent flagged uncertainty, or the trust tier requires human sign-off.
+            PR is not blocked but a reviewer is assigned. The most common escalation path.
+          </p>
+        </div>
+        <div class="flex gap-3 items-start p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+          <span class="badge badge-sm bg-red-500/15 text-red-400 border border-red-500/30 shrink-0 mt-0.5">Reject</span>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            At least one finding with high or critical severity, detected certainty, and a concrete actionable suggestion.
+            PR receives a "changes requested" review. Merge is blocked until the issue is addressed.
+          </p>
+        </div>
+        <div class="flex gap-3 items-start p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+          <span class="badge badge-sm bg-slate-500/15 text-slate-400 border border-slate-500/30 shrink-0 mt-0.5">Hard block</span>
+          <p class="text-xs text-slate-300 leading-relaxed">
+            Mechanical checks failed or the combined score exceeded the hard-block threshold.
+            Commit status is set to failure. Usually means the code doesn't pass basic gates.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <!-- ──────────────────────────────────────────── -->
+    <!-- RISK TIERS -->
+    <!-- ──────────────────────────────────────────── -->
+
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">Risk tiers</h2>
+      <p class="text-xs text-slate-400 mb-5">The triage stage assigns a risk tier based on what the PR changes. Higher tiers run more agents and need higher scores to auto-approve.</p>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="border-b border-slate-700/50">
+              <th class="text-left py-2 pr-4 text-slate-400 font-medium">Tier</th>
+              <th class="text-left py-2 pr-4 text-slate-400 font-medium">Typical signals</th>
+              <th class="text-left py-2 text-slate-400 font-medium">What runs</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-300">
+            <tr class="border-b border-slate-700/30">
+              <td class="py-2 pr-4 font-medium text-slate-200">Trivial</td>
+              <td class="py-2 pr-4">Docs-only, generated code, config-only</td>
+              <td class="py-2">No AI agents &mdash; auto-approved immediately</td>
+            </tr>
+            <tr class="border-b border-slate-700/30">
+              <td class="py-2 pr-4 font-medium text-slate-200">Low</td>
+              <td class="py-2 pr-4">Small utility change, no risk signals</td>
+              <td class="py-2">Minimal agent set (typically 2&ndash;3 agents)</td>
+            </tr>
+            <tr class="border-b border-slate-700/30">
+              <td class="py-2 pr-4 font-medium text-slate-200">Medium</td>
+              <td class="py-2 pr-4">Data layer, API boundary, or hotspot file touched</td>
+              <td class="py-2">Most agents run (typically 4&ndash;5)</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 font-medium text-slate-200">High</td>
+              <td class="py-2 pr-4">Security surface, new dependencies, architecture boundary crossed</td>
+              <td class="py-2">All 6 agents run</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+        <p class="text-2xs text-slate-400 leading-relaxed">
+          <strong class="text-slate-300">Amplifiers</strong> can boost the tier: cross-stack changes (Python + TypeScript),
+          3+ languages, SQL/Terraform/Docker files, elevated or critical repo risk class, and path-risk rules from <code class="text-slate-300">review.yml</code>.
+        </p>
+      </div>
+    </div>
+
+    <!-- ──────────────────────────────────────────── -->
+    <!-- TRUST TIERS -->
+    <!-- ──────────────────────────────────────────── -->
+
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">Trust tiers</h2>
+      <p class="text-xs text-slate-400 mb-5">
+        Separate from risk tiers. Trust tiers answer <em>"who needs to approve this?"</em> rather than <em>"how risky is it?"</em>.
+        Configured per-path in <code class="text-slate-300">review.yml</code> under <code class="text-slate-300">trust_tiers.rules</code>.
+      </p>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-xs">
+          <thead>
+            <tr class="border-b border-slate-700/50">
+              <th class="text-left py-2 pr-4 text-slate-400 font-medium">Tier</th>
+              <th class="text-left py-2 text-slate-400 font-medium">Behaviour</th>
+            </tr>
+          </thead>
+          <tbody class="text-slate-300">
+            <tr class="border-b border-slate-700/30">
+              <td class="py-2 pr-4 font-mono text-emerald-400/80">ai_only</td>
+              <td class="py-2">Full AI autonomy. Auto-approve allowed, no human reviewer requested.</td>
+            </tr>
+            <tr class="border-b border-slate-700/30">
+              <td class="py-2 pr-4 font-mono text-emerald-400/80">spot_check</td>
+              <td class="py-2">Auto-approve allowed, but a human reviewer is requested for an optional look. Default tier.</td>
+            </tr>
+            <tr class="border-b border-slate-700/30">
+              <td class="py-2 pr-4 font-mono text-emerald-400/80">mandatory_human</td>
+              <td class="py-2">Human must approve. Overrides auto-approve regardless of score.</td>
+            </tr>
+            <tr>
+              <td class="py-2 pr-4 font-mono text-emerald-400/80">human_primary</td>
+              <td class="py-2">Specific reviewer group must approve (e.g. security team). Strictest tier.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="mt-4 p-3 rounded-md bg-slate-800/50 border border-slate-700/30">
+        <p class="text-2xs text-slate-400 leading-relaxed">
+          <strong class="text-slate-300">Escalation:</strong> after agents run, trust can be bumped upward (never downward)
+          if findings contain security keywords or high-severity issues. For example, a change to a utility file classified as
+          <code class="text-slate-300">ai_only</code> might escalate to <code class="text-slate-300">spot_check</code> if an agent flags a potential auth issue.
+        </p>
+      </div>
+    </div>
+
+    <!-- ──────────────────────────────────────────── -->
+    <!-- SCORING -->
+    <!-- ──────────────────────────────────────────── -->
+
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">Scoring</h2>
+      <p class="text-xs text-slate-400 mb-5">
+        Each finding has a severity and a certainty. They combine into a numeric score that drives the decision.
+      </p>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <h4 class="text-xs font-semibold text-slate-300 mb-2">Severity weights</h4>
+          <div class="space-y-1.5">
+            <div class="flex justify-between text-xs"><span class="text-slate-400">Low</span><span class="font-mono text-slate-300">1</span></div>
+            <div class="flex justify-between text-xs"><span class="text-slate-400">Medium</span><span class="font-mono text-slate-300">3</span></div>
+            <div class="flex justify-between text-xs"><span class="text-slate-400">High</span><span class="font-mono text-slate-300">6</span></div>
+            <div class="flex justify-between text-xs"><span class="text-slate-400">Critical</span><span class="font-mono text-slate-300">10</span></div>
+          </div>
+        </div>
+        <div>
+          <h4 class="text-xs font-semibold text-slate-300 mb-2">Certainty multipliers</h4>
+          <div class="space-y-1.5">
+            <div class="flex justify-between text-xs"><span class="text-slate-400">Detected</span><span class="font-mono text-slate-300">&times;1.0</span></div>
+            <div class="flex justify-between text-xs"><span class="text-slate-400">Suspected</span><span class="font-mono text-slate-300">&times;0.5</span></div>
+            <div class="flex justify-between text-xs"><span class="text-slate-400">Uncertain</span><span class="font-mono text-slate-300">&times;0.2</span></div>
+          </div>
+        </div>
+      </div>
+
+      <p class="text-xs text-slate-400 mt-4 leading-relaxed">
+        The combined score (0&ndash;10) is a weighted average of all agent scores. Default thresholds:
+        auto-approve &le; <strong class="text-slate-300">4.0</strong>,
+        human-review &ge; <strong class="text-slate-300">4.0</strong>,
+        hard-block &ge; <strong class="text-slate-300">8.0</strong>.
+        All configurable in <code class="text-slate-300">review.yml</code>.
+      </p>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>

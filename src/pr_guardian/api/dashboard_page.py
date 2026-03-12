@@ -15,6 +15,7 @@ _REVIEW_DETAIL_HTML = _DASHBOARD_DIR / "review_detail.html"
 _SCANS_HTML = _DASHBOARD_DIR / "scans.html"
 _PROMPTS_HTML = _DASHBOARD_DIR / "prompts.html"
 _SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"
+_GUIDE_HTML = _DASHBOARD_DIR / "guide.html"
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -57,3 +58,9 @@ async def prompts_page():
 async def settings_page():
     """Serve the LLM provider settings page."""
     return _SETTINGS_HTML.read_text()
+
+
+@router.get("/guide", response_class=HTMLResponse)
+async def guide_page():
+    """Serve the guide / how-to page."""
+    return _GUIDE_HTML.read_text()

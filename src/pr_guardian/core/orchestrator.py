@@ -183,6 +183,15 @@ async def _run_pipeline(
     config = service_config or load_repo_config(repo_path)
     config = await apply_global_settings(config)
 
+    # Load repo-level review guidelines (review.md)
+    review_guidelines = ""
+    try:
+        review_guidelines = await adapter.fetch_file_content(
+            pr.repo, "review.md", ref=pr.target_branch,
+        )
+    except Exception:
+        pass  # File doesn't exist or fetch failed — no guidelines
+
     language_map = detect_languages(changed_files)
     security_surface = build_security_surface(config.security_surface, changed_files)
     dep_graph = build_dep_graph(config.path_risk.critical_consumers or None)
@@ -209,6 +218,7 @@ async def _run_pipeline(
         cross_stack=language_map.cross_stack,
         repo_config=config.model_dump(),
         repo_risk_class=risk_class_map.get(config.repo_risk_class, RepoRiskClass.STANDARD),
+        review_guidelines=review_guidelines,
         hotspots=hotspots,
         security_surface=security_surface,
         blast_radius=blast_radius,
@@ -223,6 +233,10 @@ async def _run_pipeline(
     _plog("info", "discovery",
           f"Trust tier: {trust_tier_result.resolved_tier.value}. "
           f"Triggering files: {', '.join(trust_tier_result.triggering_files[:5]) or 'none'}.")
+
+    if review_guidelines:
+        _plog("info", "discovery",
+              f"Loaded review.md guidelines ({len(review_guidelines)} chars).")
 
     langs = list(language_map.languages.keys())
     _plog("info", "discovery",

@@ -129,6 +129,7 @@ class ReviewContext:
 
     repo_config: dict = field(default_factory=dict)
     repo_risk_class: RepoRiskClass = RepoRiskClass.STANDARD
+    review_guidelines: str = ""
 
     hotspots: set[str] = field(default_factory=set)
     security_surface: SecuritySurface = field(default_factory=SecuritySurface)

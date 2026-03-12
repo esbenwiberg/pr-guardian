@@ -43,8 +43,9 @@ def build_agent_prompt(
     agent_type: str,
     languages: list[str],
     base_override: str | None = None,
+    repo_guidelines: str | None = None,
 ) -> str:
-    """Compose system prompt from base + language-specific sections."""
+    """Compose system prompt from base + language-specific sections + repo guidelines."""
     parts: list[str] = []
 
     if base_override:
@@ -53,6 +54,14 @@ def build_agent_prompt(
         parts.append(base)
     else:
         parts.append(f"You are a {agent_type.replace('_', ' ')} review agent for PR Guardian.")
+
+    if repo_guidelines:
+        parts.append(
+            "## REPOSITORY REVIEW GUIDELINES\n\n"
+            "The following guidelines were provided by the repository maintainers. "
+            "Apply them as additional review criteria.\n\n"
+            + repo_guidelines
+        )
 
     for lang in languages:
         lang_prompt = load_prompt(f"{agent_type}/{lang}.md")

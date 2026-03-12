@@ -101,7 +101,11 @@ class BaseAgent:
         """Run the agent review. Override for custom behavior."""
         languages = list(context.language_map.languages.keys())
         override = await storage.get_prompt_override(self.agent_name)
-        system_prompt = build_agent_prompt(self.prompt_dir, languages, base_override=override)
+        system_prompt = build_agent_prompt(
+            self.prompt_dir, languages,
+            base_override=override,
+            repo_guidelines=context.review_guidelines or None,
+        )
         system_prompt += f"\n\n{AGENT_OUTPUT_SCHEMA}"
 
         user_message = build_agent_context(
