@@ -282,6 +282,19 @@ def _check_reject(
     return reasons
 
 
+def recheck_reject(
+    agent_results: list[AgentResult],
+    config: GuardianConfig,
+) -> bool:
+    """Return True if the REJECT criteria still hold on the (filtered) findings.
+
+    Called after post-decision noise reduction to verify the high-confidence
+    actionable findings that triggered REJECT weren't removed by the severity
+    floor, deduplication, or adversarial validator.
+    """
+    return bool(_check_reject(agent_results, config))
+
+
 def _apply_matrix(
     tier: RiskTier,
     repo_risk: RepoRiskClass,

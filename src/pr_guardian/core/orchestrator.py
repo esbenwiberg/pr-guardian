@@ -19,7 +19,7 @@ from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import build_summary_comment, get_review_labels
 from pr_guardian.decision.dedup import deduplicate_findings
-from pr_guardian.decision.engine import decide
+from pr_guardian.decision.engine import decide, recheck_reject
 from pr_guardian.decision.severity_filter import filter_findings
 from pr_guardian.decision.validator import validate_findings
 from pr_guardian.discovery.blast_radius import compute_blast_radius
@@ -412,6 +412,18 @@ async def _run_pipeline(
         if validator_meta.get("error"):
             _plog("warn", "noise_reduction",
                   f"Validator error (findings kept as-is): {validator_meta['error']}")
+
+    # Re-evaluate REJECT after noise reduction: if the high-confidence findings
+    # that triggered REJECT were removed by dedup/severity-floor/validator,
+    # downgrade to HUMAN_REVIEW so the decision matches the displayed findings.
+    if result.decision == Decision.REJECT and not recheck_reject(result.agent_results, config):
+        result.decision = Decision.HUMAN_REVIEW
+        result.override_reasons.append(
+            "Downgraded from reject: actionable findings removed by post-decision filtering"
+        )
+        _plog("info", "decision",
+              "Decision downgraded: reject → human_review "
+              "(high-confidence findings removed by noise reduction).")
 
     result.pipeline_log = pipeline_log
 

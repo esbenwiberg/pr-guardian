@@ -6,6 +6,15 @@
 <title>PR Guardian — Review Findings</title>
 <link rel="stylesheet" href="/static/styles.css">
 </head>
+<!--
+  Tailwind safelist — dynamic classes built at runtime that the scanner can't detect:
+  banner-auto_approve banner-human_review banner-reject banner-hard_block banner-pending banner-error
+  verdict-pass verdict-warn verdict-flag_human
+  sev-critical sev-high sev-medium sev-low
+  badge-trivial badge-low badge-medium badge-high
+  badge-auto_approve badge-human_review badge-reject badge-hard_block badge-pending badge-error
+  log-badge-info log-badge-warn log-badge-error log-badge-debug
+-->
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
 
 <!-- Sidebar -->
@@ -68,8 +77,23 @@
 
     <!-- Info cards -->
     <div class="grid grid-cols-5 gap-3 mb-6">
-      <div class="stat-card"><div class="stat-card-label">Risk Tier</div><div class="stat-card-value" id="v-risk"></div></div>
-      <div class="stat-card"><div class="stat-card-label">Score</div><div class="stat-card-value" id="v-score"></div></div>
+      <div class="stat-card stat-card-tooltip">
+        <div class="stat-card-label">Risk Tier</div>
+        <div class="stat-card-value" id="v-risk"></div>
+        <div class="tooltip" id="risk-tooltip">
+          <div class="tooltip-title">Why this risk tier?</div>
+          <ul class="tooltip-reasons" id="risk-reasons"></ul>
+        </div>
+      </div>
+      <div class="stat-card stat-card-tooltip">
+        <div class="stat-card-label">Score</div>
+        <div class="stat-card-value" id="v-score"></div>
+        <div class="tooltip">
+          <div class="tooltip-title">Severity Score</div>
+          Weighted average of agent findings (0 = clean, 10 = critical issues).
+          Each finding scores severity × certainty, then agents are weighted by importance (security highest, code quality lowest).
+        </div>
+      </div>
       <div class="stat-card"><div class="stat-card-label">Findings</div><div class="stat-card-value" id="v-findings"></div></div>
       <div class="stat-card"><div class="stat-card-label">Duration</div><div class="stat-card-value" id="v-duration"></div></div>
       <div class="stat-card"><div class="stat-card-label">Cost</div><div class="stat-card-value" id="v-cost"></div></div>
@@ -184,6 +208,17 @@ function render(d) {
   // Info cards
   document.getElementById('v-risk').textContent = (d.risk_tier || '-').toUpperCase();
   document.getElementById('v-score').textContent = d.combined_score != null ? `${d.combined_score.toFixed(1)} / 10` : '-';
+
+  // Populate risk tier tooltip from pipeline log
+  const triageReasons = (d.pipeline_log || [])
+    .filter(e => e.stage === 'triage' && typeof e.msg === 'string' && e.msg.startsWith('Reason: '))
+    .map(e => e.msg.replace('Reason: ', ''));
+  const reasonsList = document.getElementById('risk-reasons');
+  if (triageReasons.length) {
+    reasonsList.innerHTML = triageReasons.map(r => `<li>${esc(r)}</li>`).join('');
+  } else {
+    reasonsList.innerHTML = '<li>No detailed reasons available</li>';
+  }
   const totalFindings = (d.agent_results || []).reduce((sum, a) => sum + (a.findings || []).length, 0);
   document.getElementById('v-findings').textContent = totalFindings;
   document.getElementById('v-duration').textContent = d.duration_ms ? `${(d.duration_ms / 1000).toFixed(1)}s` : '-';

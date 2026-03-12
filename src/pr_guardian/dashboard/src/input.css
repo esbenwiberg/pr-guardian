@@ -133,6 +133,7 @@
   /* Decision-colored banners */
   .banner-auto_approve { @apply border; background: rgba(52, 211, 153, 0.08); border-color: rgba(52, 211, 153, 0.25); }
   .banner-human_review { @apply border; background: rgba(251, 146, 60, 0.08); border-color: rgba(251, 146, 60, 0.25); }
+  .banner-reject       { @apply border; background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.25); }
   .banner-hard_block   { @apply border; background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.25); }
   .banner-pending      { @apply bg-slate-800 border border-slate-700/50; }
   .banner-error        { @apply border; background: rgba(248, 113, 113, 0.08); border-color: rgba(248, 113, 113, 0.25); }
@@ -227,6 +228,27 @@
     color: var(--accent-400);
     border-left-color: var(--accent-400);
   }
+
+  /* Stat card tooltip (hover to reveal) */
+  .stat-card-tooltip {
+    @apply relative cursor-help;
+  }
+  .stat-card-tooltip .tooltip {
+    @apply hidden absolute z-40 text-xs leading-relaxed text-slate-400
+           rounded-lg border border-slate-700/50 bg-slate-900 p-3
+           text-left whitespace-normal;
+    top: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    min-width: 240px;
+    max-width: 340px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .stat-card-tooltip:hover .tooltip { @apply block; }
+  .tooltip-title { @apply font-semibold text-slate-200 mb-1; }
+  .tooltip-reasons { @apply list-none p-0 m-0; }
+  .tooltip-reasons li { @apply py-0.5; }
+  .tooltip-reasons li::before { content: "•"; @apply mr-1.5 text-slate-600; }
 
   /* Toast with slide-in animation */
   .pg-toast {
