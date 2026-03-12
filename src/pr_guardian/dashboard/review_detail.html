@@ -75,6 +75,11 @@
       <a id="pr-link" class="btn btn-sm btn-secondary" target="_blank">View PR</a>
     </div>
 
+    <!-- Override reasons (why decision was escalated) -->
+    <div id="overrides-section" style="display:none" class="mb-4">
+      <div class="text-xs text-slate-400 flex items-start gap-2 flex-wrap" id="overrides-list"></div>
+    </div>
+
     <!-- Info cards -->
     <div class="grid grid-cols-5 gap-3 mb-6">
       <div class="stat-card stat-card-tooltip">
@@ -203,6 +208,15 @@ function render(d) {
     document.getElementById('pr-link').style.display = '';
   } else {
     document.getElementById('pr-link').style.display = 'none';
+  }
+
+  // Override reasons
+  const overrides = d.override_reasons || [];
+  if (overrides.length) {
+    document.getElementById('overrides-section').style.display = '';
+    document.getElementById('overrides-list').innerHTML = overrides
+      .map(r => `<span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-slate-700/50 bg-slate-800/60 text-xs text-slate-400"><span class="text-orange-400">!</span> ${esc(r)}</span>`)
+      .join('');
   }
 
   // Info cards
