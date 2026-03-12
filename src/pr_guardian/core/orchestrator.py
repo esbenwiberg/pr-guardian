@@ -18,6 +18,7 @@ from pr_guardian.config.loader import apply_global_settings, load_repo_config
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import build_summary_comment, get_review_labels
+from pr_guardian.decision.dedup import deduplicate_findings
 from pr_guardian.decision.engine import decide
 from pr_guardian.decision.severity_filter import filter_findings
 from pr_guardian.decision.validator import validate_findings
@@ -361,6 +362,16 @@ async def _run_pipeline(
         _plog("info", "decision", f"Override: {reason}")
 
     # Stage 5: Post-decision noise reduction
+    # Deduplication: remove duplicate findings across agents (display only,
+    # scoring already happened on the full set inside decide()).
+    deduped_results, dedup_removed = deduplicate_findings(
+        result.agent_results, config,
+    )
+    result.agent_results = deduped_results
+    if dedup_removed:
+        _plog("info", "noise_reduction",
+              f"Deduplication removed {dedup_removed} duplicate finding(s).")
+
     # Severity floor: suppress low-value findings per risk tier (display only,
     # scoring already happened on the full set inside decide()).
     filtered_results, suppressed_count = filter_findings(
