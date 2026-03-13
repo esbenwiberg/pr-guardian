@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — How It Works</title>
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+  /* Flow diagram styles */
+  .flow-container { position: relative; }
+  .flow-line {
+    position: absolute; left: 50%; width: 2px; background: linear-gradient(to bottom, #334155, var(--accent-400), #334155);
+    transform: translateX(-50%); top: 0; bottom: 0; z-index: 0;
+  }
+  .flow-step { position: relative; z-index: 1; }
+  .flow-step:first-child .flow-connector-up { display: none; }
+  .flow-step:last-child .flow-connector-down { display: none; }
+  .flow-connector {
+    width: 2px; height: 28px; margin: 0 auto;
+    background: linear-gradient(to bottom, rgba(51,65,85,.6), var(--accent-400));
+  }
+  .flow-connector-down {
+    width: 2px; height: 28px; margin: 0 auto;
+    background: linear-gradient(to bottom, var(--accent-400), rgba(51,65,85,.6));
+  }
+  .flow-arrow {
+    width: 0; height: 0; margin: 0 auto;
+    border-left: 6px solid transparent; border-right: 6px solid transparent;
+    border-top: 8px solid var(--accent-400);
+  }
+  .flow-card {
+    border-radius: .75rem; border: 1px solid rgba(51,65,85,.5);
+    background: rgba(30,41,59,.9); padding: 1.25rem 1.5rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.3);
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .flow-card:hover {
+    border-color: color-mix(in srgb, var(--accent-400) 30%, transparent);
+    box-shadow: 0 4px 16px -4px rgba(0,0,0,.4), 0 0 0 1px color-mix(in srgb, var(--accent-400) 10%, transparent);
+  }
+  .flow-card-accent {
+    border-left: 3px solid var(--accent-400);
+  }
+  .stage-num {
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 28px; height: 28px; border-radius: 50%; font-size: .75rem; font-weight: 700;
+    background: color-mix(in srgb, var(--accent-400) 15%, transparent);
+    color: var(--accent-400); flex-shrink: 0;
+  }
+  .stage-num-sm {
+    width: 22px; height: 22px; font-size: .625rem;
+  }
+  .outcome-card {
+    border-radius: .75rem; border: 1px solid; padding: 1rem 1.25rem;
+    text-align: center; flex: 1; min-width: 140px;
+  }
+  .outcome-approve { border-color: rgba(52,211,153,.3); background: rgba(52,211,153,.06); }
+  .outcome-review  { border-color: rgba(251,191,36,.3); background: rgba(251,191,36,.06); }
+  .outcome-reject  { border-color: rgba(251,146,60,.3); background: rgba(251,146,60,.06); }
+  .outcome-block   { border-color: rgba(248,113,113,.3); background: rgba(248,113,113,.06); }
+  .check-pill {
+    display: inline-flex; align-items: center; gap: .375rem;
+    border-radius: .375rem; border: 1px solid rgba(51,65,85,.5);
+    background: rgba(15,23,42,.6); padding: .25rem .625rem;
+    font-size: .75rem; color: #cbd5e1;
+  }
+  .agent-card {
+    border-radius: .5rem; border: 1px solid rgba(51,65,85,.5);
+    background: rgba(15,23,42,.5); padding: .875rem 1rem;
+    transition: border-color .15s;
+  }
+  .agent-card:hover { border-color: rgba(51,65,85,.8); }
+  .weight-bar {
+    height: 6px; border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent-400), var(--accent-500));
+  }
+  .tier-row {
+    display: flex; align-items: center; gap: .75rem;
+    padding: .625rem .75rem; border-radius: .5rem;
+    border: 1px solid rgba(51,65,85,.3);
+    background: rgba(15,23,42,.4);
+  }
+  .tier-dot {
+    width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0;
+  }
+  .threshold-bar {
+    position: relative; height: 32px; border-radius: .375rem;
+    background: rgba(51,65,85,.4); overflow: hidden;
+  }
+  .threshold-zone {
+    position: absolute; top: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: .625rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+  }
+</style>
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">G</div>
+    <span class="text-sm font-semibold text-slate-50 hidden lg:block">PR Guardian</span>
+    <span class="ml-auto text-2xs font-mono text-slate-500 hidden lg:block">v0.1</span>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/dashboard" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"/></svg>
+      <span class="hidden lg:block">Dashboard</span>
+    </a>
+    <a href="/reviews" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z"/></svg>
+      <span class="hidden lg:block">Reviews</span>
+    </a>
+    <a href="/scans" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+      <span class="hidden lg:block">Scans</span>
+    </a>
+    <a href="/prompts" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+      <span class="hidden lg:block">Prompts</span>
+    </a>
+    <a href="/how-it-works" class="sidebar-item active">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3"/></svg>
+      <span class="hidden lg:block">How It Works</span>
+    </a>
+    <a href="/settings" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.248a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+      <span class="hidden lg:block">Settings</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer hidden lg:block">
+    <div class="text-2xs text-slate-500 px-3 py-2">PR Guardian v0.1</div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <h1 class="text-sm font-semibold text-slate-50">How It Works</h1>
+  </header>
+
+  <div class="max-w-[860px] mx-auto px-6 py-8 space-y-10">
+
+    <!-- Hero -->
+    <div class="text-center mb-2">
+      <h2 class="text-2xl font-bold text-slate-50 mb-2">The Review Pipeline</h2>
+      <p class="text-sm text-slate-400 max-w-xl mx-auto leading-relaxed">
+        Every PR flows through a 6-stage pipeline. Deterministic gates run first, then AI agents
+        analyse what matters, and a rules-based engine makes the final call.
+      </p>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- VISUAL FLOW DIAGRAM                                          -->
+    <!-- ============================================================ -->
+    <div class="space-y-1">
+
+      <!-- Trigger -->
+      <div class="flow-step">
+        <div class="flow-card" style="max-width:480px; margin:0 auto; text-align:center; border:1px dashed rgba(51,65,85,.7); background:rgba(15,23,42,.6);">
+          <div class="flex items-center justify-center gap-2">
+            <svg class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0"/></svg>
+            <span class="text-sm font-semibold text-slate-300">Webhook Received</span>
+          </div>
+          <p class="text-2xs text-slate-500 mt-1">GitHub or Azure DevOps fires a PR event</p>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Stage 0: Discovery -->
+      <div class="flow-step">
+        <div class="flow-card flow-card-accent" style="max-width:620px; margin:0 auto;">
+          <div class="flex items-start gap-3">
+            <span class="stage-num">0</span>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Discovery</h3>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                Parse the diff, detect languages, map the security surface, compute blast radius, and load historical hotspot data.
+              </p>
+              <div class="flex flex-wrap gap-2">
+                <span class="check-pill"><span class="text-2xs text-slate-500">diff</span> Parse &amp; chunk</span>
+                <span class="check-pill"><span class="text-2xs text-slate-500">lang</span> Detect stack</span>
+                <span class="check-pill"><span class="text-2xs text-slate-500">sec</span> Surface map</span>
+                <span class="check-pill"><span class="text-2xs text-slate-500">blast</span> Radius calc</span>
+                <span class="check-pill"><span class="text-2xs text-slate-500">hist</span> Hotspot load</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Stage 1: Mechanical Gates -->
+      <div class="flow-step">
+        <div class="flow-card flow-card-accent" style="max-width:620px; margin:0 auto;">
+          <div class="flex items-start gap-3">
+            <span class="stage-num">1</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <h3 class="text-[15px] font-semibold text-slate-50">Mechanical Gates</h3>
+                <span class="badge badge-sm" style="background:rgba(248,113,113,.1); color:#f87171; --tw-ring-color:rgba(248,113,113,.2);">HARD BLOCK ON FAIL</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                Deterministic checks run in parallel. If any fail, the PR is immediately blocked &mdash; no agents run.
+              </p>
+              <div class="space-y-2">
+                <p class="text-2xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Universal checks</p>
+                <div class="flex flex-wrap gap-2">
+                  <span class="check-pill">Gitleaks <span class="text-2xs text-slate-500">secrets</span></span>
+                  <span class="check-pill">Semgrep <span class="text-2xs text-slate-500">static analysis</span></span>
+                  <span class="check-pill">PII Scanner <span class="text-2xs text-slate-500">personal data</span></span>
+                  <span class="check-pill">API Contract <span class="text-2xs text-slate-500">stability</span></span>
+                  <span class="check-pill">Migration Safety <span class="text-2xs text-slate-500">DB changes</span></span>
+                </div>
+                <p class="text-2xs font-semibold uppercase tracking-wider text-slate-500 mt-3 mb-1">Language-conditional</p>
+                <div class="flex flex-wrap gap-2">
+                  <span class="check-pill">npm audit <span class="text-2xs text-slate-500">JS / TS</span></span>
+                  <span class="check-pill">pip audit <span class="text-2xs text-slate-500">Python</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Stage 2: Triage -->
+      <div class="flow-step">
+        <div class="flow-card flow-card-accent" style="max-width:620px; margin:0 auto;">
+          <div class="flex items-start gap-3">
+            <span class="stage-num">2</span>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Triage</h3>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                Classify the change's risk tier based on what was touched, then select which AI agents need to run.
+              </p>
+              <div class="space-y-2">
+                <div class="tier-row">
+                  <span class="tier-dot" style="background:#64748b;"></span>
+                  <div class="flex-1">
+                    <span class="text-xs font-semibold text-slate-300">Trivial</span>
+                    <span class="text-2xs text-slate-500 ml-2">Docs, config, generated files</span>
+                  </div>
+                  <span class="text-2xs text-slate-500 font-mono">0 agents</span>
+                </div>
+                <div class="tier-row">
+                  <span class="tier-dot" style="background:#34d399;"></span>
+                  <div class="flex-1">
+                    <span class="text-xs font-semibold text-slate-300">Low</span>
+                    <span class="text-2xs text-slate-500 ml-2">Minor changes, no risk flags</span>
+                  </div>
+                  <span class="text-2xs text-slate-500 font-mono">1 agent</span>
+                </div>
+                <div class="tier-row">
+                  <span class="tier-dot" style="background:#fbbf24;"></span>
+                  <div class="flex-1">
+                    <span class="text-xs font-semibold text-slate-300">Medium</span>
+                    <span class="text-2xs text-slate-500 ml-2">Data layer, API boundary, hotspot</span>
+                  </div>
+                  <span class="text-2xs text-slate-500 font-mono">2-3 agents</span>
+                </div>
+                <div class="tier-row">
+                  <span class="tier-dot" style="background:#f87171;"></span>
+                  <div class="flex-1">
+                    <span class="text-xs font-semibold text-slate-300">High</span>
+                    <span class="text-2xs text-slate-500 ml-2">Security surface, wide blast radius, cross-arch</span>
+                  </div>
+                  <span class="text-2xs text-slate-500 font-mono">6 agents</span>
+                </div>
+              </div>
+              <div class="mt-3 p-2.5 rounded-lg" style="background:rgba(15,23,42,.5); border:1px solid rgba(51,65,85,.3);">
+                <p class="text-2xs text-slate-500"><strong class="text-slate-400">Amplifiers:</strong> Cross-stack changes, >3 languages, SQL/Terraform/Dockerfile, elevated repo risk class, or custom path-risk rules can bump the tier up.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Stage 3: AI Agents -->
+      <div class="flow-step">
+        <div class="flow-card flow-card-accent" style="max-width:620px; margin:0 auto;">
+          <div class="flex items-start gap-3">
+            <span class="stage-num">3</span>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-[15px] font-semibold text-slate-50 mb-1">AI Agents</h3>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                Selected agents run in parallel. Each returns findings with severity, certainty, and evidence. Prompts are fully editable on the <a href="/prompts" class="text-amber-400 hover:underline">Prompts</a> page.
+              </p>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                <div class="agent-card">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-200">Security &amp; Privacy</span>
+                    <span class="text-2xs font-mono text-amber-400">3.0x</span>
+                  </div>
+                  <div class="weight-bar" style="width:100%;"></div>
+                  <p class="text-2xs text-slate-500 mt-1.5">Vulnerabilities, data handling, auth flaws</p>
+                </div>
+                <div class="agent-card">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-200">Test Quality</span>
+                    <span class="text-2xs font-mono text-amber-400">2.5x</span>
+                  </div>
+                  <div class="weight-bar" style="width:83%;"></div>
+                  <p class="text-2xs text-slate-500 mt-1.5">Coverage gaps, assertion quality, test hygiene</p>
+                </div>
+                <div class="agent-card">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-200">Architecture &amp; Intent</span>
+                    <span class="text-2xs font-mono text-amber-400">2.0x</span>
+                  </div>
+                  <div class="weight-bar" style="width:67%;"></div>
+                  <p class="text-2xs text-slate-500 mt-1.5">Design violations, layer boundaries, consistency</p>
+                </div>
+                <div class="agent-card">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-200">Performance</span>
+                    <span class="text-2xs font-mono text-amber-400">1.5x</span>
+                  </div>
+                  <div class="weight-bar" style="width:50%;"></div>
+                  <p class="text-2xs text-slate-500 mt-1.5">Regressions, N+1 queries, bottlenecks</p>
+                </div>
+                <div class="agent-card">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-200">Hotspot Focus</span>
+                    <span class="text-2xs font-mono text-amber-400">1.5x</span>
+                  </div>
+                  <div class="weight-bar" style="width:50%;"></div>
+                  <p class="text-2xs text-slate-500 mt-1.5">Extra scrutiny on historically problematic files</p>
+                </div>
+                <div class="agent-card">
+                  <div class="flex items-center justify-between mb-1.5">
+                    <span class="text-xs font-semibold text-slate-200">Code Quality</span>
+                    <span class="text-2xs font-mono text-amber-400">1.0x</span>
+                  </div>
+                  <div class="weight-bar" style="width:33%;"></div>
+                  <p class="text-2xs text-slate-500 mt-1.5">Clarity, observability, logging, error handling</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Stage 4: Decision -->
+      <div class="flow-step">
+        <div class="flow-card flow-card-accent" style="max-width:620px; margin:0 auto;">
+          <div class="flex items-start gap-3">
+            <span class="stage-num">4</span>
+            <div class="flex-1 min-w-0">
+              <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Decision Engine</h3>
+              <p class="text-xs text-slate-400 leading-relaxed mb-3">
+                Deterministic, rules-based. Scores every finding, validates certainty claims against evidence, then applies the decision matrix.
+              </p>
+
+              <!-- Scoring formula -->
+              <div class="p-3 rounded-lg mb-3" style="background:rgba(15,23,42,.5); border:1px solid rgba(51,65,85,.3);">
+                <p class="text-2xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Scoring formula</p>
+                <p class="text-sm font-mono text-slate-200" style="letter-spacing:.02em;">
+                  score = severity <span class="text-slate-500">&times;</span> certainty <span class="text-slate-500">&times;</span> agent_weight
+                </p>
+                <div class="grid grid-cols-2 gap-4 mt-3">
+                  <div>
+                    <p class="text-2xs text-slate-500 font-semibold mb-1">Severity</p>
+                    <div class="space-y-1">
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">Low</span><span class="font-mono text-slate-300">1</span></div>
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">Medium</span><span class="font-mono text-slate-300">3</span></div>
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">High</span><span class="font-mono text-slate-300">6</span></div>
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">Critical</span><span class="font-mono text-slate-300">10</span></div>
+                    </div>
+                  </div>
+                  <div>
+                    <p class="text-2xs text-slate-500 font-semibold mb-1">Certainty multiplier</p>
+                    <div class="space-y-1">
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">Detected</span><span class="font-mono text-slate-300">1.0x</span></div>
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">Suspected</span><span class="font-mono text-slate-300">0.5x</span></div>
+                      <div class="flex justify-between text-2xs"><span class="text-slate-400">Uncertain</span><span class="font-mono text-slate-300">0.2x</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Threshold bar -->
+              <p class="text-2xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Decision thresholds</p>
+              <div class="threshold-bar mb-2">
+                <div class="threshold-zone" style="left:0; width:40%; background:rgba(52,211,153,.15); color:#34d399;">
+                  Auto-approve
+                </div>
+                <div class="threshold-zone" style="left:40%; width:40%; background:rgba(251,191,36,.12); color:#fbbf24;">
+                  Human review
+                </div>
+                <div class="threshold-zone" style="left:80%; width:20%; background:rgba(248,113,113,.12); color:#f87171;">
+                  Hard block
+                </div>
+              </div>
+              <div class="flex justify-between text-2xs font-mono text-slate-500 px-1">
+                <span>0</span>
+                <span style="position:relative; left:-10%;">4.0</span>
+                <span style="position:relative; left:-5%;">8.0</span>
+                <span>10</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Stage 5: Validation -->
+      <div class="flow-step">
+        <div class="flow-card flow-card-accent" style="max-width:620px; margin:0 auto;">
+          <div class="flex items-start gap-3">
+            <span class="stage-num">5</span>
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2 mb-1">
+                <h3 class="text-[15px] font-semibold text-slate-50">Validation</h3>
+                <span class="badge badge-sm badge-neutral">CONDITIONAL</span>
+              </div>
+              <p class="text-xs text-slate-400 leading-relaxed">
+                If findings remain, an adversarial validator challenges each one to reduce noise. Findings without sufficient evidence get their certainty downgraded.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flow-arrow" style="margin:6px auto;"></div>
+
+      <!-- Outcomes -->
+      <div class="flow-step">
+        <div class="flex flex-wrap gap-3 justify-center" style="max-width:620px; margin:0 auto;">
+          <div class="outcome-card outcome-approve">
+            <div class="text-emerald-400 font-bold text-sm mb-1">Auto-approve</div>
+            <p class="text-2xs text-slate-400">Score &le; 4.0, trust tier permits, no overrides</p>
+          </div>
+          <div class="outcome-card outcome-review">
+            <div class="text-amber-400 font-bold text-sm mb-1">Human Review</div>
+            <p class="text-2xs text-slate-400">Score 4.0 &ndash; 8.0, or override triggered</p>
+          </div>
+          <div class="outcome-card outcome-reject">
+            <div class="text-orange-400 font-bold text-sm mb-1">Reject</div>
+            <p class="text-2xs text-slate-400">High-confidence findings with fix suggestions</p>
+          </div>
+          <div class="outcome-card outcome-block">
+            <div class="text-red-400 font-bold text-sm mb-1">Hard Block</div>
+            <p class="text-2xs text-slate-400">Mechanical failure or score &ge; 8.0</p>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- ADDITIONAL DETAILS                                           -->
+    <!-- ============================================================ -->
+
+    <!-- Certainty Validation -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Certainty Validation</h3>
+      <p class="text-xs text-slate-400 leading-relaxed mb-4">
+        Agents claim a certainty level for each finding. The decision engine validates these claims against actual evidence before scoring.
+      </p>
+      <div class="space-y-2">
+        <div class="tier-row">
+          <span class="text-xs font-semibold text-emerald-400" style="min-width:80px;">Detected</span>
+          <p class="text-2xs text-slate-400 flex-1">Requires &ge;2 signals: pattern match + CWE, concrete suggestion, full context, or cross-references</p>
+        </div>
+        <div class="tier-row">
+          <span class="text-xs font-semibold text-amber-400" style="min-width:80px;">Suspected</span>
+          <p class="text-2xs text-slate-400 flex-1">Requires &ge;1 signal: pattern match, full context, or concrete suggestion</p>
+        </div>
+        <div class="tier-row">
+          <span class="text-xs font-semibold text-slate-400" style="min-width:80px;">Uncertain</span>
+          <p class="text-2xs text-slate-400 flex-1">Default fallback when evidence is insufficient</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trust Tiers -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Trust Tiers</h3>
+      <p class="text-xs text-slate-400 leading-relaxed mb-4">
+        Orthogonal to risk. Determined by path-based config rules, then escalated one-way if security-sensitive keywords appear in findings.
+      </p>
+      <div class="space-y-2">
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#34d399;"></span>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-200">AI Only</span>
+            <p class="text-2xs text-slate-500 mt-0.5">AI decides autonomously. Auto-approve allowed.</p>
+          </div>
+        </div>
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#60a5fa;"></span>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-200">Spot Check</span>
+            <span class="badge badge-sm badge-neutral ml-2">default</span>
+            <p class="text-2xs text-slate-500 mt-0.5">Auto-approve allowed. Optional human review requested.</p>
+          </div>
+        </div>
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#fbbf24;"></span>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-200">Mandatory Human</span>
+            <p class="text-2xs text-slate-500 mt-0.5">Blocks until any human approves.</p>
+          </div>
+        </div>
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#f87171;"></span>
+          <div class="flex-1">
+            <span class="text-xs font-semibold text-slate-200">Human Primary</span>
+            <p class="text-2xs text-slate-500 mt-0.5">Blocks until a designated reviewer group approves.</p>
+          </div>
+        </div>
+      </div>
+      <div class="mt-3 p-2.5 rounded-lg" style="background:rgba(15,23,42,.5); border:1px solid rgba(51,65,85,.3);">
+        <p class="text-2xs text-slate-500"><strong class="text-slate-400">Escalation keywords:</strong> auth, permission, token, credential, secret, encryption, crypto, rbac, role, privilege, session, injection, csrf, xss, cors, oauth, jwt, certificate, password, api_key</p>
+      </div>
+    </div>
+
+    <!-- Override Rules -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Override Rules</h3>
+      <p class="text-xs text-slate-400 leading-relaxed mb-4">
+        Even if the score says auto-approve, these conditions force a human review.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+        <div class="check-pill text-2xs">Any agent returns FLAG_HUMAN verdict</div>
+        <div class="check-pill text-2xs">&ge;1 DETECTED + MEDIUM/HIGH/CRITICAL finding</div>
+        <div class="check-pill text-2xs">&ge;3 SUSPECTED findings</div>
+        <div class="check-pill text-2xs">PR adds new external dependencies</div>
+        <div class="check-pill text-2xs">Trust tier is Mandatory Human or Human Primary</div>
+        <div class="check-pill text-2xs">Target branch: main, master, release/*</div>
+      </div>
+    </div>
+
+    <!-- Noise Reduction -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-1">Noise Reduction</h3>
+      <p class="text-xs text-slate-400 leading-relaxed mb-3">
+        Findings are always scored in full, but lower-risk tiers suppress noisy results in the PR comment.
+      </p>
+      <div class="space-y-2">
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#34d399;"></span>
+          <span class="text-xs text-slate-300 flex-1"><strong>Low tier:</strong> <span class="text-slate-500">suppress all LOW severity findings</span></span>
+        </div>
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#fbbf24;"></span>
+          <span class="text-xs text-slate-300 flex-1"><strong>Medium tier:</strong> <span class="text-slate-500">suppress LOW severity + UNCERTAIN certainty</span></span>
+        </div>
+        <div class="tier-row">
+          <span class="tier-dot" style="background:#f87171;"></span>
+          <span class="text-xs text-slate-300 flex-1"><strong>High tier:</strong> <span class="text-slate-500">show everything</span></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="pb-8"></div>
+
+  </div>
+</div>
+
+</body>
+</html>
