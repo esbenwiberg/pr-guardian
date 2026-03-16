@@ -54,3 +54,6 @@ class ReviewResult:
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     cost_usd: float = 0.0
+
+    # Feedback loop: populated on re-reviews with dismissals
+    dismissal_summary: dict | None = None  # {new, resolved, carried_over, dismissed}

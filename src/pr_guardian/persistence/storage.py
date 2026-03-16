@@ -1,6 +1,7 @@
 """Service layer: save review results and query for the dashboard."""
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -15,6 +16,7 @@ from pr_guardian.models.pr import PlatformPR
 from pr_guardian.persistence.database import async_session
 from pr_guardian.persistence.models import (
     AgentResultRow,
+    FindingDismissalRow,
     FindingRow,
     GlobalConfigRow,
     MechanicalResultRow,
@@ -395,8 +397,160 @@ async def delete_global_config(key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Finding dismissals (feedback loop)
 # ---------------------------------------------------------------------------
+
+
+def finding_signature(file: str, category: str, agent_name: str) -> str:
+    """Stable hash that survives line-number shifts."""
+    raw = f"{file}::{category}::{agent_name}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
+async def upsert_dismissal(
+    pr_id: str,
+    repo: str,
+    platform: str,
+    finding: dict,
+    agent_name: str,
+    status: str,
+    comment: str,
+) -> uuid.UUID:
+    """Create or update a dismissal. Computes signature from finding fields."""
+    sig = finding_signature(finding["file"], finding["category"], agent_name)
+    source = {
+        "file": finding.get("file", ""),
+        "line": finding.get("line"),
+        "category": finding.get("category", ""),
+        "agent_name": agent_name,
+        "severity": finding.get("severity", ""),
+        "certainty": finding.get("certainty", ""),
+        "description": (finding.get("description", "") or "")[:500],
+    }
+    async with async_session() as session:
+        # Check for existing active dismissal with same signature
+        q = (
+            select(FindingDismissalRow)
+            .where(FindingDismissalRow.repo == repo)
+            .where(FindingDismissalRow.pr_id == pr_id)
+            .where(FindingDismissalRow.platform == platform)
+            .where(FindingDismissalRow.signature == sig)
+            .where(FindingDismissalRow.active.is_(True))
+        )
+        existing = (await session.scalars(q)).first()
+        if existing:
+            existing.status = status
+            existing.comment = comment
+            existing.source_finding = source
+            existing.updated_at = datetime.now(timezone.utc)
+            await session.commit()
+            return existing.id
+
+        row = FindingDismissalRow(
+            pr_id=pr_id,
+            repo=repo,
+            platform=platform,
+            signature=sig,
+            status=status,
+            comment=comment,
+            source_finding=source,
+            active=True,
+        )
+        session.add(row)
+        await session.commit()
+        return row.id
+
+
+async def remove_dismissal(dismissal_id: uuid.UUID) -> bool:
+    """Delete a dismissal (un-dismiss). Returns True if deleted."""
+    async with async_session() as session:
+        row = await session.get(FindingDismissalRow, dismissal_id)
+        if not row:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+async def get_active_dismissals(
+    pr_id: str,
+    repo: str,
+    platform: str,
+) -> list[dict[str, Any]]:
+    """All active dismissals for a PR."""
+    async with async_session() as session:
+        q = (
+            select(FindingDismissalRow)
+            .where(FindingDismissalRow.repo == repo)
+            .where(FindingDismissalRow.pr_id == pr_id)
+            .where(FindingDismissalRow.platform == platform)
+            .where(FindingDismissalRow.active.is_(True))
+        )
+        rows = (await session.scalars(q)).all()
+        return [_dismissal_to_dict(r) for r in rows]
+
+
+async def match_dismissals_to_findings(
+    pr_id: str,
+    repo: str,
+    platform: str,
+    findings_with_agent: list[dict],
+) -> dict[str, dict]:
+    """Returns {signature: dismissal_dict} for findings that match an active dismissal."""
+    dismissals = await get_active_dismissals(pr_id, repo, platform)
+    sig_map = {d["signature"]: d for d in dismissals}
+
+    matched: dict[str, dict] = {}
+    for f in findings_with_agent:
+        sig = finding_signature(f["file"], f["category"], f["agent_name"])
+        if sig in sig_map:
+            matched[sig] = sig_map[sig]
+    return matched
+
+
+async def archive_stale_dismissals(
+    pr_id: str,
+    repo: str,
+    platform: str,
+    active_signatures: set[str],
+) -> int:
+    """Mark dismissals as inactive if their signature didn't appear in the latest review."""
+    count = 0
+    async with async_session() as session:
+        q = (
+            select(FindingDismissalRow)
+            .where(FindingDismissalRow.repo == repo)
+            .where(FindingDismissalRow.pr_id == pr_id)
+            .where(FindingDismissalRow.platform == platform)
+            .where(FindingDismissalRow.active.is_(True))
+        )
+        rows = (await session.scalars(q)).all()
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            if row.signature not in active_signatures:
+                row.active = False
+                row.updated_at = now
+                count += 1
+        if count:
+            await session.commit()
+    return count
+
+
+def _dismissal_to_dict(row: FindingDismissalRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "pr_id": row.pr_id,
+        "repo": row.repo,
+        "platform": row.platform,
+        "signature": row.signature,
+        "status": row.status,
+        "comment": row.comment,
+        "source_finding": row.source_finding,
+        "active": row.active,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
 
 # ---------------------------------------------------------------------------
 # Scan operations
@@ -669,6 +823,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
                 "error": a.error,
                 "findings": [
                     {
+                        "id": str(f.id),
                         "severity": f.severity,
                         "certainty": f.certainty,
                         "category": f.category,

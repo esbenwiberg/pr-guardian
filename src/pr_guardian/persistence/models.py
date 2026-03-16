@@ -246,3 +246,32 @@ class ScanFindingRow(Base):
     effort_estimate: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     agent_result: Mapped[ScanAgentResultRow] = relationship(back_populates="findings")
+
+
+# ---------------------------------------------------------------------------
+# Finding dismissals (feedback loop)
+# ---------------------------------------------------------------------------
+
+
+class FindingDismissalRow(Base):
+    """Author dismissal/comment on a finding, scoped per-PR across reviews."""
+
+    __tablename__ = "finding_dismissals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    pr_id: Mapped[str] = mapped_column(String(64), index=True)
+    repo: Mapped[str] = mapped_column(String(256))
+    platform: Mapped[str] = mapped_column(String(16))
+    signature: Mapped[str] = mapped_column(String(16), index=True)
+    status: Mapped[str] = mapped_column(String(24))  # by_design | false_positive | acknowledged | will_fix
+    comment: Mapped[str] = mapped_column(Text, default="")
+    source_finding: Mapped[dict] = mapped_column(JSONB, default=dict)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

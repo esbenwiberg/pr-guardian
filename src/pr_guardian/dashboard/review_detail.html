@@ -68,6 +68,10 @@
         <div class="text-sm text-slate-400 mt-1" id="banner-meta"></div>
       </div>
       <a id="pr-link" class="btn btn-sm btn-secondary" target="_blank">View PR</a>
+      <div class="flex items-center gap-2">
+        <span class="text-xs text-slate-400" id="dismissal-count" style="display:none">0 findings dismissed</span>
+        <button id="re-review-btn" class="btn btn-sm btn-primary" onclick="triggerReReview()" style="display:none" title="Re-run review with dismissal feedback">Re-review with feedback</button>
+      </div>
     </div>
 
     <!-- Info cards -->
@@ -125,6 +129,38 @@
       <div class="dialog-footer">
         <button class="btn btn-secondary" onclick="closeExport()">Close</button>
         <button class="btn btn-primary" id="copy-btn" onclick="copyExport()">Copy to Clipboard</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Dismiss dialog -->
+<div id="dismiss-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeDismissDialog()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-md">
+      <div class="dialog-header">
+        <h2 class="text-base font-semibold">Dismiss Finding</h2>
+        <button class="btn btn-ghost btn-sm" onclick="closeDismissDialog()">&times;</button>
+      </div>
+      <div class="dialog-body space-y-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Status</label>
+          <select id="dismiss-status" class="form-select w-full text-sm bg-slate-800 border border-slate-600 rounded px-3 py-2 text-slate-200">
+            <option value="false_positive">False positive</option>
+            <option value="by_design">By design</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="will_fix">Will fix</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Comment (optional)</label>
+          <textarea id="dismiss-comment" class="form-textarea w-full text-sm bg-slate-800 border border-slate-600 rounded px-3 py-2 text-slate-200 min-h-[80px]" placeholder="e.g. 'Uses parameterized queries, safe from injection'"></textarea>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary" onclick="closeDismissDialog()">Cancel</button>
+        <button class="btn btn-primary" id="dismiss-submit-btn" onclick="submitDismiss()">Dismiss Finding</button>
       </div>
     </div>
   </div>
@@ -227,7 +263,7 @@ function render(d) {
             ${hasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
           <div class="border-t border-slate-700/50 collapsed" id="findings-${ai}" style="display:none">
-            ${findings.map((f, fi) => renderFinding(ai, fi, f)).join('')}
+            ${findings.map((f, fi) => renderFinding(ai, fi, f, agent.agent_name)).join('')}
           </div>
         </div>`;
     }).join('');
@@ -235,14 +271,28 @@ function render(d) {
     document.getElementById('agents-container').innerHTML = '<div class="empty-state"><div class="empty-state-text">No agent results available.</div></div>';
   }
 
+  // Show dismissal count and re-review button
+  const dCount = d.dismissal_count || 0;
+  if (dCount > 0 || totalFindings > 0) {
+    document.getElementById('re-review-btn').style.display = '';
+  }
+  if (dCount > 0) {
+    const el = document.getElementById('dismissal-count');
+    el.textContent = `${dCount} finding${dCount !== 1 ? 's' : ''} dismissed`;
+    el.style.display = '';
+  }
+
   updateSelectionCount();
 }
 
-function renderFinding(ai, fi, f) {
+function renderFinding(ai, fi, f, agentName) {
   const key = `${ai}-${fi}`;
   const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
+  const d = f.dismissal;
+  const isDismissed = !!d;
+  const dismissedClass = isDismissed ? ' opacity-60' : '';
   return `
-    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0" data-key="${key}">
+    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0${dismissedClass}" data-key="${key}" data-finding-id="${f.id || ''}">
       <input type="checkbox" class="form-checkbox f-check mt-0.5 shrink-0" data-key="${key}" onchange="toggleFinding('${key}')">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
@@ -254,8 +304,27 @@ function renderFinding(ai, fi, f) {
         </div>
         <div class="text-sm mt-1.5 leading-relaxed">${esc(f.description || '')}</div>
         ${f.suggestion ? `<div class="text-xs text-emerald-400 mt-1 pl-3 border-l-2 border-emerald-400">${esc(f.suggestion)}</div>` : ''}
+        <div class="flex items-center gap-2 mt-2" data-dismiss-area="${key}">
+          ${isDismissed ? renderDismissedBadge(d) : renderDismissButton(f.id)}
+        </div>
       </div>
     </div>`;
+}
+
+function renderDismissButton(findingId) {
+  if (!findingId) return '';
+  return `<button class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600 text-slate-300 transition-colors"
+    onclick="openDismissDialog('${findingId}')">Dismiss</button>`;
+}
+
+function renderDismissedBadge(d) {
+  const statusLabels = { by_design: 'By design', false_positive: 'False positive', acknowledged: 'Acknowledged', will_fix: 'Will fix' };
+  const label = statusLabels[d.status] || d.status;
+  const comment = d.comment ? ` \u2014 "${esc(d.comment)}"` : '';
+  return `<span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-amber-900/50 text-amber-400">
+    ${esc(label)}${comment}
+    <button class="ml-1 text-amber-600 hover:text-amber-300 transition-colors" onclick="undoDismiss('${d.id}')" title="Undo dismiss">\u2715</button>
+  </span>`;
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
@@ -401,6 +470,87 @@ function buildExportText() {
   lines.push('Please fix the above findings. For each one, show the current code and your proposed fix.');
 
   return lines.join('\n');
+}
+
+// --- Dismiss dialog ---
+
+let dismissFindingId = null;
+
+function openDismissDialog(findingId) {
+  dismissFindingId = findingId;
+  document.getElementById('dismiss-modal').classList.remove('hidden');
+  document.getElementById('dismiss-comment').value = '';
+  document.getElementById('dismiss-status').value = 'false_positive';
+}
+
+function closeDismissDialog() {
+  document.getElementById('dismiss-modal').classList.add('hidden');
+  dismissFindingId = null;
+}
+
+async function submitDismiss() {
+  if (!dismissFindingId) return;
+  const status = document.getElementById('dismiss-status').value;
+  const comment = document.getElementById('dismiss-comment').value.trim();
+  const btn = document.getElementById('dismiss-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+
+  try {
+    const resp = await fetch(`/api/dashboard/findings/${dismissFindingId}/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, comment }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    closeDismissDialog();
+    // Reload to reflect changes
+    loadReview();
+  } catch (e) {
+    alert(`Failed to dismiss: ${e.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Dismiss Finding';
+  }
+}
+
+async function undoDismiss(dismissalId) {
+  try {
+    const resp = await fetch(`/api/dashboard/dismissals/${dismissalId}`, { method: 'DELETE' });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    loadReview();
+  } catch (e) {
+    alert(`Failed to undo dismiss: ${e.message}`);
+  }
+}
+
+// --- Re-review ---
+
+async function triggerReReview() {
+  const btn = document.getElementById('re-review-btn');
+  btn.disabled = true;
+  btn.textContent = 'Queuing...';
+
+  try {
+    const resp = await fetch(`/api/dashboard/reviews/${REVIEW_ID}/re-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    btn.textContent = 'Queued! Redirecting...';
+    // Redirect to dashboard to see the new review in progress
+    setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
+  } catch (e) {
+    alert(`Re-review failed: ${e.message}`);
+    btn.disabled = false;
+    btn.textContent = 'Re-review with feedback';
+  }
 }
 
 // Init

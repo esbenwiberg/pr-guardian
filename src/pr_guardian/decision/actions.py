@@ -77,6 +77,22 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
         lines.append("")
         lines.append(f"**{total_findings} finding(s):** {', '.join(parts)}")
 
+    # ── Dismissal / re-review summary ─────────────────────────────
+    if result.dismissal_summary:
+        ds = result.dismissal_summary
+        parts = []
+        if ds.get("dismissed"):
+            parts.append(f"{ds['dismissed']} dismissed by author")
+        if ds.get("new"):
+            parts.append(f"{ds['new']} new")
+        if ds.get("resolved"):
+            parts.append(f"{ds['resolved']} resolved")
+        if ds.get("carried_over"):
+            parts.append(f"{ds['carried_over']} carried over")
+        if parts:
+            lines.append("")
+            lines.append(f"\U0001f501 **Re-review:** {', '.join(parts)}")
+
     # ── Detail page link ────────────────────────────────────────────
     detail_url = _detail_url(result.review_id, base_url)
     if detail_url:

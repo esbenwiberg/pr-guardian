@@ -104,6 +104,7 @@ def build_agent_context(
     context: ReviewContext,
     agent_name: str,
     max_context_tokens: int = 120_000,
+    dismissal_context: str | None = None,
 ) -> str:
     """Build the user message (diff + context) sent to an agent."""
     parts: list[str] = []
@@ -146,5 +147,9 @@ def build_agent_context(
 
     parts.append("\n## Diff\n")
     parts.extend(diff_parts)
+
+    # Append dismissal context from previous review feedback
+    if dismissal_context:
+        parts.append(f"\n{dismissal_context}")
 
     return "\n".join(parts)
