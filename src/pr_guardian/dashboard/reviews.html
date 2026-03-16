@@ -241,10 +241,8 @@ async function cancelReview(id) {
 function renderReviewRow(r) {
   return `
     <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
-      <td class="!px-2">
-        <a href="/reviews/${r.id}" onclick="event.stopPropagation()" class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white transition-colors" title="Open review details page">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
-        </a>
+      <td style="padding:0 8px;width:40px">
+        <a href="/reviews/${r.id}" onclick="event.stopPropagation()" style="display:inline-block;padding:4px 10px;background:#059669;color:#fff;border-radius:4px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;line-height:1.4" onmouseover="this.style.background='#047857'" onmouseout="this.style.background='#059669'">View</a>
       </td>
       <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
       <td>${esc(r.repo)}</td>
