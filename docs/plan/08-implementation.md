@@ -366,7 +366,7 @@ triage:
 auto_approve:
   enabled: true
   allowed_target_branches: ["develop", "feature/*"]
-  blocked_target_branches: ["main", "master", "release/*"]
+  blocked_target_branches: ["release/*"]
   require_all_checks_pass: true
   # NOTE: auto-approve targets are configurable per repo. The 50-70% auto-approve
   # target applies to the allowed branches. PRs to blocked branches always require

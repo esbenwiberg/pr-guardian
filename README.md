@@ -139,8 +139,7 @@ auto_approve:
     - develop
     - "feature/*"
   blocked_target_branches:
-    - main
-    - release/*
+    - "release/*"
 
 weights:                           # tune agent influence on final score
   security_privacy: 3.0

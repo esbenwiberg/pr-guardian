@@ -64,7 +64,7 @@ class AutoApproveConfig(BaseModel):
     enabled: bool = True
     allowed_target_branches: list[str] = Field(default_factory=lambda: ["develop", "feature/*"])
     blocked_target_branches: list[str] = Field(
-        default_factory=lambda: ["main", "master", "release/*"]
+        default_factory=lambda: ["release/*"]
     )
     require_all_checks_pass: bool = True
 
