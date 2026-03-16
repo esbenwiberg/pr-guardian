@@ -39,11 +39,14 @@ class ReviewResponse(BaseModel):
     score: float | None = None
 
 
-async def _run_review_background(pr: PlatformPR, adapter, post_comment: bool, base_url: str) -> None:
+async def _run_review_background(
+    pr: PlatformPR, adapter, post_comment: bool, base_url: str,
+    dismissals: list[dict] | None = None,
+) -> None:
     """Run the review pipeline in the background, logging any errors."""
     import traceback
     try:
-        await run_review(pr, adapter, post_comment=post_comment, base_url=base_url)
+        await run_review(pr, adapter, post_comment=post_comment, base_url=base_url, dismissals=dismissals)
     except Exception as e:
         log.error("background_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 

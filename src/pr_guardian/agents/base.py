@@ -82,7 +82,7 @@ class BaseAgent:
             self._llm = create_llm_client(self.config)
         return self._llm
 
-    async def review(self, context: ReviewContext) -> AgentResult:
+    async def review(self, context: ReviewContext, *, dismissal_context: str | None = None) -> AgentResult:
         """Run the agent review. Override for custom behavior."""
         languages = list(context.language_map.languages.keys())
         override = await storage.get_prompt_override(self.agent_name)
@@ -92,6 +92,7 @@ class BaseAgent:
         user_message = build_agent_context(
             context, self.agent_name,
             max_context_tokens=self.config.agents.max_context_tokens,
+            dismissal_context=dismissal_context,
         )
 
         model = resolve_model(self.config, self.agent_name)

@@ -90,6 +90,7 @@ async def run_review(
     *,
     post_comment: bool = True,
     base_url: str = "",
+    dismissals: list[dict] | None = None,
 ) -> ReviewResult:
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
@@ -137,7 +138,7 @@ async def run_review(
     await adapter.set_status(pr, "pending", "PR Guardian review in progress")
 
     try:
-        return await _run_pipeline(pr, adapter, service_config, storage, review_db_id, pipeline_log, _plog, _emit, _update_stage, post_comment=post_comment, base_url=base_url)
+        return await _run_pipeline(pr, adapter, service_config, storage, review_db_id, pipeline_log, _plog, _emit, _update_stage, post_comment=post_comment, base_url=base_url, dismissals=dismissals)
     except Exception as exc:
         if storage and review_db_id:
             try:
@@ -161,6 +162,7 @@ async def _run_pipeline(
     *,
     post_comment: bool = True,
     base_url: str = "",
+    dismissals: list[dict] | None = None,
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
@@ -287,6 +289,33 @@ async def _run_pipeline(
         _plog("info", "triage", f"Reason: {reason}")
     log.info("triage_complete", tier=triage_result.risk_tier.value, agents=sorted(triage_result.agent_set))
 
+    # Build per-agent dismissal context strings
+    agent_dismissal_context: dict[str, str] = {}
+    if dismissals:
+        for agent_name in triage_result.agent_set:
+            relevant = [d for d in dismissals if d.get("source_finding", {}).get("agent_name") == agent_name]
+            if relevant:
+                lines = [
+                    "## Previously Dismissed Findings",
+                    "The PR author has reviewed the following findings and provided context.",
+                    "Do not re-flag dismissed items unless new code changes make them relevant again.",
+                    "",
+                ]
+                for i, d in enumerate(relevant, 1):
+                    sf = d.get("source_finding", {})
+                    lines.append(
+                        f"{i}. [{sf.get('file', '?')} :: {sf.get('category', '?')}] "
+                        f"Status: {d['status']}"
+                    )
+                    if d.get("comment"):
+                        lines.append(f'   Author: "{d["comment"]}"')
+                    lines.append("")
+                agent_dismissal_context[agent_name] = "\n".join(lines)
+        if agent_dismissal_context:
+            _plog("info", "agents",
+                   f"Injecting dismissal context for {len(agent_dismissal_context)} agent(s) "
+                   f"({len(dismissals)} total dismissal(s)).")
+
     # Stage 3: AI Agents (parallel)
     await _update_stage("agents", f"Running {len(triage_result.agent_set)} AI agents")
     agent_results: list[AgentResult] = []
@@ -296,7 +325,9 @@ async def _run_pipeline(
             agent_cls = AGENT_REGISTRY.get(agent_name)
             if agent_cls:
                 agent = agent_cls(config)
-                agent_tasks.append(agent.review(context))
+                agent_tasks.append(
+                    agent.review(context, dismissal_context=agent_dismissal_context.get(agent_name))
+                )
 
         if agent_tasks:
             agent_results = await asyncio.gather(*agent_tasks)
@@ -401,6 +432,66 @@ async def _run_pipeline(
         if validator_meta.get("error"):
             _plog("warn", "noise_reduction",
                   f"Validator error (findings kept as-is): {validator_meta['error']}")
+
+    # Post-review dismissal matching
+    if dismissals and storage:
+        try:
+            from pr_guardian.persistence.storage import (
+                finding_signature as _fsig,
+                match_dismissals_to_findings,
+                archive_stale_dismissals,
+            )
+            # Build list of all findings with agent_name for matching
+            all_findings_flat = []
+            active_sigs: set[str] = set()
+            for ar in result.agent_results:
+                for f in ar.findings:
+                    entry = {
+                        "file": f.file, "category": f.category, "agent_name": ar.agent_name,
+                    }
+                    all_findings_flat.append(entry)
+                    active_sigs.add(_fsig(f.file, f.category, ar.agent_name))
+
+            matched = await match_dismissals_to_findings(
+                pr.pr_id, pr.repo, pr.platform.value, all_findings_flat,
+            )
+            archived = await archive_stale_dismissals(
+                pr.pr_id, pr.repo, pr.platform.value, active_sigs,
+            )
+
+            # Adjust score: exclude false_positive/by_design from combined score
+            score_excluded = {sig for sig, d in matched.items() if d["status"] in ("false_positive", "by_design")}
+            if score_excluded:
+                _plog("info", "dismissals",
+                      f"{len(score_excluded)} dismissed finding(s) excluded from score "
+                      f"(false_positive/by_design).")
+
+            if matched:
+                _plog("info", "dismissals",
+                      f"{len(matched)} finding(s) matched existing dismissals.")
+            if archived:
+                _plog("info", "dismissals",
+                      f"{archived} stale dismissal(s) archived (findings didn't reappear).")
+
+            # Build review diff summary
+            prev_finding_sigs = {
+                d.get("signature") for d in dismissals
+            }
+            new_sigs = active_sigs - prev_finding_sigs
+            resolved_sigs = prev_finding_sigs - active_sigs
+            carried_sigs = active_sigs & prev_finding_sigs
+            result.dismissal_summary = {
+                "new": len(new_sigs),
+                "resolved": len(resolved_sigs),
+                "carried_over": len(carried_sigs),
+                "dismissed": len(matched),
+            }
+            _plog("info", "dismissals",
+                  f"Review diff: {len(new_sigs)} new, {len(resolved_sigs)} resolved, "
+                  f"{len(carried_sigs)} carried over, {len(matched)} dismissed.")
+
+        except Exception as e:
+            log.warning("dismissal_matching_failed", error=str(e))
 
     result.pipeline_log = pipeline_log
 
