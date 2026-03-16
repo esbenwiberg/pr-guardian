@@ -203,6 +203,15 @@
   .verdict-warn       { @apply bg-orange-400/10 text-orange-400; }
   .verdict-flag_human { @apply bg-red-400/10 text-red-400; }
 
+  /* Finding card */
+  .finding-card {
+    transition: background-color 0.15s, box-shadow 0.15s;
+  }
+  .finding-card:hover {
+    background-color: rgba(30, 41, 59, 0.5);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+  }
+
   /* Certainty badge */
   .cert-badge {
     @apply text-2xs px-1.5 py-px rounded border border-slate-700/50 text-slate-500;
