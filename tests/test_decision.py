@@ -161,7 +161,7 @@ class TestDecisionMatrix:
         ctx = _make_context(
             pr=PlatformPR(
                 platform=Platform.GITHUB, pr_id="1", repo="test",
-                repo_url="", source_branch="feature", target_branch="main",
+                repo_url="", source_branch="feature", target_branch="release/1.0",
                 author="test", title="Test", head_commit_sha="abc",
             ),
         )

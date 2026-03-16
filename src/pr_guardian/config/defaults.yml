@@ -49,8 +49,6 @@ auto_approve:
     - develop
     - "feature/*"
   blocked_target_branches:
-    - main
-    - master
     - "release/*"
   require_all_checks_pass: true
 
