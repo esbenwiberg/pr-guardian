@@ -46,8 +46,11 @@ certainty_validation:
 auto_approve:
   enabled: true
   allowed_target_branches:
+    - main
+    - master
     - develop
     - "feature/*"
+    - "fix/*"
   blocked_target_branches:
     - "release/*"
   require_all_checks_pass: true
