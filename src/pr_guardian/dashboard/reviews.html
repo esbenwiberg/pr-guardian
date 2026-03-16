@@ -240,7 +240,14 @@ async function cancelReview(id) {
 function renderReviewRow(r) {
   return `
     <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
-      <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
+      <td>
+        <div class="flex items-center gap-2">
+          <div><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></div>
+          <a href="/reviews/${r.id}" onclick="event.stopPropagation()" class="inline-flex items-center justify-center w-6 h-6 rounded text-slate-500 hover:text-blue-400 hover:bg-slate-700/60 transition-colors shrink-0 ml-auto" title="Open review details page">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+          </a>
+        </div>
+      </td>
       <td>${esc(r.repo)}</td>
       <td>${esc(r.author)}</td>
       <td><span class="badge badge-${r.risk_tier}">${r.risk_tier || '-'}</span></td>
@@ -248,14 +255,7 @@ function renderReviewRow(r) {
       <td><span class="badge badge-${r.decision}">${formatDecision(r.decision)}</span></td>
       <td class="text-xs text-emerald-400">${formatCost(r.cost_usd)}</td>
       <td>${formatDuration(r.duration_ms)}</td>
-      <td class="text-xs text-slate-400">
-        <div class="flex items-center justify-between gap-2">
-          <span>${formatTime(r.started_at)}</span>
-          <a href="/reviews/${r.id}" onclick="event.stopPropagation()" class="inline-flex items-center justify-center w-7 h-7 rounded-md text-slate-500 hover:text-slate-50 hover:bg-slate-700/60 transition-colors shrink-0" title="Open review details">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
-          </a>
-        </div>
-      </td>
+      <td class="text-xs text-slate-400">${formatTime(r.started_at)}</td>
     </tr>
   `;
 }
