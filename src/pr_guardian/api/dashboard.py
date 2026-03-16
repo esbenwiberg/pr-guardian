@@ -71,11 +71,20 @@ async def dashboard_review_detail(review_id: uuid.UUID):
 
         row["dismissal_count"] = dismissal_count
 
-        # Include archived (resolved) dismissals from prior reviews
+        # Collect active dismissals that didn't match any current finding
+        matched_sigs = {
+            finding_signature(f.get("file", ""), f.get("category", ""), a["agent_name"])
+            for a in row.get("agent_results", [])
+            for f in a.get("findings", [])
+            if (f.get("dismissal"))
+        }
+        unmatched_active = [d for d in dismissals if d["signature"] not in matched_sigs]
+
+        # Also include archived (resolved) dismissals from prior reviews
         archived = await storage.get_archived_dismissals(
             row["pr_id"], row["repo"], row["platform"],
         )
-        row["prior_dismissals"] = archived
+        row["prior_dismissals"] = unmatched_active + archived
     except Exception:
         row["dismissal_count"] = 0
         row["prior_dismissals"] = []
