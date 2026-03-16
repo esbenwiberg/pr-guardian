@@ -112,6 +112,18 @@
     <!-- Agent findings groups -->
     <div id="agents-container"></div>
 
+    <!-- Prior dismissed findings (resolved in re-reviews) -->
+    <div id="prior-dismissals-section" style="display:none" class="mt-6">
+      <div class="card overflow-hidden">
+        <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/40 transition-colors" onclick="togglePriorDismissals()">
+          <span class="text-xs text-slate-400 transition-transform duration-150" id="prior-toggle">&#9654;</span>
+          <span class="font-semibold text-sm text-slate-400">Previously Dismissed</span>
+          <span class="text-xs text-slate-500 ml-auto" id="prior-count"></span>
+        </div>
+        <div class="border-t border-slate-700/50" id="prior-list" style="display:none"></div>
+      </div>
+    </div>
+
   </div>
 </div>
 
@@ -285,6 +297,14 @@ function render(d) {
     el.style.display = '';
   }
 
+  // Prior dismissed findings (resolved / no longer flagged)
+  const priorDismissals = d.prior_dismissals || [];
+  if (priorDismissals.length) {
+    document.getElementById('prior-dismissals-section').style.display = '';
+    document.getElementById('prior-count').textContent = `${priorDismissals.length} resolved`;
+    document.getElementById('prior-list').innerHTML = priorDismissals.map(renderPriorDismissal).join('');
+  }
+
   updateSelectionCount();
 }
 
@@ -328,6 +348,39 @@ function renderDismissedBadge(d) {
     ${esc(label)}${comment}
     <button class="ml-1 text-amber-600 hover:text-amber-300 transition-colors" onclick="undoDismiss('${d.id}')" title="Undo dismiss">\u2715</button>
   </span>`;
+}
+
+function renderPriorDismissal(d) {
+  const f = d.source_finding || {};
+  const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
+  const statusLabels = { by_design: 'By design', false_positive: 'False positive', acknowledged: 'Acknowledged', will_fix: 'Will fix' };
+  const label = statusLabels[d.status] || d.status;
+  const comment = d.comment ? ` \u2014 "${esc(d.comment)}"` : '';
+  return `
+    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0 opacity-50">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2 flex-wrap">
+          ${f.severity ? `<span class="sev-badge sev-${f.severity}">${f.severity}</span>` : ''}
+          ${f.certainty ? `<span class="cert-badge">${f.certainty}</span>` : ''}
+          ${loc ? `<span class="font-mono text-xs text-emerald-400">${esc(loc)}</span>` : ''}
+          ${f.category ? `<span class="text-xs text-slate-400">${esc(f.category)}</span>` : ''}
+          ${f.agent_name ? `<span class="text-xs text-slate-500">${esc(f.agent_name)}</span>` : ''}
+        </div>
+        <div class="text-sm mt-1.5 leading-relaxed text-slate-400">${esc(f.description || '')}</div>
+        <div class="flex items-center gap-2 mt-2">
+          <span class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-slate-700/50 text-slate-400">${esc(label)}${comment}</span>
+          <span class="text-xs text-slate-600">Resolved</span>
+        </div>
+      </div>
+    </div>`;
+}
+
+function togglePriorDismissals() {
+  const list = document.getElementById('prior-list');
+  const toggle = document.getElementById('prior-toggle');
+  const visible = list.style.display !== 'none';
+  list.style.display = visible ? 'none' : '';
+  toggle.style.transform = visible ? '' : 'rotate(90deg)';
 }
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }

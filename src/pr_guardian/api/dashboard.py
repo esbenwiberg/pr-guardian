@@ -70,8 +70,15 @@ async def dashboard_review_detail(review_id: uuid.UUID):
                     dismissal_count += 1
 
         row["dismissal_count"] = dismissal_count
+
+        # Include archived (resolved) dismissals from prior reviews
+        archived = await storage.get_archived_dismissals(
+            row["pr_id"], row["repo"], row["platform"],
+        )
+        row["prior_dismissals"] = archived
     except Exception:
         row["dismissal_count"] = 0
+        row["prior_dismissals"] = []
 
     return row
 

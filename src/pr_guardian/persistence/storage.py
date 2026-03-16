@@ -490,6 +490,25 @@ async def get_active_dismissals(
         return [_dismissal_to_dict(r) for r in rows]
 
 
+async def get_archived_dismissals(
+    pr_id: str,
+    repo: str,
+    platform: str,
+) -> list[dict[str, Any]]:
+    """Inactive (archived) dismissals for a PR — findings resolved in later reviews."""
+    async with async_session() as session:
+        q = (
+            select(FindingDismissalRow)
+            .where(FindingDismissalRow.repo == repo)
+            .where(FindingDismissalRow.pr_id == pr_id)
+            .where(FindingDismissalRow.platform == platform)
+            .where(FindingDismissalRow.active.is_(False))
+            .order_by(FindingDismissalRow.updated_at.desc())
+        )
+        rows = (await session.scalars(q)).all()
+        return [_dismissal_to_dict(r) for r in rows]
+
+
 async def match_dismissals_to_findings(
     pr_id: str,
     repo: str,
