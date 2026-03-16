@@ -100,6 +100,7 @@
         <table class="data-table">
           <thead>
             <tr>
+              <th class="w-10"></th>
               <th>PR</th>
               <th>Repo</th>
               <th>Author</th>
@@ -112,7 +113,7 @@
             </tr>
           </thead>
           <tbody id="reviews-body">
-            <tr><td colspan="9" class="empty-state">Loading...</td></tr>
+            <tr><td colspan="10" class="empty-state">Loading...</td></tr>
           </tbody>
         </table>
       </div>
@@ -185,13 +186,13 @@ async function loadReviews() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const reviews = await resp.json();
     if (!Array.isArray(reviews) || !reviews.length) {
-      el.innerHTML = '<tr><td colspan="9" class="empty-state">No reviews found</td></tr>';
+      el.innerHTML = '<tr><td colspan="10" class="empty-state">No reviews found</td></tr>';
       return;
     }
     el.innerHTML = reviews.map(r => renderReviewRow(r)).join('');
   } catch (e) {
     console.error('Failed to load reviews', e);
-    el.innerHTML = '<tr><td colspan="9" class="empty-state text-red-400">Failed to load reviews — check database connection</td></tr>';
+    el.innerHTML = '<tr><td colspan="10" class="empty-state text-red-400">Failed to load reviews — check database connection</td></tr>';
   }
 }
 
@@ -240,15 +241,12 @@ async function cancelReview(id) {
 function renderReviewRow(r) {
   return `
     <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
-      <td>
-        <div class="flex items-center gap-1.5">
-          <strong>#${esc(r.pr_id)}</strong>
-          <a href="/reviews/${r.id}" onclick="event.stopPropagation()" class="inline-flex items-center justify-center w-5 h-5 rounded bg-slate-700 text-blue-400 hover:bg-blue-500 hover:text-white transition-colors shrink-0" title="Open review details page">
-            <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
-          </a>
-        </div>
-        <span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span>
+      <td class="!px-2">
+        <a href="/reviews/${r.id}" onclick="event.stopPropagation()" class="inline-flex items-center justify-center w-7 h-7 rounded-md bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600 hover:text-white transition-colors" title="Open review details page">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/></svg>
+        </a>
       </td>
+      <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
       <td>${esc(r.repo)}</td>
       <td>${esc(r.author)}</td>
       <td><span class="badge badge-${r.risk_tier}">${r.risk_tier || '-'}</span></td>
