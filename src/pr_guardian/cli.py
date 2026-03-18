@@ -469,6 +469,38 @@ def batch_dismiss_cmd(review_id, status, comment, finding_ids, severity):
     asyncio.run(_run())
 
 
+@main.command("my-reviews")
+@click.argument("author")
+@click.option("--limit", default=10, type=int, help="Max reviews to show")
+@click.option("--decision", default=None, help="Filter by decision")
+@click.option("--json-output", "as_json", is_flag=True, help="Output raw JSON")
+def my_reviews_cmd(author, limit, decision, as_json):
+    """Show recent reviews for a specific PR author."""
+    from pr_guardian.persistence import storage
+
+    async def _run():
+        rows = await storage.list_reviews(limit=limit, author=author, decision=decision)
+        if as_json:
+            click.echo(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            click.echo(f"No reviews found for author '{author}'.")
+            return
+        click.echo(f"\nReviews for {author} (latest {limit}):\n")
+        for r in rows:
+            decision_str = (r.get("decision") or "pending").upper()
+            risk = (r.get("risk_tier") or "?").upper()
+            score = r.get("combined_score")
+            score_str = f"{score:.1f}" if score is not None else "—"
+            findings = sum(len(a.get("findings", [])) for a in r.get("agent_results", []))
+            click.echo(
+                f"  {r['id'][:8]}  {decision_str:<14} {risk:<8} score={score_str:<5}  "
+                f"findings={findings:<3} {r.get('repo', ''):<30} {r.get('title', '')[:40]}"
+            )
+
+    asyncio.run(_run())
+
+
 @main.command("re-review")
 @click.argument("review_id")
 @click.option("--post-comment/--no-comment", default=True, help="Post comment to PR")

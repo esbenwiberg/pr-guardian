@@ -177,6 +177,7 @@ async def list_reviews(
     offset: int = 0,
     repo: str | None = None,
     decision: str | None = None,
+    author: str | None = None,
 ) -> list[dict[str, Any]]:
     """List reviews with optional filters, newest first."""
     async with async_session() as session:
@@ -185,6 +186,8 @@ async def list_reviews(
             q = q.where(ReviewRow.repo == repo)
         if decision:
             q = q.where(ReviewRow.decision == decision)
+        if author:
+            q = q.where(ReviewRow.author == author)
         q = q.offset(offset).limit(limit)
         rows = (await session.scalars(q)).all()
         return [_review_to_dict(r) for r in rows]

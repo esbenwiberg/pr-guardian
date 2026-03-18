@@ -36,10 +36,28 @@ async def dashboard_reviews(
     offset: int = Query(0, ge=0),
     repo: str | None = Query(None),
     decision: str | None = Query(None),
+    author: str | None = Query(None),
 ):
     """Paginated list of reviews with optional filters."""
     try:
-        return await storage.list_reviews(limit=limit, offset=offset, repo=repo, decision=decision)
+        return await storage.list_reviews(limit=limit, offset=offset, repo=repo, decision=decision, author=author)
+    except Exception:
+        return []
+
+
+@router.get("/my-reviews")
+async def my_reviews(
+    author: str = Query(..., description="PR author username"),
+    limit: int = Query(10, ge=1, le=100),
+    decision: str | None = Query(None),
+):
+    """Reviews for a specific author — most recent first.
+
+    Useful for agents or CLI tools to pull a user's reviews
+    and work through the findings.
+    """
+    try:
+        return await storage.list_reviews(limit=limit, author=author, decision=decision)
     except Exception:
         return []
 
@@ -118,6 +136,45 @@ _VALID_DISMISSAL_STATUSES = {"by_design", "false_positive", "acknowledged", "wil
 class DismissRequest(BaseModel):
     status: str
     comment: str = ""
+
+
+class BatchDismissRequest(BaseModel):
+    finding_ids: list[uuid.UUID]
+    status: str
+    comment: str = ""
+
+
+@router.post("/findings/batch-dismiss")
+async def batch_dismiss(body: BatchDismissRequest):
+    """Dismiss multiple findings in one request."""
+    if body.status not in _VALID_DISMISSAL_STATUSES:
+        raise HTTPException(400, f"Invalid status. Must be one of: {_VALID_DISMISSAL_STATUSES}")
+
+    dismissed = 0
+    not_found: list[str] = []
+    signatures: list[str] = []
+
+    for fid in body.finding_ids:
+        review = await _find_review_for_finding(fid)
+        if not review:
+            not_found.append(str(fid))
+            continue
+
+        finding_dict, agent_name = review["_matched_finding"], review["_matched_agent"]
+        await storage.upsert_dismissal(
+            pr_id=review["pr_id"],
+            repo=review["repo"],
+            platform=review["platform"],
+            finding=finding_dict,
+            agent_name=agent_name,
+            status=body.status,
+            comment=body.comment,
+        )
+        sig = finding_signature(finding_dict["file"], finding_dict["category"], agent_name)
+        signatures.append(sig)
+        dismissed += 1
+
+    return {"dismissed": dismissed, "not_found": not_found, "signatures": signatures}
 
 
 @router.post("/findings/{finding_id}/dismiss")
