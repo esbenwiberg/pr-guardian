@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — API Reference</title>
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+  .cmd-block { background:rgba(15,23,42,.8); border:1px solid rgba(51,65,85,.5); border-radius:.5rem; padding:.75rem 1rem; overflow-x:auto; }
+  .cmd-code { font-family:'JetBrains Mono',monospace; font-size:.8125rem; color:#cbd5e1; }
+  .endpoint { display:flex; align-items:center; gap:.5rem; margin-bottom:.5rem; }
+  .method { display:inline-block; font-size:.625rem; font-weight:700; letter-spacing:.05em; padding:.125rem .5rem; border-radius:.25rem; font-family:'JetBrains Mono',monospace; }
+  .method-get { background:rgba(52,211,153,.15); color:#34d399; }
+  .method-post { background:rgba(96,165,250,.15); color:#60a5fa; }
+  .method-put { background:rgba(251,191,36,.15); color:#fbbf24; }
+  .method-delete { background:rgba(248,113,113,.15); color:#f87171; }
+  .path { font-family:'JetBrains Mono',monospace; font-size:.8125rem; color:#e2e8f0; }
+  .param-table { width:100%; border-collapse:collapse; margin-top:.5rem; }
+  .param-table th { text-align:left; font-size:.6875rem; font-weight:600; color:#64748b; text-transform:uppercase; letter-spacing:.05em; padding:.375rem .5rem; border-bottom:1px solid rgba(51,65,85,.5); }
+  .param-table td { font-size:.75rem; color:#cbd5e1; padding:.375rem .5rem; border-bottom:1px solid rgba(51,65,85,.2); }
+  .param-table td:first-child { font-family:'JetBrains Mono',monospace; color:#34d399; white-space:nowrap; }
+</style>
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<!-- Sidebar -->
+<aside class="sidebar">
+  <div class="sidebar-header">
+    <div class="sidebar-logo">G</div>
+    <span class="text-sm font-semibold text-slate-50 hidden lg:block">PR Guardian</span>
+    <span class="ml-auto text-2xs font-mono text-slate-500 hidden lg:block">v0.1</span>
+  </div>
+  <nav class="sidebar-nav">
+    <a href="/dashboard" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 6A2.25 2.25 0 0 1 6 3.75h2.25A2.25 2.25 0 0 1 10.5 6v2.25a2.25 2.25 0 0 1-2.25 2.25H6a2.25 2.25 0 0 1-2.25-2.25V6ZM3.75 15.75A2.25 2.25 0 0 1 6 13.5h2.25a2.25 2.25 0 0 1 2.25 2.25V18a2.25 2.25 0 0 1-2.25 2.25H6A2.25 2.25 0 0 1 3.75 18v-2.25ZM13.5 6a2.25 2.25 0 0 1 2.25-2.25H18A2.25 2.25 0 0 1 20.25 6v2.25A2.25 2.25 0 0 1 18 10.5h-2.25a2.25 2.25 0 0 1-2.25-2.25V6ZM13.5 15.75a2.25 2.25 0 0 1 2.25-2.25H18a2.25 2.25 0 0 1 2.25 2.25V18A2.25 2.25 0 0 1 18 20.25h-2.25a2.25 2.25 0 0 1-2.25-2.25v-2.25Z"/></svg>
+      <span class="hidden lg:block">Dashboard</span>
+    </a>
+    <a href="/reviews" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 0 0 2.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 0 0-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 0 0 .75-.75 2.25 2.25 0 0 0-.1-.664m-5.8 0A2.251 2.251 0 0 1 13.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25ZM6.75 12h.008v.008H6.75V12Zm0 3h.008v.008H6.75V15Zm0 3h.008v.008H6.75V18Z"/></svg>
+      <span class="hidden lg:block">Reviews</span>
+    </a>
+    <a href="/scans" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+      <span class="hidden lg:block">Scans</span>
+    </a>
+    <a href="/prompts" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 7.5l3 2.25-3 2.25m4.5 0h3m-9 8.25h13.5A2.25 2.25 0 0 0 21 18V6a2.25 2.25 0 0 0-2.25-2.25H5.25A2.25 2.25 0 0 0 3 6v12a2.25 2.25 0 0 0 2.25 2.25Z"/></svg>
+      <span class="hidden lg:block">Prompts</span>
+    </a>
+    <a href="/how-it-works" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3"/></svg>
+      <span class="hidden lg:block">How It Works</span>
+    </a>
+    <a href="/cli-reference" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 6.75h12M8.25 12h12M8.25 17.25h12M3.75 6.75h.007v.008H3.75V6.75Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0ZM3.75 12h.007v.008H3.75V12Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Zm-.375 5.25h.007v.008H3.75v-.008Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z"/></svg>
+      <span class="hidden lg:block">CLI Reference</span>
+    </a>
+    <a href="/api-reference" class="sidebar-item active">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/></svg>
+      <span class="hidden lg:block">API Reference</span>
+    </a>
+    <a href="/settings" class="sidebar-item">
+      <svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.325.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 0 1 1.37.49l1.296 2.247a1.125 1.125 0 0 1-.26 1.431l-1.003.827c-.293.241-.438.613-.43.992a7.723 7.723 0 0 1 0 .255c-.008.378.137.75.43.991l1.004.827c.424.35.534.955.26 1.43l-1.298 2.248a1.125 1.125 0 0 1-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.47 6.47 0 0 1-.22.128c-.331.183-.581.495-.644.869l-.213 1.281c-.09.543-.56.94-1.11.94h-2.594c-.55 0-1.019-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 0 1-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 0 1-1.369-.49l-1.297-2.247a1.125 1.125 0 0 1 .26-1.431l1.004-.827c.292-.24.437-.613.43-.991a6.932 6.932 0 0 1 0-.255c.007-.38-.138-.751-.43-.992l-1.004-.827a1.125 1.125 0 0 1-.26-1.43l1.297-2.247a1.125 1.125 0 0 1 1.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.086.22-.128.332-.183.582-.495.644-.869l.214-1.28Z"/><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"/></svg>
+      <span class="hidden lg:block">Settings</span>
+    </a>
+  </nav>
+  <div class="sidebar-footer hidden lg:block">
+    <div class="text-2xs text-slate-500 px-3 py-2">PR Guardian v0.1</div>
+  </div>
+</aside>
+
+<!-- Main Content -->
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <h1 class="text-sm font-semibold text-slate-50">API Reference</h1>
+  </header>
+
+  <div class="max-w-[860px] mx-auto px-6 py-8 space-y-6">
+
+    <div class="text-center mb-2">
+      <h2 class="text-2xl font-bold text-slate-50 mb-2">API Reference</h2>
+      <p class="text-sm text-slate-400 max-w-xl mx-auto leading-relaxed">
+        REST API at <code class="text-emerald-400 text-xs font-mono">http://localhost:8000/api</code>. All endpoints return JSON.
+      </p>
+    </div>
+
+    <!-- Reviews -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Reviews</h3>
+
+      <div class="space-y-5">
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/review</span></div>
+          <p class="text-xs text-slate-400 mb-2">Trigger a review by PR URL. Returns immediately; review runs in background.</p>
+          <div class="cmd-block"><code class="cmd-code">{"pr_url": "https://github.com/owner/repo/pull/123", "dry_run": false, "post_comment": false}</code></div>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/reviews</span></div>
+          <p class="text-xs text-slate-400 mb-1">Paginated list of reviews with optional filters.</p>
+          <table class="param-table">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td>limit</td><td>int</td><td>Max results (1-200, default 50)</td></tr>
+            <tr><td>offset</td><td>int</td><td>Pagination offset</td></tr>
+            <tr><td>repo</td><td>string</td><td>Filter by repository</td></tr>
+            <tr><td>decision</td><td>string</td><td>auto_approve, human_review, reject, hard_block</td></tr>
+            <tr><td>author</td><td>string</td><td>Filter by PR author</td></tr>
+          </table>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/my-reviews?author=octocat</span></div>
+          <p class="text-xs text-slate-400 mb-1">Convenience endpoint for a specific author's reviews.</p>
+          <table class="param-table">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td>author</td><td>string</td><td><strong>Required.</strong> PR author username</td></tr>
+            <tr><td>limit</td><td>int</td><td>Max results (1-100, default 10)</td></tr>
+            <tr><td>decision</td><td>string</td><td>Filter by decision</td></tr>
+          </table>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/reviews/{review_id}</span></div>
+          <p class="text-xs text-slate-400">Full review detail with findings enriched with dismissal status.</p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/active</span></div>
+          <p class="text-xs text-slate-400">Currently in-progress reviews.</p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-delete">DELETE</span><span class="path">/api/dashboard/reviews/{review_id}</span></div>
+          <p class="text-xs text-slate-400">Cancel a stuck review.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Finding Dismissals -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Finding Dismissals</h3>
+
+      <div class="space-y-5">
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/dashboard/findings/{finding_id}/dismiss</span></div>
+          <p class="text-xs text-slate-400 mb-2">Dismiss a finding with a status and optional comment.</p>
+          <div class="cmd-block"><code class="cmd-code">{"status": "false_positive", "comment": "Not applicable"}</code></div>
+          <p class="text-2xs text-slate-500 mt-2">Status: <code class="text-emerald-400">by_design</code> | <code class="text-emerald-400">false_positive</code> | <code class="text-emerald-400">acknowledged</code> | <code class="text-emerald-400">will_fix</code></p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/dashboard/findings/batch-dismiss</span></div>
+          <p class="text-xs text-slate-400 mb-2">Dismiss multiple findings in one request.</p>
+          <div class="cmd-block"><code class="cmd-code">{"finding_ids": ["uuid-1", "uuid-2"], "status": "false_positive", "comment": "Batch dismissed"}</code></div>
+          <p class="text-2xs text-slate-500 mt-2">Returns: <code class="text-slate-300">{"dismissed": 2, "not_found": [], "signatures": [...]}</code></p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-delete">DELETE</span><span class="path">/api/dashboard/dismissals/{dismissal_id}</span></div>
+          <p class="text-xs text-slate-400">Remove a dismissal (un-dismiss).</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Re-Review -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Re-Review</h3>
+
+      <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/dashboard/reviews/{review_id}/re-review</span></div>
+      <p class="text-xs text-slate-400 mb-2">Focused re-evaluation of original findings. Fetches incremental diff, asks agents if findings are still valid. Does NOT run a full review or find new issues.</p>
+      <div class="cmd-block"><code class="cmd-code">{"status": "queued", "pr_id": "123", "mode": "re_evaluate", "findings_to_evaluate": 8}</code></div>
+    </div>
+
+    <!-- Scans -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Scans</h3>
+
+      <div class="space-y-5">
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/scan/recent</span></div>
+          <p class="text-xs text-slate-400 mb-2">Recent changes scan on merged code.</p>
+          <div class="cmd-block"><code class="cmd-code">{"repo": "owner/repo", "platform": "github", "time_window_days": 7}</code></div>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/scan/maintenance</span></div>
+          <p class="text-xs text-slate-400 mb-2">Maintenance scan for stale files.</p>
+          <div class="cmd-block"><code class="cmd-code">{"repo": "owner/repo", "platform": "github", "staleness_months": 6, "max_files": 50}</code></div>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/scans</span></div>
+          <p class="text-xs text-slate-400">Paginated list of scans. Params: limit, offset, repo, scan_type.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/scans/{scan_id}</span></div>
+          <p class="text-xs text-slate-400">Full scan detail with findings.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/scan-stats</span></div>
+          <p class="text-xs text-slate-400">Aggregate scan statistics.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prompts & Settings -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Prompts &amp; Settings</h3>
+
+      <div class="space-y-5">
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/prompts</span></div>
+          <p class="text-xs text-slate-400">All agent prompts with override status and defaults.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-put">PUT</span><span class="path">/api/dashboard/prompts/{agent_name}</span></div>
+          <p class="text-xs text-slate-400 mb-2">Update prompt override.</p>
+          <div class="cmd-block"><code class="cmd-code">{"content": "Your custom prompt..."}</code></div>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-delete">DELETE</span><span class="path">/api/dashboard/prompts/{agent_name}</span></div>
+          <p class="text-xs text-slate-400">Reset prompt to file default.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/settings</span></div>
+          <p class="text-xs text-slate-400">Current LLM provider settings (API keys masked).</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-put">PUT</span><span class="path">/api/dashboard/settings</span></div>
+          <p class="text-xs text-slate-400 mb-2">Update LLM provider.</p>
+          <div class="cmd-block"><code class="cmd-code">{"active_provider": "anthropic", "anthropic_api_key": "sk-ant-..."}</code></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Other -->
+    <div class="card p-6">
+      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Other</h3>
+
+      <div class="space-y-5">
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/stats</span></div>
+          <p class="text-xs text-slate-400">Dashboard aggregate stats: total reviews, decisions, avg score, cost, top repos.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/events</span></div>
+          <p class="text-xs text-slate-400">Server-Sent Events stream for real-time review progress.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/health</span></div>
+          <p class="text-xs text-slate-400">Health check.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/webhooks/github</span></div>
+          <p class="text-xs text-slate-400">GitHub webhook handler. Requires webhook secret for signature verification.</p>
+        </div>
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/webhooks/ado</span></div>
+          <p class="text-xs text-slate-400">Azure DevOps webhook handler.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="pb-8"></div>
+  </div>
+</div>
+
+</body>
+</html>
