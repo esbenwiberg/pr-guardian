@@ -415,7 +415,8 @@ function toggleGroupCheck(e, ai) {
   e.stopPropagation();
   const checked = e.target.checked;
   const findings = reviewData.agent_results[ai].findings || [];
-  findings.forEach((_, fi) => {
+  findings.forEach((f, fi) => {
+    if (f.dismissal) return; // skip dismissed
     const key = `${ai}-${fi}`;
     if (checked) selectedFindings.add(key); else selectedFindings.delete(key);
   });
@@ -427,7 +428,7 @@ function selectBySeverity(...sevs) {
   const agents = reviewData.agent_results || [];
   agents.forEach((agent, ai) => {
     (agent.findings || []).forEach((f, fi) => {
-      if (sevs.includes(f.severity)) selectedFindings.add(`${ai}-${fi}`);
+      if (sevs.includes(f.severity) && !f.dismissal) selectedFindings.add(`${ai}-${fi}`);
     });
   });
   syncCheckboxes();
@@ -437,7 +438,9 @@ function selectBySeverity(...sevs) {
 function selectAll() {
   const agents = reviewData.agent_results || [];
   agents.forEach((agent, ai) => {
-    (agent.findings || []).forEach((_, fi) => selectedFindings.add(`${ai}-${fi}`));
+    (agent.findings || []).forEach((f, fi) => {
+      if (!f.dismissal) selectedFindings.add(`${ai}-${fi}`);
+    });
   });
   syncCheckboxes();
   updateSelectionCount();
@@ -453,13 +456,17 @@ function syncCheckboxes() {
   document.querySelectorAll('.f-check').forEach(cb => {
     cb.checked = selectedFindings.has(cb.dataset.key);
   });
-  // Sync group checkboxes
+  // Sync group checkboxes (ignore dismissed findings)
   (reviewData.agent_results || []).forEach((agent, ai) => {
     const groupCb = document.querySelector(`[data-agent-idx="${ai}"] .group-check`);
     if (!groupCb) return;
     const findings = agent.findings || [];
-    const allSelected = findings.length > 0 && findings.every((_, fi) => selectedFindings.has(`${ai}-${fi}`));
-    const someSelected = findings.some((_, fi) => selectedFindings.has(`${ai}-${fi}`));
+    const active = findings.filter(f => !f.dismissal);
+    const allSelected = active.length > 0 && active.every((f, _) => {
+      const fi = findings.indexOf(f);
+      return selectedFindings.has(`${ai}-${fi}`);
+    });
+    const someSelected = findings.some((f, fi) => !f.dismissal && selectedFindings.has(`${ai}-${fi}`));
     groupCb.checked = allSelected;
     groupCb.indeterminate = someSelected && !allSelected;
   });
