@@ -215,6 +215,33 @@ class GitHubAdapter:
         tree = resp.json().get("tree", [])
         return [item["path"] for item in tree if item.get("type") == "blob"]
 
+    async def fetch_compare_diff(
+        self, repo: str, base_sha: str, head_sha: str, project: str = "",
+    ) -> Diff:
+        """Fetch diff between two commits using the compare API."""
+        client = self._get_client()
+        resp = await client.get(
+            f"/repos/{repo}/compare/{base_sha}...{head_sha}",
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        diff_files: list[DiffFile] = []
+        for f in data.get("files", []):
+            status_map = {
+                "added": "added", "removed": "deleted",
+                "modified": "modified", "renamed": "renamed",
+            }
+            diff_files.append(DiffFile(
+                path=f.get("filename", ""),
+                status=status_map.get(f.get("status", ""), "modified"),
+                old_path=f.get("previous_filename"),
+                additions=f.get("additions", 0),
+                deletions=f.get("deletions", 0),
+                patch=f.get("patch", ""),
+            ))
+        return Diff(files=diff_files)
+
     async def fetch_pr_files(
         self, repo: str, pr_id: int | str, project: str = "",
     ) -> list[dict]:

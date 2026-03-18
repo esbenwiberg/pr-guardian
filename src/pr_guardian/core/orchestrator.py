@@ -27,7 +27,7 @@ from pr_guardian.discovery.dep_graph import build_dep_graph
 from pr_guardian.languages.detector import detect_languages
 from pr_guardian.mechanical.runner import all_checks_passed, run_mechanical_checks
 from pr_guardian.models.context import RepoRiskClass, ReviewContext
-from pr_guardian.models.findings import AgentResult
+from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.platform.protocol import PlatformAdapter
@@ -509,6 +509,333 @@ async def _run_pipeline(
         score=round(result.combined_score, 2),
     )
     return result
+
+
+async def run_re_review(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    original_review: dict,
+    service_config: GuardianConfig | None = None,
+    *,
+    post_comment: bool = True,
+    base_url: str = "",
+) -> ReviewResult:
+    """Focused re-review: re-evaluate original findings against incremental changes.
+
+    Unlike run_review, this does NOT run the full pipeline. It:
+    1. Fetches the incremental diff (old commit → current HEAD)
+    2. Collects non-dismissed findings from the original review
+    3. Asks each agent to re-evaluate its own findings
+    4. Produces a result with kept/resolved/updated findings
+    """
+    log.info("re_review_started", pr_id=pr.pr_id, repo=pr.repo)
+
+    storage = _try_import_storage()
+    review_db_id: uuid.UUID | None = None
+
+    if storage:
+        try:
+            review_db_id = await storage.create_review_record(pr)
+        except Exception as e:
+            log.warning("db_create_failed", error=str(e))
+
+    pipeline_log: list[dict] = []
+
+    def _plog(level: str, stage: str, msg: str, **extra):
+        pipeline_log.append({
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "level": level, "stage": stage, "msg": msg,
+            **{k: v for k, v in extra.items() if v is not None},
+        })
+
+    def _emit(stage: str, detail: str = "", **extra):
+        event_bus.publish(ReviewEvent(
+            review_id=str(review_db_id) if review_db_id else "",
+            pr_id=pr.pr_id, repo=pr.repo, stage=stage,
+            detail=detail, extra=extra,
+        ))
+
+    async def _update_stage(stage: str, detail: str = ""):
+        _emit(stage, detail)
+        if storage and review_db_id:
+            try:
+                await storage.update_review_stage(review_db_id, stage, detail)
+            except Exception:
+                pass
+
+    await adapter.set_status(pr, "pending", "PR Guardian re-review in progress")
+
+    try:
+        return await _run_re_review_pipeline(
+            pr, adapter, original_review, service_config, storage,
+            review_db_id, pipeline_log, _plog, _emit, _update_stage,
+            post_comment=post_comment, base_url=base_url,
+        )
+    except Exception as exc:
+        if storage and review_db_id:
+            try:
+                await storage.mark_review_failed(review_db_id, str(exc), pipeline_log=pipeline_log)
+            except Exception:
+                pass
+        _emit("error", str(exc))
+        raise
+
+
+async def _run_re_review_pipeline(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    original_review: dict,
+    service_config: GuardianConfig | None,
+    storage,
+    review_db_id: uuid.UUID | None,
+    pipeline_log: list[dict],
+    _plog, _emit, _update_stage,
+    *,
+    post_comment: bool = True,
+    base_url: str = "",
+) -> ReviewResult:
+    """Inner re-review pipeline."""
+    from pr_guardian.models.context import RiskTier
+
+    config = service_config or GuardianConfig()
+    config = await apply_global_settings(config)
+
+    # --- Step 1: Fetch incremental diff ---
+    await _update_stage("discovery", "Fetching incremental diff since last review")
+
+    old_sha = original_review.get("head_commit_sha", "")
+    new_sha = pr.head_commit_sha
+
+    incremental_diff_text = ""
+    if old_sha and new_sha and old_sha != new_sha:
+        try:
+            incr_diff = await adapter.fetch_compare_diff(
+                pr.repo, old_sha, new_sha,
+                project=getattr(pr, "project", "") or "",
+            )
+            # Build a text representation of the incremental diff
+            parts = []
+            for f in incr_diff.files:
+                parts.append(f"### {f.path} ({f.status})")
+                if f.patch:
+                    parts.append(f"```\n{f.patch}\n```")
+                else:
+                    parts.append("*[no patch content]*")
+            incremental_diff_text = "\n".join(parts)
+            _plog("info", "discovery",
+                  f"Incremental diff: {len(incr_diff.files)} file(s) changed "
+                  f"between {old_sha[:8]} and {new_sha[:8]}.")
+        except Exception as e:
+            _plog("warn", "discovery",
+                  f"Could not fetch incremental diff: {e}. "
+                  f"Re-evaluating findings without new code context.")
+    else:
+        _plog("info", "discovery",
+              "No new commits since last review. Re-evaluating findings on their own merits.")
+
+    # --- Step 2: Collect non-dismissed findings grouped by agent ---
+    await _update_stage("discovery", "Collecting original findings")
+
+    dismissed_sigs: set[str] = set()
+    if storage:
+        try:
+            from pr_guardian.persistence.storage import finding_signature
+            dismissals = await storage.get_active_dismissals(
+                pr.pr_id, pr.repo, pr.platform.value,
+            )
+            for d in dismissals:
+                dismissed_sigs.add(d["signature"])
+        except Exception:
+            pass
+
+    agent_findings: dict[str, list[dict]] = {}
+    total_original = 0
+    total_dismissed = 0
+
+    for agent_result in original_review.get("agent_results", []):
+        agent_name = agent_result["agent_name"]
+        for f in agent_result.get("findings", []):
+            total_original += 1
+            from pr_guardian.persistence.storage import finding_signature
+            sig = finding_signature(
+                f.get("file", ""), f.get("category", ""), agent_name,
+            )
+            if sig in dismissed_sigs:
+                total_dismissed += 1
+                continue
+            agent_findings.setdefault(agent_name, []).append(f)
+
+    active_findings = sum(len(fs) for fs in agent_findings.values())
+    _plog("info", "discovery",
+          f"Original review: {total_original} finding(s), "
+          f"{total_dismissed} dismissed, {active_findings} to re-evaluate.")
+
+    if active_findings == 0:
+        _plog("info", "decision", "No active findings to re-evaluate. Auto-approving.")
+        result = ReviewResult(
+            pr_id=pr.pr_id, repo=pr.repo,
+            risk_tier=RiskTier.TRIVIAL,
+            repo_risk_class=_parse_risk_class(original_review.get("repo_risk_class")),
+            review_id=str(review_db_id) if review_db_id else "",
+            mechanical_results=[], mechanical_passed=True,
+            decision=Decision.AUTO_APPROVE, agent_results=[],
+            summary="Re-review: all original findings have been dismissed.",
+            pipeline_log=pipeline_log,
+        )
+        if post_comment:
+            await _post_results(adapter, pr, result, config, base_url=base_url)
+        await _save_result(storage, review_db_id, result, _emit)
+        return result
+
+    # --- Step 3: Run agents in re-evaluation mode ---
+    await _update_stage("agents", f"Re-evaluating {active_findings} finding(s) across {len(agent_findings)} agent(s)")
+
+    pr_metadata = {
+        "title": pr.title, "repo": pr.repo, "author": pr.author,
+    }
+
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_cost = 0.0
+
+    re_eval_tasks = []
+    agent_names_ordered = []
+    for agent_name, findings in agent_findings.items():
+        agent_cls = AGENT_REGISTRY.get(agent_name)
+        if not agent_cls:
+            continue
+        agent = agent_cls(config)
+        re_eval_tasks.append(
+            agent.re_evaluate(findings, incremental_diff_text, pr_metadata)
+        )
+        agent_names_ordered.append(agent_name)
+
+    all_evaluations = await asyncio.gather(*re_eval_tasks)
+
+    # --- Step 4: Build results from evaluations ---
+    await _update_stage("decision", "Computing final verdict from re-evaluation")
+
+    kept_findings: list[AgentResult] = []
+
+    for agent_name, evaluations in zip(agent_names_ordered, all_evaluations):
+        original_findings = agent_findings[agent_name]
+        kept: list[Finding] = []
+        resolved_count = 0
+
+        for ev in evaluations:
+            idx = ev.get("finding_index", 0) - 1
+            if idx < 0 or idx >= len(original_findings):
+                continue
+            status = ev.get("status", "kept")
+            orig = original_findings[idx]
+
+            if status == "resolved":
+                resolved_count += 1
+                _plog("info", "agents",
+                      f"Agent {agent_name}: finding {idx+1} RESOLVED — {ev.get('reason', '')[:100]}")
+                continue
+
+            severity = ev.get("updated_severity") or orig.get("severity", "low")
+            description = ev.get("updated_description") or orig.get("description", "")
+            if status == "updated":
+                _plog("info", "agents",
+                      f"Agent {agent_name}: finding {idx+1} UPDATED — {ev.get('reason', '')[:100]}")
+
+            kept.append(Finding(
+                severity=Severity(severity),
+                certainty=Certainty(orig.get("certainty", "uncertain")),
+                category=orig.get("category", ""),
+                language=orig.get("language", ""),
+                file=orig.get("file", ""),
+                line=orig.get("line"),
+                description=description,
+                suggestion=orig.get("suggestion", ""),
+                cwe=orig.get("cwe"),
+            ))
+
+        # Track tokens from first evaluation's meta
+        if evaluations and evaluations[0].get("_meta"):
+            meta = evaluations[0]["_meta"]
+            in_tok = meta.get("input_tokens", 0)
+            out_tok = meta.get("output_tokens", 0)
+            total_input_tokens += in_tok
+            total_output_tokens += out_tok
+            agent_cost = _estimate_cost(meta.get("model", ""), in_tok, out_tok)
+            total_cost += agent_cost
+
+        verdict = Verdict.PASS if not kept else (
+            Verdict.FLAG_HUMAN if any(f.severity in (Severity.HIGH, Severity.CRITICAL) for f in kept)
+            else Verdict.WARN
+        )
+
+        _plog("info", "agents",
+              f"Agent {agent_name}: {len(kept)} kept, {resolved_count} resolved.")
+
+        kept_findings.append(AgentResult(
+            agent_name=agent_name,
+            verdict=verdict,
+            findings=kept,
+        ))
+
+    # Compute decision
+    all_kept = sum(len(ar.findings) for ar in kept_findings)
+    has_high = any(
+        f.severity in (Severity.HIGH, Severity.CRITICAL)
+        for ar in kept_findings for f in ar.findings
+    )
+
+    if all_kept == 0:
+        decision = Decision.AUTO_APPROVE
+        summary_text = "Re-review: all findings have been resolved."
+    elif has_high:
+        decision = Decision.HUMAN_REVIEW
+        summary_text = f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved). High-severity findings need attention."
+    else:
+        decision = Decision.HUMAN_REVIEW
+        summary_text = f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved)."
+
+    risk_tier = RiskTier.HIGH if has_high else (RiskTier.MEDIUM if all_kept > 0 else RiskTier.TRIVIAL)
+
+    # Build combined score from kept findings
+    from pr_guardian.decision.engine import combined_score as calc_score
+    score = calc_score(kept_findings, config) if all_kept > 0 else 0.0
+
+    result = ReviewResult(
+        pr_id=pr.pr_id, repo=pr.repo,
+        risk_tier=risk_tier,
+        repo_risk_class=_parse_risk_class(original_review.get("repo_risk_class")),
+        review_id=str(review_db_id) if review_db_id else "",
+        mechanical_results=[], mechanical_passed=True,
+        decision=decision,
+        agent_results=kept_findings,
+        combined_score=score,
+        summary=summary_text,
+        pipeline_log=pipeline_log,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        cost_usd=round(total_cost, 6),
+        dismissal_summary={
+            "original_findings": total_original,
+            "dismissed": total_dismissed,
+            "re_evaluated": active_findings,
+            "resolved": active_findings - all_kept,
+            "kept": all_kept,
+        },
+    )
+
+    if post_comment:
+        await _post_results(adapter, pr, result, config, base_url=base_url)
+    await _save_result(storage, review_db_id, result, _emit)
+
+    log.info("re_review_complete", pr_id=pr.pr_id, decision=decision.value,
+             kept=all_kept, resolved=active_findings - all_kept)
+    return result
+
+
+def _parse_risk_class(value: str | None) -> RepoRiskClass:
+    """Parse a risk class string, with fallback."""
+    mapping = {"standard": RepoRiskClass.STANDARD, "elevated": RepoRiskClass.ELEVATED, "critical": RepoRiskClass.CRITICAL}
+    return mapping.get(value or "", RepoRiskClass.STANDARD)
 
 
 async def _save_result(storage, review_db_id, result, _emit) -> None:

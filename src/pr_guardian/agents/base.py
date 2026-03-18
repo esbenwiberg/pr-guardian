@@ -67,6 +67,30 @@ If no issues found, return {"verdict": "pass", "languages_reviewed": [...], "fin
 """
 
 
+RE_EVALUATE_OUTPUT_SCHEMA = """
+Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching this schema:
+{
+  "evaluations": [
+    {
+      "finding_index": 1,
+      "status": "kept | resolved | updated",
+      "reason": "brief explanation of why this finding is kept, resolved, or updated",
+      "updated_severity": null,
+      "updated_description": null
+    }
+  ]
+}
+
+Rules:
+- "kept" = the finding is still valid and unfixed
+- "resolved" = new code changes have fixed/addressed this finding
+- "updated" = still valid but details changed (provide updated_severity and/or updated_description)
+- You MUST evaluate every finding listed. Do not skip any.
+- Do NOT invent new findings. Only evaluate the ones provided.
+- If the incremental diff is empty (no new changes), re-evaluate each finding on its own merits — was the original assessment correct?
+"""
+
+
 class BaseAgent:
     """Base class for all AI review agents."""
 
@@ -81,6 +105,87 @@ class BaseAgent:
         if self._llm is None:
             self._llm = create_llm_client(self.config)
         return self._llm
+
+    async def re_evaluate(
+        self,
+        findings: list[dict],
+        incremental_diff: str,
+        pr_metadata: dict,
+    ) -> list[dict]:
+        """Re-evaluate existing findings against incremental changes.
+
+        Returns a list of evaluation dicts with status (kept/resolved/updated)
+        for each input finding.
+        """
+        model = resolve_model(self.config, self.agent_name)
+        llm = self._get_llm()
+
+        # Build the system prompt
+        override = await storage.get_prompt_override(self.agent_name)
+        system_prompt = build_agent_prompt(self.prompt_dir, [], base_override=override)
+        system_prompt += "\n\nYou are in RE-EVALUATION MODE. Your job is to re-assess previously identified findings — NOT to find new issues."
+        system_prompt += f"\n\n{RE_EVALUATE_OUTPUT_SCHEMA}"
+
+        # Build user message with findings + incremental diff
+        parts: list[str] = []
+        parts.append(f"## PR: {pr_metadata.get('title', '')}")
+        parts.append(f"- Repo: {pr_metadata.get('repo', '')}")
+        parts.append(f"- Author: {pr_metadata.get('author', '')}")
+
+        parts.append("\n## Findings to Re-Evaluate\n")
+        for i, f in enumerate(findings, 1):
+            parts.append(
+                f"### Finding {i}: [{f.get('severity', '?').upper()}] {f.get('category', '?')}"
+            )
+            parts.append(f"- File: {f.get('file', '?')}:{f.get('line', '?')}")
+            parts.append(f"- Certainty: {f.get('certainty', '?')}")
+            parts.append(f"- Description: {f.get('description', '')}")
+            if f.get("suggestion"):
+                parts.append(f"- Suggestion: {f['suggestion']}")
+            parts.append("")
+
+        if incremental_diff.strip():
+            parts.append("\n## Changes Since Last Review\n")
+            parts.append(f"```\n{incremental_diff}\n```")
+        else:
+            parts.append("\n## Changes Since Last Review\n")
+            parts.append("*No new commits since the last review. Re-evaluate findings on their own merits.*")
+
+        user_message = "\n".join(parts)
+
+        try:
+            response = await llm.complete(
+                system=system_prompt,
+                user=user_message,
+                model=model,
+                max_tokens=self.config.llm.max_tokens,
+                temperature=self.config.llm.temperature,
+                response_format="json",
+            )
+            extracted = self._extract_json(response.content)
+            try:
+                data = json.loads(extracted)
+            except json.JSONDecodeError:
+                repaired = self._repair_truncated_json(extracted)
+                data = json.loads(repaired)
+
+            evaluations = data.get("evaluations", [])
+            # Attach token metadata
+            for ev in evaluations:
+                ev["_meta"] = {
+                    "model": model,
+                    "input_tokens": response.input_tokens,
+                    "output_tokens": response.output_tokens,
+                }
+            return evaluations
+
+        except Exception as e:
+            log.error("re_evaluate_failed", agent=self.agent_name, error=str(e))
+            # On failure, keep all findings as-is
+            return [
+                {"finding_index": i + 1, "status": "kept", "reason": f"Re-evaluation failed: {e}"}
+                for i in range(len(findings))
+            ]
 
     async def review(self, context: ReviewContext, *, dismissal_context: str | None = None) -> AgentResult:
         """Run the agent review. Override for custom behavior."""

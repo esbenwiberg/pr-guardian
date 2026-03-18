@@ -70,6 +70,12 @@ class PlatformAdapter(Protocol):
         """Fetch list of changed files for a PR (filename, additions, deletions)."""
         ...
 
+    async def fetch_compare_diff(
+        self, repo: str, base_sha: str, head_sha: str, project: str = "",
+    ) -> Diff:
+        """Fetch diff between two commits. Used for incremental re-reviews."""
+        ...
+
     async def fetch_commits_for_path(
         self, repo: str, path: str, per_page: int = 1, project: str = "",
     ) -> list[dict]:
