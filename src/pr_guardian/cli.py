@@ -223,5 +223,311 @@ def scan_maintenance(repo: str, platform: str, staleness: int, max_files: int):
     asyncio.run(_run())
 
 
+@main.command("reviews")
+@click.option("--limit", default=20, type=int, help="Max reviews to show")
+@click.option("--repo", default=None, help="Filter by repo")
+@click.option("--decision", default=None, help="Filter by decision")
+@click.option("--json-output", "as_json", is_flag=True, help="Output raw JSON")
+def list_reviews_cmd(limit, repo, decision, as_json):
+    """List recent reviews."""
+    from pr_guardian.persistence import storage
+
+    async def _run():
+        rows = await storage.list_reviews(limit=limit, repo=repo, decision=decision)
+        if as_json:
+            click.echo(json.dumps(rows, indent=2, default=str))
+            return
+        if not rows:
+            click.echo("No reviews found.")
+            return
+        for r in rows:
+            decision_str = (r.get("decision") or "pending").upper()
+            risk = (r.get("risk_tier") or "?").upper()
+            score = r.get("combined_score")
+            score_str = f"{score:.1f}" if score is not None else "—"
+            click.echo(
+                f"  {r['id'][:8]}  {decision_str:<14} {risk:<8} score={score_str:<5}  "
+                f"{r.get('repo', ''):<30} {r.get('title', '')[:50]}"
+            )
+
+    asyncio.run(_run())
+
+
+@main.command("review")
+@click.argument("review_id")
+@click.option("--json-output", "as_json", is_flag=True, help="Output raw JSON")
+def show_review_cmd(review_id, as_json):
+    """Show review detail with findings."""
+    import uuid as uuid_mod
+    from pr_guardian.persistence import storage
+    from pr_guardian.persistence.storage import finding_signature
+
+    async def _run():
+        try:
+            rid = uuid_mod.UUID(review_id)
+        except ValueError:
+            click.echo(f"Invalid review ID: {review_id}", err=True)
+            sys.exit(1)
+
+        row = await storage.get_review(rid)
+        if not row:
+            click.echo("Review not found.", err=True)
+            sys.exit(1)
+
+        if as_json:
+            click.echo(json.dumps(row, indent=2, default=str))
+            return
+
+        decision_str = (row.get("decision") or "pending").upper()
+        risk = (row.get("risk_tier") or "?").upper()
+        score = row.get("combined_score")
+
+        click.echo(f"\n{'='*70}")
+        click.echo(f"Review: {row['id']}")
+        click.echo(f"PR:     {row.get('repo', '')} #{row.get('pr_id', '')} — {row.get('title', '')}")
+        click.echo(f"Decision: {decision_str}   Risk: {risk}   Score: {score}")
+        click.echo(f"Cost: ${row.get('cost_usd', 0):.4f}   Duration: {row.get('duration_ms', 0)}ms")
+        click.echo(f"{'='*70}")
+
+        # Enrich with dismissals
+        dismissals = []
+        sig_map = {}
+        try:
+            dismissals = await storage.get_active_dismissals(
+                row["pr_id"], row["repo"], row["platform"],
+            )
+            sig_map = {d["signature"]: d for d in dismissals}
+        except Exception:
+            pass
+
+        finding_num = 0
+        for agent in row.get("agent_results", []):
+            if not agent.get("findings"):
+                continue
+            click.echo(f"\n  Agent: {agent['agent_name']}  (verdict: {agent.get('verdict', '?')})")
+            click.echo(f"  {'—'*60}")
+            for f in agent["findings"]:
+                finding_num += 1
+                sig = finding_signature(
+                    f.get("file", ""), f.get("category", ""), agent["agent_name"],
+                )
+                dismissed = sig_map.get(sig)
+                dismiss_tag = f" [DISMISSED: {dismissed['status']}]" if dismissed else ""
+                click.echo(
+                    f"    [{finding_num}] {f.get('severity', '?').upper()}/{f.get('certainty', '?').upper()}  "
+                    f"{f.get('category', '')}{dismiss_tag}"
+                )
+                click.echo(f"        File: {f.get('file', '?')}:{f.get('line', '?')}")
+                click.echo(f"        {f.get('description', '')[:120]}")
+                if f.get("suggestion"):
+                    click.echo(f"        → {f['suggestion'][:120]}")
+                click.echo(f"        ID: {f.get('id', '?')}")
+
+        if finding_num == 0:
+            click.echo("\n  No findings.")
+
+        click.echo()
+
+    asyncio.run(_run())
+
+
+@main.command("dismiss")
+@click.argument("finding_id")
+@click.option("--status", required=True, type=click.Choice(["by_design", "false_positive", "acknowledged", "will_fix"]))
+@click.option("--comment", default="", help="Optional comment")
+def dismiss_cmd(finding_id, status, comment):
+    """Dismiss a finding by ID."""
+    import uuid as uuid_mod
+    from pr_guardian.persistence import storage
+    from pr_guardian.persistence.storage import finding_signature
+    from pr_guardian.persistence.database import async_session as get_session
+    from pr_guardian.persistence.models import FindingRow, AgentResultRow, ReviewRow
+
+    async def _run():
+        try:
+            fid = uuid_mod.UUID(finding_id)
+        except ValueError:
+            click.echo(f"Invalid finding ID: {finding_id}", err=True)
+            sys.exit(1)
+
+        # Look up finding context
+        async with get_session() as session:
+            from sqlalchemy import select as sel
+            f_row = (await session.scalars(sel(FindingRow).where(FindingRow.id == fid))).first()
+            if not f_row:
+                click.echo("Finding not found.", err=True)
+                sys.exit(1)
+            ar_row = await session.get(AgentResultRow, f_row.agent_result_id)
+            r_row = await session.get(ReviewRow, ar_row.review_id)
+
+        finding_dict = {
+            "file": f_row.file,
+            "line": f_row.line,
+            "category": f_row.category,
+            "severity": f_row.severity,
+            "certainty": f_row.certainty,
+            "description": f_row.description,
+        }
+
+        dismissal_id = await storage.upsert_dismissal(
+            pr_id=r_row.pr_id,
+            repo=r_row.repo,
+            platform=r_row.platform,
+            finding=finding_dict,
+            agent_name=ar_row.agent_name,
+            status=status,
+            comment=comment,
+        )
+        sig = finding_signature(f_row.file, f_row.category, ar_row.agent_name)
+        click.echo(f"Dismissed: {dismissal_id} (sig={sig})")
+
+    asyncio.run(_run())
+
+
+@main.command("batch-dismiss")
+@click.argument("review_id")
+@click.option("--status", required=True, type=click.Choice(["by_design", "false_positive", "acknowledged", "will_fix"]))
+@click.option("--comment", default="", help="Optional comment")
+@click.option("--finding-ids", default=None, help="Comma-separated finding IDs (default: all findings)")
+@click.option("--severity", default=None, help="Only dismiss findings with this severity or lower")
+def batch_dismiss_cmd(review_id, status, comment, finding_ids, severity):
+    """Batch dismiss findings from a review."""
+    import uuid as uuid_mod
+    from pr_guardian.persistence import storage
+    from pr_guardian.persistence.storage import finding_signature
+    from pr_guardian.persistence.database import async_session as get_session
+    from pr_guardian.persistence.models import FindingRow, AgentResultRow, ReviewRow
+
+    SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+
+    async def _run():
+        try:
+            rid = uuid_mod.UUID(review_id)
+        except ValueError:
+            click.echo(f"Invalid review ID: {review_id}", err=True)
+            sys.exit(1)
+
+        row = await storage.get_review(rid)
+        if not row:
+            click.echo("Review not found.", err=True)
+            sys.exit(1)
+
+        # Parse optional finding IDs filter
+        target_ids = None
+        if finding_ids:
+            target_ids = set()
+            for fid_str in finding_ids.split(","):
+                try:
+                    target_ids.add(str(uuid_mod.UUID(fid_str.strip())))
+                except ValueError:
+                    click.echo(f"Invalid finding ID: {fid_str.strip()}", err=True)
+                    sys.exit(1)
+
+        # Severity threshold
+        max_severity = SEVERITY_ORDER.get(severity, 999) if severity else 999
+
+        dismissed_count = 0
+        skipped_count = 0
+
+        for agent in row.get("agent_results", []):
+            for f in agent.get("findings", []):
+                fid = f.get("id", "")
+
+                # Filter by finding IDs if specified
+                if target_ids is not None and fid not in target_ids:
+                    skipped_count += 1
+                    continue
+
+                # Filter by severity threshold
+                f_sev = SEVERITY_ORDER.get(f.get("severity", "low"), 0)
+                if f_sev > max_severity:
+                    skipped_count += 1
+                    continue
+
+                finding_dict = {
+                    "file": f.get("file", ""),
+                    "line": f.get("line"),
+                    "category": f.get("category", ""),
+                    "severity": f.get("severity", ""),
+                    "certainty": f.get("certainty", ""),
+                    "description": f.get("description", ""),
+                }
+
+                await storage.upsert_dismissal(
+                    pr_id=row["pr_id"],
+                    repo=row["repo"],
+                    platform=row["platform"],
+                    finding=finding_dict,
+                    agent_name=agent["agent_name"],
+                    status=status,
+                    comment=comment,
+                )
+                dismissed_count += 1
+
+        click.echo(f"Dismissed {dismissed_count} finding(s), skipped {skipped_count}.")
+
+    asyncio.run(_run())
+
+
+@main.command("re-review")
+@click.argument("review_id")
+@click.option("--post-comment/--no-comment", default=True, help="Post comment to PR")
+def re_review_cmd(review_id, post_comment):
+    """Trigger a re-review with dismissal context."""
+    import uuid as uuid_mod
+    from pr_guardian.persistence import storage
+    from pr_guardian.core.orchestrator import run_review
+    from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
+    from pr_guardian.platform.factory import create_adapter
+
+    async def _run():
+        try:
+            rid = uuid_mod.UUID(review_id)
+        except ValueError:
+            click.echo(f"Invalid review ID: {review_id}", err=True)
+            sys.exit(1)
+
+        review = await storage.get_review(rid)
+        if not review:
+            click.echo("Review not found.", err=True)
+            sys.exit(1)
+
+        pr_url = review.get("pr_url")
+        if not pr_url:
+            click.echo("Review has no PR URL — cannot re-review.", err=True)
+            sys.exit(1)
+
+        dismissals = await storage.get_active_dismissals(
+            review["pr_id"], review["repo"], review["platform"],
+        )
+        click.echo(f"Re-reviewing {review['repo']} #{review['pr_id']} with {len(dismissals)} dismissal(s)...")
+
+        stub, platform_name = _parse_pr_url(pr_url)
+        adapter = create_adapter(platform_name)
+
+        try:
+            pr = await _hydrate_pr(adapter, stub, platform_name)
+        except Exception as e:
+            click.echo(f"Failed to fetch PR info: {e}", err=True)
+            sys.exit(1)
+
+        try:
+            result = await run_review(pr, adapter, post_comment=post_comment, dismissals=dismissals)
+            click.echo(f"\nReview complete!")
+            click.echo(f"  Decision: {result.decision.value.upper()}")
+            click.echo(f"  Risk: {result.risk_tier.value.upper()}")
+            click.echo(f"  Score: {result.combined_score}")
+            click.echo(f"  Cost: ${result.cost_usd:.4f}")
+            click.echo(f"  Findings: {sum(len(a.findings) for a in result.agent_results)}")
+        except Exception as e:
+            click.echo(f"Review failed: {e}", err=True)
+            sys.exit(1)
+        finally:
+            if hasattr(adapter, "close"):
+                await adapter.close()
+
+    asyncio.run(_run())
+
+
 if __name__ == "__main__":
     main()
