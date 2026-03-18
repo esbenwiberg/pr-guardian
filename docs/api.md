@@ -169,14 +169,23 @@ Un-dismiss a previously dismissed finding.
 POST /api/dashboard/reviews/{review_id}/re-review
 ```
 
-Re-runs the full review pipeline with dismissal context injected. Agents see previously dismissed findings and won't re-flag them unless new code changes make them relevant.
+Focused re-evaluation of original findings — does NOT run a full review pipeline.
+
+The re-review:
+1. Fetches the incremental diff (last reviewed commit → current HEAD)
+2. Collects non-dismissed findings from the original review
+3. Asks each agent: "are these findings still valid?"
+4. Each finding is marked `kept`, `resolved`, or `updated`
+
+Much cheaper and faster than a full review. Won't hallucinate new findings.
 
 **Response:**
 ```json
 {
   "status": "queued",
   "pr_id": "123",
-  "dismissal_count": 5
+  "mode": "re_evaluate",
+  "findings_to_evaluate": 8
 }
 ```
 

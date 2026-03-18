@@ -216,19 +216,20 @@ async def undismiss_finding(dismissal_id: uuid.UUID):
 
 @router.post("/reviews/{review_id}/re-review")
 async def re_review(review_id: uuid.UUID, request: Request):
-    """Trigger a re-review of the same PR, with dismissal context injected."""
+    """Focused re-review: re-evaluate original findings against incremental changes.
+
+    Does NOT run the full pipeline. Instead:
+    1. Fetches incremental diff (old commit → current HEAD)
+    2. Collects non-dismissed findings from the original review
+    3. Asks each agent to re-evaluate its own findings
+    4. Returns kept/resolved/updated findings
+    """
     review = await storage.get_review(review_id)
     if not review:
         raise HTTPException(404, "Review not found")
     if not review.get("pr_url"):
         raise HTTPException(422, "Review has no PR URL — cannot re-review")
 
-    # Fetch active dismissals
-    dismissals = await storage.get_active_dismissals(
-        review["pr_id"], review["repo"], review["platform"],
-    )
-
-    # Trigger the review via the same path as manual review
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
     from pr_guardian.platform.factory import create_adapter
 
@@ -245,13 +246,27 @@ async def re_review(review_id: uuid.UUID, request: Request):
     async def _run_bg():
         import traceback
         try:
-            from pr_guardian.core.orchestrator import run_review
-            await run_review(pr, adapter, post_comment=True, base_url=base_url, dismissals=dismissals)
+            from pr_guardian.core.orchestrator import run_re_review
+            await run_re_review(
+                pr, adapter, original_review=review,
+                post_comment=True, base_url=base_url,
+            )
         except Exception as e:
             log.error("re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
     asyncio.create_task(_run_bg())
-    return {"status": "queued", "pr_id": review["pr_id"], "dismissal_count": len(dismissals)}
+
+    # Count non-dismissed findings for the response
+    active_findings = sum(
+        len(a.get("findings", []))
+        for a in review.get("agent_results", [])
+    )
+    return {
+        "status": "queued",
+        "pr_id": review["pr_id"],
+        "mode": "re_evaluate",
+        "findings_to_evaluate": active_findings,
+    }
 
 
 async def _find_review_for_finding(finding_id: uuid.UUID) -> dict | None:

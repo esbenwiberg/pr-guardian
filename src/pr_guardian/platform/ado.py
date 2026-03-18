@@ -476,6 +476,40 @@ class ADOAdapter:
             if not item.get("isFolder", False) and item.get("path")
         ]
 
+    async def fetch_compare_diff(
+        self, repo: str, base_sha: str, head_sha: str, project: str = "",
+    ) -> Diff:
+        """Fetch diff between two commits. ADO uses the commits diff API."""
+        proj = project or self._default_project
+        client = self._get_client()
+        resp = await client.get(
+            f"{self._org_url}/{proj}/_apis/git/repositories/{repo}/diffs/commits",
+            params={
+                "baseVersion": base_sha,
+                "baseVersionType": "commit",
+                "targetVersion": head_sha,
+                "targetVersionType": "commit",
+                "api-version": "7.1",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        diff_files: list[DiffFile] = []
+        for change in data.get("changes", []):
+            item = change.get("item", {})
+            path = item.get("path", "").lstrip("/")
+            if item.get("isFolder"):
+                continue
+            change_type = change.get("changeType", "edit").lower()
+            status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
+            diff_files.append(DiffFile(
+                path=path,
+                status=status_map.get(change_type, "modified"),
+                old_path=change.get("sourceServerItem", {}).get("path") if change_type == "rename" else None,
+            ))
+        return Diff(files=diff_files)
+
     async def fetch_pr_files(
         self, repo: str, pr_id: int | str, project: str = "",
     ) -> list[dict]:

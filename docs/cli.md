@@ -140,12 +140,22 @@ pr-guardian batch-dismiss <review-uuid> --status false_positive --severity mediu
 
 ### `re-review <review_id>`
 
-Trigger a re-review of the same PR. Active dismissals are injected as context — agents won't re-flag dismissed findings unless new code changes make them relevant.
+Focused re-evaluation of original findings — does NOT run a full review.
+
+The re-review:
+1. Fetches the incremental diff (last reviewed commit → current HEAD)
+2. Collects non-dismissed findings from the original review
+3. Asks each agent: "are these findings still valid?"
+4. Each finding is marked `kept`, `resolved`, or `updated`
+
+This is much cheaper and faster than a full review, and won't hallucinate new findings.
 
 ```bash
 pr-guardian re-review <review-uuid>
 pr-guardian re-review <review-uuid> --no-comment   # don't post PR comment
 ```
+
+If no new commits exist since the last review, agents re-evaluate findings on their own merits (useful for catching false positives on second pass).
 
 ---
 

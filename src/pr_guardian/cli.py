@@ -505,10 +505,15 @@ def my_reviews_cmd(author, limit, decision, as_json):
 @click.argument("review_id")
 @click.option("--post-comment/--no-comment", default=True, help="Post comment to PR")
 def re_review_cmd(review_id, post_comment):
-    """Trigger a re-review with dismissal context."""
+    """Re-evaluate original findings against incremental changes.
+
+    Does NOT run a full review. Instead, takes the original findings (minus
+    dismissed ones), fetches only the diff since the last reviewed commit,
+    and asks each agent whether its findings are still valid.
+    """
     import uuid as uuid_mod
     from pr_guardian.persistence import storage
-    from pr_guardian.core.orchestrator import run_review
+    from pr_guardian.core.orchestrator import run_re_review
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
     from pr_guardian.platform.factory import create_adapter
 
@@ -529,10 +534,14 @@ def re_review_cmd(review_id, post_comment):
             click.echo("Review has no PR URL — cannot re-review.", err=True)
             sys.exit(1)
 
-        dismissals = await storage.get_active_dismissals(
-            review["pr_id"], review["repo"], review["platform"],
+        total_findings = sum(
+            len(a.get("findings", []))
+            for a in review.get("agent_results", [])
         )
-        click.echo(f"Re-reviewing {review['repo']} #{review['pr_id']} with {len(dismissals)} dismissal(s)...")
+        click.echo(
+            f"Re-evaluating {review['repo']} #{review['pr_id']} — "
+            f"{total_findings} original finding(s)..."
+        )
 
         stub, platform_name = _parse_pr_url(pr_url)
         adapter = create_adapter(platform_name)
@@ -544,15 +553,20 @@ def re_review_cmd(review_id, post_comment):
             sys.exit(1)
 
         try:
-            result = await run_review(pr, adapter, post_comment=post_comment, dismissals=dismissals)
-            click.echo(f"\nReview complete!")
+            result = await run_re_review(
+                pr, adapter, original_review=review,
+                post_comment=post_comment,
+            )
+            kept = sum(len(a.findings) for a in result.agent_results)
+            summary = result.dismissal_summary or {}
+            click.echo(f"\nRe-review complete!")
             click.echo(f"  Decision: {result.decision.value.upper()}")
-            click.echo(f"  Risk: {result.risk_tier.value.upper()}")
-            click.echo(f"  Score: {result.combined_score}")
+            click.echo(f"  Findings kept: {kept}")
+            click.echo(f"  Findings resolved: {summary.get('resolved', 0)}")
+            click.echo(f"  Findings dismissed: {summary.get('dismissed', 0)}")
             click.echo(f"  Cost: ${result.cost_usd:.4f}")
-            click.echo(f"  Findings: {sum(len(a.findings) for a in result.agent_results)}")
         except Exception as e:
-            click.echo(f"Review failed: {e}", err=True)
+            click.echo(f"Re-review failed: {e}", err=True)
             sys.exit(1)
         finally:
             if hasattr(adapter, "close"):
