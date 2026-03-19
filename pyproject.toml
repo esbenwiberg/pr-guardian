@@ -42,7 +42,7 @@ pr-guardian = "pr_guardian.cli:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-pr_guardian = ["config/*.yml", "dashboard/*.html", "dashboard/static/*.css"]
+pr_guardian = ["config/*.yml", "dashboard/*.html", "dashboard/static/*.css", "dashboard/static/*.js"]
 
 [tool.ruff]
 line-length = 99
