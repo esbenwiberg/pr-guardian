@@ -28,6 +28,16 @@ param githubToken string = ''
 @description('GitHub webhook secret')
 param githubWebhookSecret string = ''
 
+@description('Entra ID application client ID — leave empty to skip auth setup')
+param entraClientId string = ''
+
+@secure()
+@description('Entra ID application client secret')
+param entraClientSecret string = ''
+
+@description('Entra ID tenant ID')
+param entraTenantId string = ''
+
 var prefix = 'prguardian-${envName}'
 var registryName = replace('prguardian${envName}acr', '-', '')
 
@@ -77,6 +87,9 @@ module containerApp 'container-app.bicep' = {
     anthropicApiKey: anthropicApiKey
     githubToken: githubToken
     githubWebhookSecret: githubWebhookSecret
+    entraClientId: entraClientId
+    entraClientSecret: entraClientSecret
+    entraTenantId: entraTenantId
   }
 }
 

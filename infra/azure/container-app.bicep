@@ -17,6 +17,16 @@ param githubToken string = ''
 @secure()
 param githubWebhookSecret string = ''
 
+@description('Entra ID (Azure AD) application client ID — leave empty to disable auth')
+param entraClientId string = ''
+
+@secure()
+@description('Entra ID application client secret')
+param entraClientSecret string = ''
+
+@description('Entra ID tenant ID')
+param entraTenantId string = ''
+
 // Log Analytics workspace
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${prefix}-logs'
@@ -90,6 +100,10 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           name: 'github-webhook-secret'
           value: githubWebhookSecret
         }
+        {
+          name: 'microsoft-provider-authentication-secret'
+          value: entraClientSecret
+        }
       ]
     }
     template: {
@@ -156,6 +170,44 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             }
           }
         ]
+      }
+    }
+  }
+}
+
+// Entra ID authentication (Easy Auth) — only deployed when entraClientId is provided
+resource authConfig 'Microsoft.App/containerApps/authConfigs@2024-03-01' = if (!empty(entraClientId)) {
+  parent: containerApp
+  name: 'current'
+  properties: {
+    platform: {
+      enabled: true
+    }
+    globalValidation: {
+      unauthenticatedClientAction: 'RedirectToLoginPage'
+      excludedPaths: [
+        '/api/health'
+        '/api/webhooks/*'
+      ]
+    }
+    identityProviders: {
+      azureActiveDirectory: {
+        enabled: true
+        registration: {
+          clientId: entraClientId
+          clientSecretSettingName: 'microsoft-provider-authentication-secret'
+          openIdIssuer: 'https://sts.windows.net/${entraTenantId}/v2.0'
+        }
+        validation: {
+          allowedAudiences: [
+            'api://${entraClientId}'
+          ]
+        }
+      }
+    }
+    login: {
+      tokenStore: {
+        enabled: true
       }
     }
   }
