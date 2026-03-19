@@ -46,6 +46,20 @@ if [ -z "${GITHUB_WEBHOOK_SECRET:-}" ]; then
     echo ""
 fi
 
+# Entra ID (Azure AD) authentication — all three required to enable
+if [ -z "${ENTRA_CLIENT_ID:-}" ]; then
+    read -p "Entra ID client ID (or press Enter to skip auth): " ENTRA_CLIENT_ID
+fi
+if [ -n "${ENTRA_CLIENT_ID:-}" ]; then
+    if [ -z "${ENTRA_TENANT_ID:-}" ]; then
+        read -p "Entra ID tenant ID: " ENTRA_TENANT_ID
+    fi
+    if [ -z "${ENTRA_CLIENT_SECRET:-}" ]; then
+        read -s -p "Entra ID client secret: " ENTRA_CLIENT_SECRET
+        echo ""
+    fi
+fi
+
 # Create resource group if it doesn't exist
 echo "--- Ensuring resource group exists..."
 az group create --name "$RG" --location westeurope --output none 2>/dev/null || true
@@ -62,6 +76,9 @@ DEPLOY_OUTPUT=$(az deployment group create \
         anthropicApiKey="${ANTHROPIC_API_KEY:-}" \
         githubToken="${GITHUB_TOKEN:-}" \
         githubWebhookSecret="${GITHUB_WEBHOOK_SECRET:-}" \
+        entraClientId="${ENTRA_CLIENT_ID:-}" \
+        entraClientSecret="${ENTRA_CLIENT_SECRET:-}" \
+        entraTenantId="${ENTRA_TENANT_ID:-}" \
     --output json)
 
 REGISTRY=$(echo "$DEPLOY_OUTPUT" | jq -r '.properties.outputs.registryLoginServer.value')
