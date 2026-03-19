@@ -60,21 +60,23 @@ def build_change_profile(
     )
 
     # Check for new API endpoints (heuristic: new files in controller/handler/api dirs)
+    _API_SEGMENTS = {"controllers", "controller", "handlers", "handler", "api", "routes"}
     for df in diff.files:
-        if df.status == "added" and any(
-            seg in df.path for seg in ("controller", "handler", "api/", "routes/")
-        ):
-            profile.adds_api_endpoints = True
-            break
+        if df.status == "added":
+            path_segments = set(df.path.split("/"))
+            if path_segments & _API_SEGMENTS:
+                profile.adds_api_endpoints = True
+                break
 
     # Architecture boundary crossing: count unique top-level dirs in changed prod files
+    # Require 3+ distinct modules to avoid false positives on typical multi-folder changes
     prod_modules: set[str] = set()
     for f, roles in file_roles.items():
         if FileRole.PRODUCTION in roles:
             parts = f.split("/")
             if len(parts) >= 2:
                 prod_modules.add(parts[0] + "/" + parts[1])
-    profile.crosses_architecture_boundary = len(prod_modules) > 1
+    profile.crosses_architecture_boundary = len(prod_modules) > 2
 
     # Implied agents: driven by WHAT changed
     profile.implied_agents = set()
