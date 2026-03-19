@@ -75,7 +75,11 @@
 
     <!-- Toolbar (sticky below header on scroll) -->
     <div class="sticky top-14 z-10 -mx-6 px-6 flex items-center gap-2.5 py-3 mb-1 flex-wrap bg-slate-900/90 backdrop-blur-md border-b border-slate-700/30" id="toolbar" style="display:none">
-      <span class="text-sm text-slate-400 mr-auto" id="selection-count">0 selected</span>
+      <span class="text-sm text-slate-400" id="selection-count">0 selected</span>
+      <span class="text-slate-700 mx-0.5">|</span>
+      <button class="btn btn-xs btn-ghost text-slate-500" onclick="expandAllAgents()" title="Expand all">&#9660; All</button>
+      <button class="btn btn-xs btn-ghost text-slate-500" onclick="collapseAllAgents()" title="Collapse all">&#9650; All</button>
+      <span class="mr-auto"></span>
       <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high')">Select Critical + High</button>
       <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high','medium')">+ Medium</button>
       <button class="btn btn-sm btn-secondary" onclick="selectAll()">Select All</button>
@@ -520,6 +524,30 @@ function toggleAgent(ai) {
       }, i * 30);
     });
   }
+}
+
+function expandAllAgents() {
+  const agents = reviewData?.agent_results || [];
+  agents.forEach((_, ai) => {
+    const list = document.getElementById(`findings-${ai}`);
+    const toggle = document.getElementById(`toggle-${ai}`);
+    if (list && !list.classList.contains('expanded')) {
+      list.classList.add('expanded');
+      if (toggle) toggle.style.transform = 'rotate(90deg)';
+    }
+  });
+}
+
+function collapseAllAgents() {
+  const agents = reviewData?.agent_results || [];
+  agents.forEach((_, ai) => {
+    const list = document.getElementById(`findings-${ai}`);
+    const toggle = document.getElementById(`toggle-${ai}`);
+    if (list && list.classList.contains('expanded')) {
+      list.classList.remove('expanded');
+      if (toggle) toggle.style.transform = '';
+    }
+  });
 }
 
 function toggleSuggestion(btn) {

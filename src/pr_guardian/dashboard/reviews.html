@@ -445,6 +445,12 @@ function highlightRow(rows) {
 }
 
 // ---- Init ----
+// Pre-select filter from URL query params (e.g., ?decision=auto_approve)
+const urlParams = new URLSearchParams(window.location.search);
+if (urlParams.get('decision')) {
+  currentFilter.decision = urlParams.get('decision');
+  document.getElementById('filter-decision').value = currentFilter.decision;
+}
 loadReviews();
 loadActiveReviews();
 connectSSE();
