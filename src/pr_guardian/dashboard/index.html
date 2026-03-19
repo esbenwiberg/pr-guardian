@@ -102,6 +102,15 @@
     </div>
   </div>
 
+  <!-- Trend strip: last 20 review decisions -->
+  <div class="mb-6" id="trend-section" style="display:none">
+    <div class="flex items-center gap-3">
+      <span class="text-2xs font-semibold uppercase tracking-wider text-slate-500 shrink-0">Last 20</span>
+      <div class="flex gap-0.5 flex-1 h-2 rounded-full overflow-hidden" id="trend-strip"></div>
+      <span class="text-2xs text-slate-500 shrink-0 tabular-nums" id="trend-rate"></span>
+    </div>
+  </div>
+
   <!-- Active Reviews -->
   <div class="card mb-6" id="active-section">
     <div class="card-header">
@@ -145,6 +154,15 @@
         <div class="flex flex-col gap-2.5" id="repo-bars"></div>
       </div>
     </div>
+  </div>
+
+  <!-- Recent Reviews feed -->
+  <div class="card mb-6" id="recent-section" style="display:none">
+    <div class="card-header flex items-center justify-between">
+      <h2 class="text-sm font-semibold">Recent Reviews</h2>
+      <a href="/reviews" class="text-2xs text-slate-400 hover:text-slate-200 transition-colors">View all &rarr;</a>
+    </div>
+    <div class="card-body p-0" id="recent-list"></div>
   </div>
 
 </div>
@@ -366,16 +384,73 @@ function formatDuration(ms) {
   return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
 }
 
+function formatTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return d.toLocaleDateString();
+}
+
 function formatElapsed(iso) {
   const d = new Date(iso);
   const ms = Date.now() - d.getTime();
   return formatDuration(Math.max(0, ms));
 }
 
+// ---- Trend strip ----
+async function loadTrend() {
+  try {
+    const resp = await fetch(`${API}/reviews?limit=20`);
+    if (!resp.ok) return;
+    const reviews = await resp.json();
+    if (!reviews.length) return;
+
+    document.getElementById('trend-section').style.display = '';
+    const strip = document.getElementById('trend-strip');
+    const colors = { auto_approve: '#34d399', human_review: '#fb923c', reject: '#f87171', hard_block: '#ef4444' };
+
+    // Show oldest first (left to right = chronological)
+    const sorted = [...reviews].reverse();
+    strip.innerHTML = sorted.map(r => {
+      const c = colors[r.decision] || '#475569';
+      const title = `#${r.pr_id} — ${formatDecision(r.decision)}`;
+      return `<div class="flex-1 cursor-pointer transition-all hover:scale-y-150" style="background:${c}" title="${esc(title)}" onclick="window.location='/reviews/${r.id}'"></div>`;
+    }).join('');
+
+    // Calculate approval rate
+    const approved = reviews.filter(r => r.decision === 'auto_approve').length;
+    const rate = Math.round((approved / reviews.length) * 100);
+    document.getElementById('trend-rate').textContent = `${rate}% auto-approved`;
+
+    // Recent reviews feed (latest 6)
+    const recent = reviews.slice(0, 6);
+    if (recent.length) {
+      document.getElementById('recent-section').style.display = '';
+      const borderColors = { auto_approve: '#34d399', human_review: '#fb923c', reject: '#f87171', hard_block: '#ef4444' };
+      document.getElementById('recent-list').innerHTML = recent.map(r => {
+        const bc = borderColors[r.decision] || 'transparent';
+        const author = r.author ? (r.author.indexOf('@') > 0 ? r.author.substring(0, r.author.indexOf('@')) : r.author) : '';
+        return `<div class="flex items-center gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0 cursor-pointer hover:bg-slate-700/40 transition-colors" style="box-shadow:inset 3px 0 0 ${bc}" onclick="window.location='/reviews/${r.id}'">
+          <div class="flex-1 min-w-0">
+            <div class="text-sm font-medium truncate">#${esc(r.pr_id)} ${esc(truncate(r.title || '', 50))}</div>
+            <div class="text-2xs text-slate-500 mt-0.5">${esc(r.repo)} &middot; ${esc(author)}</div>
+          </div>
+          <span class="badge badge-${r.decision} shrink-0">${formatDecision(r.decision)}</span>
+          <span class="text-2xs text-slate-500 tabular-nums shrink-0 w-16 text-right">${formatTime(r.started_at)}</span>
+        </div>`;
+      }).join('');
+    }
+  } catch {}
+}
+
 // ---- Init ----
 connectSSE();
 loadStats();
 loadActive();
+loadTrend();
 
 // Periodic refresh
 setInterval(loadActive, 5000);

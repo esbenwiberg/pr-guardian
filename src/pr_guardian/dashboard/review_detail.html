@@ -89,6 +89,15 @@
       </div>
     </div>
 
+    <!-- Review history (prior runs of same PR) -->
+    <div id="history-section" style="display:none" class="mb-4">
+      <div class="flex items-center gap-2 mb-2">
+        <span class="text-xs font-semibold uppercase tracking-wider text-slate-500">Prior runs</span>
+        <span class="text-2xs text-slate-600" id="history-count"></span>
+      </div>
+      <div id="history-list" class="flex gap-2 flex-wrap"></div>
+    </div>
+
     <!-- Info cards -->
     <div class="grid grid-cols-5 gap-3 mb-6">
       <div class="stat-card"><div class="stat-card-label">Risk Tier</div><div class="stat-card-value" id="v-risk"></div></div>
@@ -218,6 +227,7 @@ async function loadReview() {
     if (data.error) throw new Error(data.error);
     reviewData = data;
     render(data);
+    loadReviewHistory();
   } catch (e) {
     showError(`Failed to load review: ${e.message}`);
   }
@@ -729,6 +739,53 @@ async function triggerReReview() {
     btn.disabled = false;
     btn.textContent = 'Re-review with feedback';
   }
+}
+
+// ---- Review history (prior runs of same PR) ----
+async function loadReviewHistory() {
+  if (!reviewData) return;
+  try {
+    const resp = await fetch(`/api/dashboard/reviews?repo=${encodeURIComponent(reviewData.repo)}&limit=50`);
+    if (!resp.ok) return;
+    const reviews = await resp.json();
+    const prRuns = reviews
+      .filter(r => String(r.pr_id) === String(reviewData.pr_id) && r.id !== REVIEW_ID)
+      .sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+    if (!prRuns.length) return;
+
+    document.getElementById('history-section').style.display = '';
+    document.getElementById('history-count').textContent = `${prRuns.length + 1} total runs`;
+
+    const dl = { auto_approve: 'Approved', human_review: 'Review', reject: 'Rejected', hard_block: 'Blocked' };
+    const dc = {
+      auto_approve: 'bg-emerald-400/[0.08] text-emerald-400 border-emerald-400/20',
+      human_review: 'bg-orange-400/[0.08] text-orange-400 border-orange-400/20',
+      reject: 'bg-red-400/[0.08] text-red-400 border-red-400/20',
+      hard_block: 'bg-red-400/[0.08] text-red-400 border-red-400/20',
+    };
+
+    document.getElementById('history-list').innerHTML = prRuns.map(r => {
+      const cls = dc[r.decision] || 'bg-slate-400/[0.08] text-slate-400 border-slate-400/20';
+      const label = dl[r.decision] || r.decision || '?';
+      const score = r.combined_score != null ? ` \u00b7 ${r.combined_score.toFixed(1)}` : '';
+      const time = formatTimeShort(r.started_at);
+      return `<a href="/reviews/${r.id}" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs ${cls} hover:brightness-125 transition-all" title="${new Date(r.started_at).toLocaleString()}">
+        <span class="font-semibold">${esc(label)}</span>
+        <span class="opacity-50 text-2xs">${score}</span>
+        <span class="opacity-40 text-2xs">${esc(time)}</span>
+      </a>`;
+    }).join('');
+  } catch {}
+}
+
+function formatTimeShort(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  const diff = Date.now() - d.getTime();
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
+  return d.toLocaleDateString();
 }
 
 // Init
