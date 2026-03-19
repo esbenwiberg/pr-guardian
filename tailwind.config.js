@@ -1,7 +1,7 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   presets: [require('./src/pr_guardian/dashboard/vendor/preset')],
-  content: ['./src/pr_guardian/dashboard/*.html'],
+  content: ['./src/pr_guardian/dashboard/*.html', './src/pr_guardian/dashboard/static/*.js'],
   darkMode: 'class',
   safelist: [
     // Dynamically constructed in JS template literals
