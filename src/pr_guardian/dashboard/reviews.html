@@ -11,7 +11,7 @@
 <!-- Sidebar -->
 <aside class="sidebar">
   <div class="sidebar-header">
-    <div class="sidebar-logo">G</div>
+    <div class="sidebar-logo"><svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v4.7c0 4.83-3.13 9.37-7 10.82-3.87-1.45-7-5.99-7-10.82V6.3l7-3.12z"/><path d="M10 15.5l-3.5-3.5 1.41-1.41L10 12.67l5.59-5.59L17 8.5l-7 7z"/></svg></div>
     <span class="text-sm font-semibold text-slate-50 hidden lg:block">PR Guardian</span>
     <span class="ml-auto text-2xs font-mono text-slate-500 hidden lg:block">v0.1</span>
   </div>
@@ -50,7 +50,11 @@
     </a>
   </nav>
   <div class="sidebar-footer hidden lg:block">
-    <div class="text-2xs text-slate-500 px-3 py-2">PR Guardian v0.1</div>
+    <button onclick="window.__cmdPalette?.open()" class="flex items-center gap-2 w-full px-3 py-2 text-2xs text-slate-500 hover:text-slate-300 transition-colors rounded-lg hover:bg-slate-800/60">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+      <span>Search</span>
+      <kbd class="kbd ml-auto" style="font-size:9px">\u2318K</kbd>
+    </button>
   </div>
 </aside>
 
@@ -70,9 +74,14 @@
         <option value="">All decisions</option>
         <option value="auto_approve">Auto-Approved</option>
         <option value="human_review">Human Review</option>
+        <option value="reject">Rejected</option>
         <option value="hard_block">Blocked</option>
       </select>
       <input id="filter-repo" type="text" placeholder="Filter repo..." class="form-input text-xs py-1.5 px-2 w-40">
+      <div class="ml-auto flex items-center gap-3">
+        <span class="text-xs text-slate-500 tabular-nums" id="review-count"></span>
+        <button id="toggle-runs" class="tab-pill text-xs active" onclick="toggleShowAllRuns()">Latest per PR</button>
+      </div>
     </div>
 
     <!-- Active Reviews -->
@@ -108,20 +117,26 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th style="width:60px"></th>
               <th>PR</th>
               <th>Repo</th>
               <th>Author</th>
               <th>Risk</th>
-              <th>Risk Score</th>
+              <th class="text-right">Score</th>
               <th>Decision</th>
-              <th>Cost</th>
-              <th>Duration</th>
-              <th>Time</th>
+              <th class="text-right">Cost</th>
+              <th class="text-right">Duration</th>
+              <th class="text-right">Time</th>
             </tr>
           </thead>
           <tbody id="reviews-body">
-            <tr><td colspan="10" class="empty-state">Loading...</td></tr>
+            <!-- Skeleton loading -->
+            <tr><td colspan="9" class="px-4 py-5"><div class="space-y-3">
+              <div class="skeleton h-8 rounded-lg"></div>
+              <div class="skeleton h-8 rounded-lg"></div>
+              <div class="skeleton h-8 rounded-lg"></div>
+              <div class="skeleton h-8 rounded-lg"></div>
+              <div class="skeleton h-8 rounded-lg"></div>
+            </div></td></tr>
           </tbody>
         </table>
       </div>
@@ -160,28 +175,14 @@
   </div>
 </div>
 
-<!-- Detail Modal -->
-<div id="modal-overlay" class="hidden fixed inset-0 z-50">
-  <div class="dialog-backdrop" onclick="closeModal()"></div>
-  <div class="dialog">
-    <div class="dialog-panel max-w-[860px] p-6">
-      <div class="flex justify-end gap-2 mb-1">
-        <button class="btn btn-secondary btn-sm" id="export-md-btn" onclick="exportMarkdown()" title="Export as Markdown report">&#8675; MD</button>
-        <button class="btn btn-ghost btn-icon btn-sm" onclick="closeModal()">&times;</button>
-      </div>
-      <div id="modal-body"></div>
-    </div>
-  </div>
-</div>
-
 <script>
 const API = '/api/dashboard';
-const STAGES = ['queued', 'discovery', 'mechanical', 'triage', 'agents', 'decision', 'validation', 'complete'];
-const TERMINAL_STAGES = ['complete', 'error'];
-const DECISION_COLORS = { auto_approve: '#00b894', human_review: '#fdcb6e', reject: '#e17055', hard_block: '#d63031' };
+const DECISION_BORDERS = { auto_approve: '#34d399', human_review: '#fb923c', reject: '#f87171', hard_block: '#ef4444' };
 
 // State
 let currentFilter = { decision: '', repo: '' };
+let allReviews = [];
+let showLatestOnly = true;
 
 // ---- Data Loading ----
 async function loadReviews() {
@@ -194,14 +195,56 @@ async function loadReviews() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const reviews = await resp.json();
     if (!Array.isArray(reviews) || !reviews.length) {
-      el.innerHTML = '<tr><td colspan="10" class="empty-state">No reviews found</td></tr>';
+      el.innerHTML = '<tr><td colspan="9" class="empty-state">No reviews found</td></tr>';
+      updateReviewCount(0, 0);
       return;
     }
-    el.innerHTML = reviews.map(r => renderReviewRow(r)).join('');
+    allReviews = reviews;
+    renderReviews();
   } catch (e) {
     console.error('Failed to load reviews', e);
-    el.innerHTML = '<tr><td colspan="10" class="empty-state text-red-400">Failed to load reviews — check database connection</td></tr>';
+    el.innerHTML = '<tr><td colspan="9" class="empty-state text-red-400">Failed to load reviews</td></tr>';
   }
+}
+
+function renderReviews() {
+  const el = document.getElementById('reviews-body');
+  const filtered = showLatestOnly ? latestPerPR(allReviews) : allReviews;
+  updateReviewCount(filtered.length, allReviews.length);
+  if (!filtered.length) {
+    el.innerHTML = '<tr><td colspan="9" class="empty-state">No reviews found</td></tr>';
+    return;
+  }
+  el.innerHTML = filtered.map((r, i) => renderReviewRow(r, i)).join('');
+  focusedRow = -1; // reset keyboard navigation
+}
+
+function latestPerPR(reviews) {
+  const groups = {};
+  for (const r of reviews) {
+    const key = `${r.repo}::${r.pr_id}`;
+    if (!groups[key] || new Date(r.started_at) > new Date(groups[key].started_at)) {
+      groups[key] = r;
+    }
+  }
+  return Object.values(groups).sort((a, b) => new Date(b.started_at) - new Date(a.started_at));
+}
+
+function updateReviewCount(shown, total) {
+  const el = document.getElementById('review-count');
+  if (showLatestOnly && total !== shown) {
+    el.textContent = `${shown} PRs \u00b7 ${total} total runs`;
+  } else {
+    el.textContent = `${shown} review${shown !== 1 ? 's' : ''}`;
+  }
+}
+
+function toggleShowAllRuns() {
+  showLatestOnly = !showLatestOnly;
+  const btn = document.getElementById('toggle-runs');
+  btn.textContent = showLatestOnly ? 'Latest per PR' : 'All runs';
+  btn.classList.toggle('active', showLatestOnly);
+  renderReviews();
 }
 
 async function loadActiveReviews() {
@@ -217,7 +260,7 @@ async function loadActiveReviews() {
     }
     container.classList.remove('hidden');
     tbody.innerHTML = active.map(r => `
-      <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
+      <tr onclick="window.location='/reviews/${r.id}'" class="cursor-pointer">
         <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
         <td>${esc(r.repo)}</td>
         <td>${esc(r.author)}</td>
@@ -246,404 +289,26 @@ async function cancelReview(id) {
 }
 
 // ---- Renderers ----
-function renderReviewRow(r) {
+function renderReviewRow(r, idx) {
+  const border = DECISION_BORDERS[r.decision] || 'transparent';
+  const animDelay = Math.min(idx * 30, 300);
   return `
-    <tr onclick="openDetail('${r.id}')" class="cursor-pointer">
-      <td style="padding:0 8px;width:40px">
-        <a href="/reviews/${r.id}" onclick="event.stopPropagation()" style="display:inline-block;padding:4px 10px;background:#059669;color:#fff;border-radius:4px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;line-height:1.4" onmouseover="this.style.background='#047857'" onmouseout="this.style.background='#059669'">View</a>
+    <tr onclick="window.location='/reviews/${r.id}'" class="cursor-pointer review-row" style="box-shadow:inset 3px 0 0 ${border};animation-delay:${animDelay}ms">
+      <td>
+        <strong class="text-slate-50">#${esc(r.pr_id)}</strong>
+        <div class="text-xs text-slate-400 mt-0.5 max-w-[260px] truncate">${esc(r.title || '')}</div>
       </td>
-      <td><strong>#${esc(r.pr_id)}</strong><br><span class="text-xs text-slate-400">${esc(truncate(r.title, 40))}</span></td>
-      <td>${esc(r.repo)}</td>
-      <td>${esc(r.author)}</td>
+      <td class="text-slate-400">${esc(r.repo)}</td>
+      <td class="text-slate-400">${esc(formatAuthor(r.author))}</td>
       <td><span class="badge badge-${r.risk_tier}">${r.risk_tier || '-'}</span></td>
-      <td>${r.combined_score?.toFixed(1) ?? '-'}</td>
+      <td class="tabular-nums text-right">${r.combined_score?.toFixed(1) ?? '-'}</td>
       <td><span class="badge badge-${r.decision}">${formatDecision(r.decision)}</span></td>
-      <td class="text-xs text-emerald-400">${formatCost(r.cost_usd)}</td>
-      <td>${formatDuration(r.duration_ms)}</td>
-      <td class="text-xs text-slate-400">${formatTime(r.started_at)}</td>
+      <td class="text-xs text-emerald-400 tabular-nums text-right">${formatCost(r.cost_usd)}</td>
+      <td class="text-xs tabular-nums text-right">${formatDuration(r.duration_ms)}</td>
+      <td class="text-xs text-slate-400 text-right" title="${r.started_at ? new Date(r.started_at).toLocaleString() : ''}">${formatTime(r.started_at)}</td>
     </tr>
   `;
 }
-
-// ---- Detail Modal ----
-let activeDetailInterval = null;
-let currentDetailReview = null;
-
-async function openDetail(id) {
-  try {
-    const r = await fetch(`${API}/reviews/${id}`).then(res => res.json());
-    if (r.error) { console.error('Review not found'); return; }
-    renderDetailModal(r);
-    document.getElementById('modal-overlay').classList.remove('hidden');
-
-    clearInterval(activeDetailInterval);
-    if (!TERMINAL_STAGES.includes(r.stage)) {
-      activeDetailInterval = setInterval(async () => {
-        try {
-          const updated = await fetch(`${API}/reviews/${id}`).then(res => res.json());
-          if (updated.error) return;
-          renderDetailModal(updated);
-          if (TERMINAL_STAGES.includes(updated.stage)) clearInterval(activeDetailInterval);
-        } catch (_) {}
-      }, 2000);
-    }
-  } catch (e) {
-    console.error('Failed to load detail', e);
-  }
-}
-
-function renderDetailModal(r) {
-  currentDetailReview = r;
-  const body = document.getElementById('modal-body');
-  const isError = r.stage === 'error';
-  const isActive = !TERMINAL_STAGES.includes(r.stage);
-  const stageIdx = STAGES.indexOf(r.stage);
-
-  const pipelineSteps = STAGES.slice(1).map((s, i) => {
-    let cls = '';
-    if (isError && (i + 1) <= stageIdx) cls = 'done';
-    else if (isError) cls = '';
-    else if ((i + 1) < stageIdx) cls = 'done';
-    else if ((i + 1) === stageIdx) cls = 'active';
-    return `<div class="pipe-step ${cls}">${s}</div>`;
-  }).join('') + (isError ? '<div class="pipe-step error">ERROR</div>' : '');
-
-  const timeInfo = isActive
-    ? (r.started_at ? formatElapsed(r.started_at) : '...')
-    : formatDuration(r.duration_ms);
-
-  const decisionIcons = { auto_approve: '&#10003;', human_review: '&#9998;', reject: '&#10007;', hard_block: '&#9940;', pending: '&#8987;', error: '&#9888;' };
-  const decisionIcon = decisionIcons[r.decision] || '&#8987;';
-
-  const totalFindings = (r.agent_results || []).reduce((sum, a) => sum + (a.findings?.length || 0), 0);
-
-  body.innerHTML = `
-    <div class="mb-5">
-      <h2 class="text-xl font-bold mb-1.5 leading-snug">${r.pr_url ? `<a href="${esc(r.pr_url)}" target="_blank" rel="noopener" class="hover:underline">PR #${esc(r.pr_id)}</a>` : `PR #${esc(r.pr_id)}`} — ${esc(r.title || 'Untitled')}</h2>
-      <div class="text-xs text-slate-400 flex items-center gap-1.5 flex-wrap">
-        <span>${esc(r.repo)}</span> &middot;
-        <span>${esc(r.author)}</span> &middot;
-        <span>${esc(r.source_branch)} &rarr; ${esc(r.target_branch)}</span>
-        ${r.head_commit_sha ? `&middot; <code class="text-2xs bg-slate-800 px-1.5 py-px rounded">${esc(r.head_commit_sha.slice(0, 8))}</code>` : ''}
-      </div>
-    </div>
-
-    <div class="flex items-center gap-4 p-4 rounded-xl mb-5 banner-${r.decision}">
-      <span class="text-2xl">${decisionIcon}</span>
-      <div class="flex-1">
-        <div class="text-[15px] font-semibold">${formatDecision(r.decision)}</div>
-        <div class="text-xs text-slate-400 mt-0.5">${isError ? esc(r.stage_detail || 'Review failed') : isActive ? 'Review in progress...' : (r.risk_tier ? `Risk: ${r.risk_tier} &middot; Score: ${r.combined_score?.toFixed(2) ?? '—'}` : 'Completed')}</div>
-      </div>
-      ${r.risk_tier ? `<span class="badge badge-${r.risk_tier} text-xs px-3 py-1">${r.risk_tier} risk</span>` : ''}
-    </div>
-
-    <div class="modal-pipeline">${pipelineSteps}</div>
-
-    ${isError && r.stage_detail ? `
-      <div class="flex items-center gap-2.5 p-3 rounded-lg mb-5 text-sm bg-red-400/[0.08] border border-red-400/20">
-        <span class="text-sm text-red-400 animate-spin">&#9888;</span>
-        <span class="text-red-400">${esc(r.stage_detail)}</span>
-      </div>
-    ` : isActive && r.stage_detail ? `
-      <div class="flex items-center gap-2.5 p-3 rounded-lg mb-5 text-sm" style="background:color-mix(in srgb, var(--accent-400) 8%, transparent);border:1px solid color-mix(in srgb, var(--accent-400) 20%, transparent)">
-        <span class="text-sm animate-spin" style="color:var(--accent-400)">&#9881;</span>
-        <span style="color:var(--accent-400)">${esc(r.stage_detail)}</span>
-      </div>
-    ` : ''}
-
-    <div class="grid grid-cols-5 gap-2.5 mb-5">
-      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
-        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Platform</div>
-        <div class="text-sm font-semibold">${esc(r.platform)}</div>
-      </div>
-      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
-        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">${isActive ? 'Elapsed' : 'Duration'}</div>
-        <div class="text-sm font-semibold">${timeInfo}</div>
-      </div>
-      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
-        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Risk Score</div>
-        <div class="text-sm font-semibold">${r.combined_score ? r.combined_score.toFixed(2) : '<span class="text-slate-500">—</span>'}</div>
-      </div>
-      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
-        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Findings</div>
-        <div class="text-sm font-semibold">${totalFindings || '<span class="text-slate-500">—</span>'}</div>
-      </div>
-      <div class="bg-slate-800 border border-slate-700/50 rounded-lg p-3">
-        <div class="text-2xs text-slate-400 uppercase tracking-wider mb-1">Cost</div>
-        <div class="text-sm font-semibold text-emerald-400">${r.cost_usd ? formatCost(r.cost_usd) : '<span class="text-slate-500">—</span>'}</div>
-        ${r.total_input_tokens ? '<div class="text-2xs text-slate-500 mt-0.5">' + r.total_input_tokens.toLocaleString() + ' + ' + r.total_output_tokens.toLocaleString() + ' tokens</div>' : ''}
-      </div>
-    </div>
-
-    ${r.summary ? `
-      <div class="card mb-3.5">
-        <div class="card-header"><h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Summary</h3></div>
-        <div class="card-body"><div class="text-sm leading-relaxed whitespace-pre-wrap">${esc(r.summary)}</div></div>
-      </div>
-    ` : ''}
-
-    ${r.override_reasons?.length ? `
-      <div class="card mb-3.5">
-        <div class="card-header">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Escalation Reasons</h3>
-          <span class="badge badge-neutral badge-sm">${r.override_reasons.length}</span>
-        </div>
-        <div class="card-body">
-          ${r.override_reasons.map(x => `
-            <div class="flex items-start gap-2.5 py-2 text-sm text-orange-400 border-b border-slate-700/30 last:border-b-0">
-              <span class="shrink-0 mt-px">&#9888;</span>
-              <span>${esc(x)}</span>
-            </div>
-          `).join('')}
-        </div>
-      </div>
-    ` : ''}
-
-    ${r.mechanical_results?.length ? `
-      <div class="card mb-3.5">
-        <div class="card-header">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Mechanical Checks</h3>
-          <span class="badge badge-neutral badge-sm">${r.mechanical_results.filter(m => m.passed).length}/${r.mechanical_results.length} passed</span>
-        </div>
-        <div class="card-body">
-          <div class="flex gap-2.5 flex-wrap">
-          ${r.mechanical_results.map(m => `
-            <div class="flex items-center gap-2 px-3.5 py-2 bg-slate-800 border border-slate-700/50 rounded-lg text-sm">
-              <span class="text-base shrink-0">${m.passed ? '<span class="text-emerald-400">&#10003;</span>' : '<span class="text-red-400">&#10007;</span>'}</span>
-              <span class="font-semibold">${esc(m.tool)}</span>
-              <span class="badge badge-sm badge-${m.severity || 'low'}">${m.severity || 'info'}</span>
-              ${m.error ? `<span class="text-xs text-orange-400">${esc(m.error)}</span>` : ''}
-              ${m.findings?.length ? `<span class="text-2xs text-slate-400">${m.findings.length} issue${m.findings.length !== 1 ? 's' : ''}</span>` : ''}
-            </div>
-          `).join('')}
-          </div>
-        </div>
-      </div>
-    ` : ''}
-
-    ${r.agent_results?.length ? `
-      <div class="card mb-3.5">
-        <div class="card-header">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Agent Results</h3>
-          <span class="badge badge-neutral badge-sm">${r.agent_results.length} agent${r.agent_results.length !== 1 ? 's' : ''}</span>
-        </div>
-        <div class="card-body p-2.5">
-          ${r.agent_results.map((a, idx) => {
-            const fc = a.findings?.length || 0;
-            const hasFindings = fc > 0;
-            return `
-              <div class="bg-slate-700/50 rounded-lg mb-2.5 last:mb-0 overflow-hidden">
-                <div class="flex items-center gap-2 px-3.5 py-2.5 cursor-pointer transition-colors hover:bg-white/[0.03]" onclick="toggleAgentFindings(this, ${idx})">
-                  <span class="font-semibold text-sm">${esc(a.agent_name)}</span>
-                  <span class="badge badge-sm badge-${a.verdict === 'pass' ? 'auto_approve' : a.verdict === 'warn' ? 'human_review' : 'hard_block'}">${a.verdict}</span>
-                  ${a.languages_reviewed?.length ? `<span class="text-2xs text-slate-400">${a.languages_reviewed.join(', ')}</span>` : ''}
-                  <span class="ml-auto text-2xs text-slate-400 flex items-center gap-2">
-                    <span>${fc} finding${fc !== 1 ? 's' : ''}</span>
-                    ${hasFindings ? '<span class="chevron transition-transform duration-200 text-xs text-slate-400">&#9656;</span>' : ''}
-                  </span>
-                </div>
-                ${a.error ? `<div class="text-red-400 text-xs px-3.5 pb-2.5">${esc(a.error)}</div>` : ''}
-                ${hasFindings ? `
-                  <div class="px-3.5 pb-3 hidden" id="agent-findings-${idx}">
-                    ${a.findings.map(f => `
-                      <div class="bg-surface-overlay border border-slate-700/50 rounded-lg p-3 mb-2 last:mb-0">
-                        <div class="flex gap-1.5 items-center mb-1.5 flex-wrap">
-                          <span class="sev-badge sev-${f.severity}">${f.severity}</span>
-                          <span class="cert-badge">${f.certainty}</span>
-                          ${f.category ? `<span class="text-2xs" style="color:var(--accent-400)">${esc(f.category)}</span>` : ''}
-                          <span class="text-2xs text-slate-400 ml-auto font-mono">${esc(f.file)}${f.line ? ':' + f.line : ''}</span>
-                        </div>
-                        <div class="text-sm leading-relaxed">${esc(f.description)}</div>
-                        ${f.suggestion ? `<div class="text-xs mt-1.5 pt-1.5 border-t border-slate-700/30" style="color:var(--accent-400)">${esc(f.suggestion)}</div>` : ''}
-                        ${f.cwe ? `<div class="text-2xs text-slate-500 mt-1">CWE: ${esc(f.cwe)}</div>` : ''}
-                      </div>
-                    `).join('')}
-                  </div>
-                ` : ''}
-              </div>
-            `;
-          }).join('')}
-        </div>
-      </div>
-    ` : ''}
-
-    ${r.pipeline_log?.length ? `
-      <div class="card mb-3.5">
-        <div class="card-header cursor-pointer" onclick="togglePipelineLog()">
-          <h3 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Pipeline Log</h3>
-          <button class="btn btn-ghost btn-xs" id="log-toggle-btn">
-            <span class="chevron text-2xs transition-transform duration-200" id="log-toggle-arrow">&#9656;</span>
-            ${r.pipeline_log.length} entries
-          </button>
-        </div>
-        <div class="card-body hidden p-0" id="pipeline-log-body">
-          <div class="max-h-[400px] overflow-y-auto">
-            ${r.pipeline_log.map(e => `
-              <div class="log-entry log-level-${e.level}">
-                <span class="log-ts">${formatLogTime(e.ts)}</span>
-                <span class="log-badge log-badge-${e.level}">${e.level}</span>
-                <span class="log-stage">${esc(e.stage)}</span>
-                <span class="log-msg">${esc(e.msg)}</span>
-              </div>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-    ` : ''}
-
-    ${isActive && !r.mechanical_results?.length && !r.agent_results?.length ? `
-      <div class="card">
-        <div class="card-body text-center py-8 text-slate-400">
-          <div class="text-2xl mb-2">&#9881;</div>
-          Review is in progress — results will appear as stages complete...
-        </div>
-      </div>
-    ` : ''}
-  `;
-}
-
-function togglePipelineLog() {
-  const body = document.getElementById('pipeline-log-body');
-  const arrow = document.getElementById('log-toggle-arrow');
-  if (!body) return;
-  if (body.classList.contains('hidden')) {
-    body.classList.remove('hidden');
-    if (arrow) arrow.classList.add('open');
-  } else {
-    body.classList.add('hidden');
-    if (arrow) arrow.classList.remove('open');
-  }
-}
-
-function formatLogTime(iso) {
-  if (!iso) return '';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-  } catch (_) { return ''; }
-}
-
-function toggleAgentFindings(header, idx) {
-  const el = document.getElementById('agent-findings-' + idx);
-  if (!el) return;
-  const chevron = header.querySelector('.chevron');
-  if (el.classList.contains('hidden')) {
-    el.classList.remove('hidden');
-    if (chevron) chevron.classList.add('open');
-  } else {
-    el.classList.add('hidden');
-    if (chevron) chevron.classList.remove('open');
-  }
-}
-
-function closeModal() {
-  document.getElementById('modal-overlay').classList.add('hidden');
-  clearInterval(activeDetailInterval);
-}
-
-function exportMarkdown() {
-  if (!currentDetailReview) return;
-  const md = generateMarkdownReport(currentDetailReview);
-  const blob = new Blob([md], { type: 'text/markdown' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `pr-review-${currentDetailReview.pr_id || 'report'}.md`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-}
-
-function generateMarkdownReport(r) {
-  const lines = [];
-  const decision = formatDecision(r.decision);
-
-  lines.push(`# PR Review Report — PR #${r.pr_id}`);
-  lines.push('');
-  lines.push(`**${r.title || 'Untitled'}**`);
-  lines.push('');
-  lines.push(`| Field | Value |`);
-  lines.push(`|-------|-------|`);
-  lines.push(`| Repository | ${r.repo} |`);
-  if (r.pr_url) lines.push(`| URL | ${r.pr_url} |`);
-  lines.push(`| Author | ${r.author} |`);
-  lines.push(`| Branch | ${r.source_branch} → ${r.target_branch} |`);
-  if (r.head_commit_sha) lines.push(`| Commit | \`${r.head_commit_sha.slice(0, 8)}\` |`);
-  lines.push(`| Platform | ${r.platform} |`);
-  lines.push(`| Decision | **${decision}** |`);
-  if (r.risk_tier) lines.push(`| Risk | ${r.risk_tier} |`);
-  if (r.combined_score != null) lines.push(`| Score | ${r.combined_score.toFixed(2)} |`);
-  if (r.duration_ms) lines.push(`| Duration | ${formatDuration(r.duration_ms)} |`);
-  if (r.cost_usd) lines.push(`| Cost | ${formatCost(r.cost_usd)} |`);
-  lines.push('');
-
-  if (r.summary) {
-    lines.push('## Summary');
-    lines.push('');
-    lines.push(r.summary);
-    lines.push('');
-  }
-
-  if (r.override_reasons?.length) {
-    lines.push('## Escalation Reasons');
-    lines.push('');
-    r.override_reasons.forEach(x => lines.push(`- ${x}`));
-    lines.push('');
-  }
-
-  if (r.mechanical_results?.length) {
-    const passed = r.mechanical_results.filter(m => m.passed).length;
-    lines.push(`## Mechanical Checks (${passed}/${r.mechanical_results.length} passed)`);
-    lines.push('');
-    r.mechanical_results.forEach(m => {
-      const icon = m.passed ? 'PASS' : 'FAIL';
-      lines.push(`- ${icon} **${m.tool}** [${m.severity || 'info'}]${m.error ? ' — ' + m.error : ''}`);
-      if (m.findings?.length) {
-        m.findings.forEach(f => lines.push(`  - ${f.file || ''}${f.line ? ':' + f.line : ''} — ${f.description || f.message || ''}`));
-      }
-    });
-    lines.push('');
-  }
-
-  if (r.agent_results?.length) {
-    lines.push('## Agent Results');
-    lines.push('');
-    r.agent_results.forEach(a => {
-      lines.push(`### ${a.agent_name} — ${a.verdict}${a.languages_reviewed?.length ? ' (' + a.languages_reviewed.join(', ') + ')' : ''}`);
-      lines.push('');
-      if (a.error) {
-        lines.push(`> **Error:** ${a.error}`);
-        lines.push('');
-      }
-      if (a.findings?.length) {
-        lines.push(`| Severity | Certainty | File | Description |`);
-        lines.push(`|----------|-----------|------|-------------|`);
-        a.findings.forEach(f => {
-          const loc = `${f.file || ''}${f.line ? ':' + f.line : ''}`;
-          lines.push(`| ${f.severity} | ${f.certainty} | \`${loc}\` | ${f.description} |`);
-          if (f.suggestion) lines.push(`| | | | Suggestion: ${f.suggestion} |`);
-          if (f.cwe) lines.push(`| | | | CWE: ${f.cwe} |`);
-        });
-        lines.push('');
-      } else {
-        lines.push('No findings.');
-        lines.push('');
-      }
-    });
-  }
-
-  lines.push('---');
-  lines.push(`*Generated by PR Guardian on ${new Date().toISOString().slice(0, 16).replace('T', ' ')} UTC*`);
-  return lines.join('\n');
-}
-
-document.getElementById('modal-overlay').addEventListener('click', (e) => {
-  if (e.target === document.getElementById('modal-overlay')) closeModal();
-});
-document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeModal(); closeReviewModal(); }
-});
 
 // ---- Review Modal ----
 function openReviewModal() {
@@ -689,6 +354,7 @@ async function submitReview(e) {
     }
     closeReviewModal();
     document.getElementById('review-form').reset();
+    showToast('Review queued');
     loadActiveReviews();
   } catch (err) {
     status.className = 'text-sm mr-auto text-red-400';
@@ -722,12 +388,28 @@ function esc(s) {
 
 function truncate(s, n) {
   if (!s) return '';
-  return s.length > n ? s.slice(0, n) + '...' : s;
+  return s.length > n ? s.slice(0, n) + '\u2026' : s;
 }
 
 function formatDecision(d) {
   const m = { auto_approve: 'Approved', human_review: 'Human Review', reject: 'Rejected', hard_block: 'Blocked', pending: 'Pending', error: 'Error' };
   return m[d] || d || '-';
+}
+
+function showToast(msg, type = 'success') {
+  let c = document.getElementById('toast-container');
+  if (!c) { c = document.createElement('div'); c.id = 'toast-container'; c.className = 'toast-container'; document.body.appendChild(c); }
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="text-sm">${esc(msg)}</span>`;
+  c.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transform = 'translateY(8px)'; el.style.transition = 'opacity 0.3s, transform 0.3s'; setTimeout(() => el.remove(), 300); }, 3500);
+}
+
+function formatAuthor(a) {
+  if (!a) return '-';
+  const at = a.indexOf('@');
+  return at > 0 ? a.substring(0, at) : a;
 }
 
 function formatCost(usd) {
@@ -762,7 +444,7 @@ function formatElapsed(iso) {
   return formatDuration(Math.max(0, ms));
 }
 
-// ---- SSE: refresh table on new reviews ----
+// ---- SSE ----
 function connectSSE() {
   const es = new EventSource(`${API}/events`);
   es.onmessage = (e) => {
@@ -770,10 +452,43 @@ function connectSSE() {
       const data = JSON.parse(e.data);
       if (data.type === 'connected') return;
       loadActiveReviews();
-      if (TERMINAL_STAGES.includes(data.stage)) loadReviews();
+      if (['complete', 'error'].includes(data.stage)) loadReviews();
     } catch {}
   };
   es.onerror = () => { es.close(); setTimeout(connectSSE, 5000); };
+}
+
+// ---- Keyboard Navigation ----
+let focusedRow = -1;
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeReviewModal(); return; }
+  // Skip if typing in an input/textarea/select
+  const tag = document.activeElement?.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+  const rows = document.querySelectorAll('#reviews-body tr[onclick]');
+  if (!rows.length) return;
+
+  if (e.key === 'j' || e.key === 'ArrowDown') {
+    e.preventDefault();
+    focusedRow = Math.min(focusedRow + 1, rows.length - 1);
+    highlightRow(rows);
+  } else if (e.key === 'k' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    focusedRow = Math.max(focusedRow - 1, 0);
+    highlightRow(rows);
+  } else if (e.key === 'Enter' && focusedRow >= 0 && focusedRow < rows.length) {
+    rows[focusedRow].click();
+  }
+});
+
+function highlightRow(rows) {
+  rows.forEach((r, i) => {
+    r.style.outline = i === focusedRow ? '2px solid var(--accent-400)' : '';
+    r.style.outlineOffset = i === focusedRow ? '-2px' : '';
+  });
+  if (rows[focusedRow]) rows[focusedRow].scrollIntoView({ block: 'nearest' });
 }
 
 // ---- Init ----
@@ -783,5 +498,6 @@ connectSSE();
 setInterval(loadReviews, 30000);
 setInterval(loadActiveReviews, 5000);
 </script>
+<script src="/static/command-palette.js"></script>
 </body>
 </html>

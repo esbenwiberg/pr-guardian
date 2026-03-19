@@ -203,6 +203,31 @@
   .verdict-warn       { @apply bg-orange-400/10 text-orange-400; }
   .verdict-flag_human { @apply bg-red-400/10 text-red-400; }
 
+  /* Smooth expand/collapse for findings */
+  .findings-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.3s ease-out;
+  }
+  .findings-collapse.expanded {
+    grid-template-rows: 1fr;
+  }
+
+  /* Review table row animation */
+  .review-row {
+    animation: fadeSlideIn 0.25s ease-out both;
+  }
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Decision badge: reject (missing from original set) */
+  .badge-reject { @apply bg-red-400/10 text-red-400 ring-red-400/20; }
+
+  /* Decision banner: reject */
+  .banner-reject { @apply border; background: rgba(248, 113, 113, 0.06); border-color: rgba(248, 113, 113, 0.2); }
+
   /* Finding card */
   .finding-card {
     transition: background-color 0.15s, box-shadow 0.15s;

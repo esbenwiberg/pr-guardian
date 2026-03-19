@@ -11,7 +11,7 @@
 <!-- Sidebar -->
 <aside class="sidebar">
   <div class="sidebar-header">
-    <div class="sidebar-logo">G</div>
+    <div class="sidebar-logo"><svg class="w-4.5 h-4.5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4zm0 2.18l7 3.12v4.7c0 4.83-3.13 9.37-7 10.82-3.87-1.45-7-5.99-7-10.82V6.3l7-3.12z"/><path d="M10 15.5l-3.5-3.5 1.41-1.41L10 12.67l5.59-5.59L17 8.5l-7 7z"/></svg></div>
     <span class="text-sm font-semibold text-slate-50 hidden lg:block">PR Guardian</span>
     <span class="ml-auto text-2xs font-mono text-slate-500 hidden lg:block">v0.1</span>
   </div>
@@ -50,7 +50,11 @@
     </a>
   </nav>
   <div class="sidebar-footer hidden lg:block">
-    <div class="text-2xs text-slate-500 px-3 py-2">PR Guardian v0.1</div>
+    <button onclick="window.__cmdPalette?.open()" class="flex items-center gap-2 w-full px-3 py-2 text-2xs text-slate-500 hover:text-slate-300 transition-colors rounded-lg hover:bg-slate-800/60">
+      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+      <span>Search</span>
+      <kbd class="kbd ml-auto" style="font-size:9px">\u2318K</kbd>
+    </button>
   </div>
 </aside>
 
@@ -107,8 +111,8 @@
       <div id="mech-list" class="flex gap-2.5 flex-wrap"></div>
     </div>
 
-    <!-- Toolbar -->
-    <div class="flex items-center gap-2.5 mb-4 flex-wrap" id="toolbar" style="display:none">
+    <!-- Toolbar (sticky below header on scroll) -->
+    <div class="sticky top-14 z-10 -mx-6 px-6 flex items-center gap-2.5 py-3 mb-1 flex-wrap bg-slate-900/90 backdrop-blur-md border-b border-slate-700/30" id="toolbar" style="display:none">
       <span class="text-sm text-slate-400 mr-auto" id="selection-count">0 selected</span>
       <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high')">Select Critical + High</button>
       <button class="btn btn-sm btn-secondary" onclick="selectBySeverity('critical','high','medium')">+ Medium</button>
@@ -245,10 +249,28 @@ function render(d) {
   }
 
   // Info cards
-  document.getElementById('v-risk').textContent = (d.risk_tier || '-').toUpperCase();
-  document.getElementById('v-score').textContent = d.combined_score != null ? `${d.combined_score.toFixed(1)} / 10` : '-';
+  const tierColors = { high: '#f87171', medium: '#fb923c', low: '#60a5fa', trivial: '#34d399' };
+  const tierTextClass = { high: 'text-red-400', medium: 'text-orange-400', low: 'text-blue-400', trivial: 'text-emerald-400' };
+
+  const riskEl = document.getElementById('v-risk');
+  riskEl.textContent = (d.risk_tier || '-').toUpperCase();
+  if (d.risk_tier && tierTextClass[d.risk_tier]) {
+    riskEl.className = 'stat-card-value ' + tierTextClass[d.risk_tier];
+    riskEl.closest('.stat-card').style.borderTop = `2px solid ${tierColors[d.risk_tier]}`;
+  }
+
+  const scoreEl = document.getElementById('v-score');
+  scoreEl.textContent = d.combined_score != null ? `${d.combined_score.toFixed(1)} / 10` : '-';
+  if (d.combined_score != null) {
+    const scoreColor = d.combined_score >= 5 ? '#f87171' : d.combined_score >= 3 ? '#fb923c' : d.combined_score >= 1 ? '#eab308' : '#34d399';
+    scoreEl.style.color = scoreColor;
+  }
+
   const totalFindings = (d.agent_results || []).reduce((sum, a) => sum + (a.findings || []).length, 0);
   document.getElementById('v-findings').textContent = totalFindings;
+  if (totalFindings > 0) {
+    document.getElementById('v-findings').closest('.stat-card').style.borderTop = '2px solid #fb923c';
+  }
   document.getElementById('v-duration').textContent = d.duration_ms ? `${(d.duration_ms / 1000).toFixed(1)}s` : '-';
   document.getElementById('v-cost').textContent = d.cost_usd ? `$${d.cost_usd.toFixed(4)}` : '-';
 
@@ -262,9 +284,37 @@ function render(d) {
   if (d.mechanical_results && d.mechanical_results.length) {
     document.getElementById('mech-section').style.display = '';
     const list = document.getElementById('mech-list');
-    list.innerHTML = d.mechanical_results.map(m =>
-      `<div class="card card-compact"><div class="card-body flex items-center gap-2 text-sm py-2.5 px-4"><span>${m.passed ? '\u2705' : '\u274c'}</span><strong>${esc(m.tool)}</strong>${m.error ? ` <span class="text-orange-400">${esc(m.error)}</span>` : ''}</div></div>`
-    ).join('');
+    const passed = d.mechanical_results.filter(m => m.passed);
+    const failed = d.mechanical_results.filter(m => !m.passed);
+    const allPassed = failed.length === 0;
+
+    if (allPassed) {
+      // Compact: single bar showing all passed
+      list.innerHTML = `
+        <div class="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-emerald-400/[0.06] border border-emerald-400/15">
+          <span class="text-emerald-400 text-sm font-semibold">${passed.length}/${d.mechanical_results.length} passed</span>
+          <span class="text-slate-500 text-xs">\u2014</span>
+          <span class="text-xs text-slate-400">${d.mechanical_results.map(m => m.tool).join(', ')}</span>
+        </div>`;
+    } else {
+      // Show failures prominently, passes compactly
+      list.innerHTML = `
+        ${failed.map(m => `
+          <div class="flex items-center gap-2.5 px-4 py-2.5 rounded-lg bg-red-400/[0.06] border border-red-400/15 mb-2">
+            <span class="text-red-400 font-bold text-sm">\u2717</span>
+            <strong class="text-sm text-red-400">${esc(m.tool)}</strong>
+            ${m.error ? `<span class="text-xs text-red-400/70">${esc(m.error)}</span>` : ''}
+            ${m.findings?.length ? `<span class="text-2xs text-red-400/50">${m.findings.length} issue${m.findings.length !== 1 ? 's' : ''}</span>` : ''}
+          </div>
+        `).join('')}
+        ${passed.length ? `
+          <div class="flex items-center gap-2 px-4 py-2 rounded-lg bg-slate-800/50 text-xs text-slate-500">
+            <span class="text-emerald-400">\u2713</span>
+            ${passed.length} passed: ${passed.map(m => m.tool).join(', ')}
+          </div>
+        ` : ''}
+      `;
+    }
   }
 
   // Agent findings
@@ -287,8 +337,12 @@ function render(d) {
             <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
             ${hasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
-          <div class="border-t border-slate-700/50 py-1 collapsed" id="findings-${ai}" style="display:none">
-            ${findings.map((f, fi) => renderFinding(ai, fi, f, agent.agent_name)).join('')}
+          <div class="findings-collapse border-t border-slate-700/50" id="findings-${ai}">
+            <div class="overflow-hidden">
+              <div class="py-1">
+                ${findings.map((f, fi) => renderFinding(ai, fi, f, agent.agent_name)).join('')}
+              </div>
+            </div>
           </div>
         </div>`;
     }).join('');
@@ -339,9 +393,11 @@ function renderFinding(ai, fi, f, agentName) {
           ${loc ? `<div class="font-mono text-xs text-emerald-400 mt-1.5">${esc(loc)}</div>` : ''}
           <div class="text-sm mt-2 leading-relaxed text-slate-200">${esc(f.description || '')}</div>
           ${f.suggestion ? `
-          <div class="mt-3 rounded-md bg-emerald-400/[0.05] border border-emerald-400/10 px-3 py-2.5">
-            <div class="text-2xs uppercase font-semibold tracking-wider text-emerald-400/50 mb-1">Suggestion</div>
-            <div class="text-xs text-emerald-400 leading-relaxed">${esc(f.suggestion)}</div>
+          <div class="mt-2">
+            <button class="text-2xs text-emerald-400/60 hover:text-emerald-400 transition-colors font-medium tracking-wide uppercase" onclick="event.stopPropagation(); toggleSuggestion(this)">Show suggestion &#9656;</button>
+            <div class="hidden mt-2 rounded-md bg-emerald-400/[0.05] border border-emerald-400/10 px-3 py-2.5">
+              <div class="text-xs text-emerald-400 leading-relaxed">${esc(f.suggestion)}</div>
+            </div>
           </div>` : ''}
         </div>
       </div>
@@ -483,9 +539,28 @@ function updateSelectionCount() {
 function toggleAgent(ai) {
   const list = document.getElementById(`findings-${ai}`);
   const toggle = document.getElementById(`toggle-${ai}`);
-  const isHidden = list.style.display === 'none';
-  list.style.display = isHidden ? '' : 'none';
-  toggle.style.transform = isHidden ? 'rotate(90deg)' : '';
+  const expanding = !list.classList.contains('expanded');
+  list.classList.toggle('expanded');
+  toggle.style.transform = expanding ? 'rotate(90deg)' : '';
+  // Staggered fade-in for finding cards on expand
+  if (expanding) {
+    const cards = list.querySelectorAll('.finding-card');
+    cards.forEach((card, i) => {
+      card.style.opacity = '0';
+      card.style.transform = 'translateY(4px)';
+      setTimeout(() => {
+        card.style.transition = 'opacity 0.2s ease-out, transform 0.2s ease-out';
+        card.style.opacity = '1';
+        card.style.transform = 'translateY(0)';
+      }, i * 30);
+    });
+  }
+}
+
+function toggleSuggestion(btn) {
+  const box = btn.nextElementSibling;
+  const isHidden = box.classList.toggle('hidden');
+  btn.innerHTML = isHidden ? 'Show suggestion &#9656;' : 'Hide suggestion &#9662;';
 }
 
 // --- Export ---
@@ -506,8 +581,30 @@ function copyExport() {
   navigator.clipboard.writeText(textarea.value).then(() => {
     const btn = document.getElementById('copy-btn');
     btn.textContent = 'Copied!';
+    showToast('Copied to clipboard');
     setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 2000);
   });
+}
+
+// ---- Toast notifications ----
+function showToast(msg, type = 'success') {
+  let container = document.getElementById('toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'toast-container';
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.innerHTML = `<span class="text-sm">${esc(msg)}</span>`;
+  container.appendChild(el);
+  setTimeout(() => {
+    el.style.opacity = '0';
+    el.style.transform = 'translateY(8px)';
+    el.style.transition = 'opacity 0.3s, transform 0.3s';
+    setTimeout(() => el.remove(), 300);
+  }, 3500);
 }
 
 function buildExportText() {
@@ -587,10 +684,10 @@ async function submitDismiss() {
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
     closeDismissDialog();
-    // Reload to reflect changes
+    showToast('Finding dismissed');
     loadReview();
   } catch (e) {
-    alert(`Failed to dismiss: ${e.message}`);
+    showToast(`Failed to dismiss: ${e.message}`, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = 'Dismiss Finding';
@@ -601,9 +698,10 @@ async function undoDismiss(dismissalId) {
   try {
     const resp = await fetch(`/api/dashboard/dismissals/${dismissalId}`, { method: 'DELETE' });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    showToast('Dismissal undone');
     loadReview();
   } catch (e) {
-    alert(`Failed to undo dismiss: ${e.message}`);
+    showToast(`Failed to undo: ${e.message}`, 'error');
   }
 }
 
@@ -624,10 +722,10 @@ async function triggerReReview() {
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
     btn.textContent = 'Queued! Redirecting...';
-    // Redirect to dashboard to see the new review in progress
+    showToast('Re-review queued');
     setTimeout(() => { window.location.href = '/dashboard'; }, 1500);
   } catch (e) {
-    alert(`Re-review failed: ${e.message}`);
+    showToast(`Re-review failed: ${e.message}`, 'error');
     btn.disabled = false;
     btn.textContent = 'Re-review with feedback';
   }
@@ -636,5 +734,6 @@ async function triggerReReview() {
 // Init
 loadReview();
 </script>
+<script src="/static/command-palette.js"></script>
 </body>
 </html>
