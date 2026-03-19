@@ -151,11 +151,27 @@ class TestDecisionMatrix:
         result = decide(ctx, [agent], RiskTier.LOW, GuardianConfig())
         assert result.decision == Decision.HUMAN_REVIEW
 
-    def test_high_always_human_review(self):
+    def test_high_all_pass_low_score_auto_approve(self):
         agent = AgentResult(agent_name="security_privacy", verdict=Verdict.PASS)
         ctx = _make_context()
         result = decide(ctx, [agent], RiskTier.HIGH, GuardianConfig())
+        assert result.decision == Decision.AUTO_APPROVE
+
+    def test_high_flag_human_review(self):
+        agent = AgentResult(agent_name="security_privacy", verdict=Verdict.FLAG_HUMAN)
+        ctx = _make_context()
+        result = decide(ctx, [agent], RiskTier.HIGH, GuardianConfig())
         assert result.decision == Decision.HUMAN_REVIEW
+
+    def test_high_with_findings_not_auto_approved(self):
+        agent = AgentResult(
+            agent_name="security_privacy",
+            verdict=Verdict.WARN,
+            findings=[_make_finding(severity=Severity.HIGH)],
+        )
+        ctx = _make_context()
+        result = decide(ctx, [agent], RiskTier.HIGH, GuardianConfig())
+        assert result.decision in (Decision.HUMAN_REVIEW, Decision.REJECT)
 
     def test_blocked_branch_overrides_auto_approve(self):
         ctx = _make_context(

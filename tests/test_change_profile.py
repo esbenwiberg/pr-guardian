@@ -51,3 +51,43 @@ class TestChangeProfile:
         )
         assert profile.has_generated_only
         assert profile.skip_agents
+
+    def test_adds_api_endpoints_uses_path_segments(self):
+        """Substring 'handler' in filename should NOT trigger adds_api_endpoints."""
+        diff = Diff(files=[DiffFile(path="src/components/ReleaseHandler.tsx", status="added")])
+        profile = build_change_profile(
+            ["src/components/ReleaseHandler.tsx"], diff, SecuritySurface(), BlastRadius(), FileRolesConfig(),
+        )
+        assert not profile.adds_api_endpoints
+
+    def test_adds_api_endpoints_true_for_api_dir(self):
+        """File added inside an 'api' directory segment should trigger."""
+        diff = Diff(files=[DiffFile(path="src/api/users.py", status="added")])
+        profile = build_change_profile(
+            ["src/api/users.py"], diff, SecuritySurface(), BlastRadius(), FileRolesConfig(),
+        )
+        assert profile.adds_api_endpoints
+
+    def test_architecture_boundary_two_modules_not_flagged(self):
+        """Touching 2 top-level modules should NOT flag as crossing boundaries."""
+        diff = Diff(files=[
+            DiffFile(path="src/components/Button.tsx", status="modified"),
+            DiffFile(path="src/utils/sort.ts", status="modified"),
+        ])
+        profile = build_change_profile(
+            ["src/components/Button.tsx", "src/utils/sort.ts"],
+            diff, SecuritySurface(), BlastRadius(), FileRolesConfig(),
+        )
+        assert not profile.crosses_architecture_boundary
+
+    def test_architecture_boundary_three_modules_flagged(self):
+        """Touching 3+ top-level modules SHOULD flag as crossing boundaries."""
+        diff = Diff(files=[
+            DiffFile(path="src/components/Button.tsx", status="modified"),
+            DiffFile(path="src/utils/sort.ts", status="modified"),
+            DiffFile(path="src/auth/login.py", status="modified"),
+        ])
+        profile = build_change_profile(
+            ["src/components/Button.tsx", "src/utils/sort.ts", "src/auth/login.py"],
+            diff, SecuritySurface(), BlastRadius(), FileRolesConfig(),
+        )

@@ -320,5 +320,7 @@ def _apply_matrix(
             return Decision.HUMAN_REVIEW
         return Decision.AUTO_APPROVE
 
-    # HIGH
+    # HIGH: default to human review, but allow auto-approve when all agents pass clean
+    if all_pass and score <= threshold:
+        return Decision.AUTO_APPROVE
     return Decision.HUMAN_REVIEW
