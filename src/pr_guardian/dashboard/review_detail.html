@@ -81,6 +81,7 @@
       <button class="btn btn-sm btn-secondary" onclick="selectAll()">Select All</button>
       <button class="btn btn-sm btn-secondary" onclick="deselectAll()">Deselect All</button>
       <button class="btn btn-sm btn-primary" id="export-btn" onclick="openExport()" disabled>Export for Agent Fix</button>
+      <button class="btn btn-sm btn-secondary" id="batch-dismiss-btn" onclick="openBatchDismiss()" disabled style="border-color:rgba(251,146,60,0.4);color:#fb923c">Dismiss Selected</button>
     </div>
 
     <!-- Agent findings groups -->
@@ -495,6 +496,7 @@ function updateSelectionCount() {
   const n = selectedFindings.size;
   document.getElementById('selection-count').textContent = `${n} selected`;
   document.getElementById('export-btn').disabled = n === 0;
+  document.getElementById('batch-dismiss-btn').disabled = n === 0;
 }
 
 // --- Agent group toggle ---
@@ -547,6 +549,65 @@ function copyExport() {
     showToast('Copied to clipboard');
     setTimeout(() => { btn.textContent = 'Copy to Clipboard'; }, 2000);
   });
+}
+
+// ---- Batch dismiss ----
+
+function openBatchDismiss() {
+  if (!selectedFindings.size) return;
+  // Reuse the dismiss dialog but for batch
+  dismissFindingId = '__batch__';
+  document.getElementById('dismiss-modal').classList.remove('hidden');
+  document.getElementById('dismiss-comment').value = '';
+  document.getElementById('dismiss-status').value = 'acknowledged';
+  // Update dialog title
+  document.querySelector('#dismiss-modal .dialog-header h2').textContent = `Dismiss ${selectedFindings.size} Finding${selectedFindings.size !== 1 ? 's' : ''}`;
+}
+
+async function submitBatchDismiss() {
+  const status = document.getElementById('dismiss-status').value;
+  const comment = document.getElementById('dismiss-comment').value.trim();
+
+  // Collect finding IDs from selection
+  const findingIds = [];
+  const agents = reviewData.agent_results || [];
+  selectedFindings.forEach(key => {
+    const [ai, fi] = key.split('-').map(Number);
+    const finding = agents[ai]?.findings?.[fi];
+    if (finding?.id && !finding.dismissal) findingIds.push(finding.id);
+  });
+
+  if (!findingIds.length) {
+    showToast('No dismissable findings selected', 'warning');
+    closeDismissDialog();
+    return;
+  }
+
+  const btn = document.getElementById('dismiss-submit-btn');
+  btn.disabled = true;
+  btn.textContent = `Dismissing ${findingIds.length}...`;
+
+  try {
+    const resp = await fetch('/api/dashboard/findings/batch-dismiss', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ finding_ids: findingIds, status, comment }),
+    });
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${resp.status}`);
+    }
+    const result = await resp.json();
+    closeDismissDialog();
+    showToast(`${result.dismissed} finding${result.dismissed !== 1 ? 's' : ''} dismissed`);
+    selectedFindings.clear();
+    loadReview();
+  } catch (e) {
+    showToast(`Batch dismiss failed: ${e.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Dismiss Finding';
+  }
 }
 
 // ---- Toast notifications ----
@@ -621,6 +682,7 @@ function openDismissDialog(findingId) {
   document.getElementById('dismiss-modal').classList.remove('hidden');
   document.getElementById('dismiss-comment').value = '';
   document.getElementById('dismiss-status').value = 'false_positive';
+  document.querySelector('#dismiss-modal .dialog-header h2').textContent = 'Dismiss Finding';
 }
 
 function closeDismissDialog() {
@@ -630,6 +692,7 @@ function closeDismissDialog() {
 
 async function submitDismiss() {
   if (!dismissFindingId) return;
+  if (dismissFindingId === '__batch__') return submitBatchDismiss();
   const status = document.getElementById('dismiss-status').value;
   const comment = document.getElementById('dismiss-comment').value.trim();
   const btn = document.getElementById('dismiss-submit-btn');
@@ -646,6 +709,9 @@ async function submitDismiss() {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${resp.status}`);
     }
+    // Optimistic: gray out the finding card immediately
+    const card = document.querySelector(`[data-finding-id="${dismissFindingId}"]`);
+    if (card) card.classList.add('dismissing');
     closeDismissDialog();
     showToast('Finding dismissed');
     loadReview();
