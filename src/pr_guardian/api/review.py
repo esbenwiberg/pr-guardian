@@ -171,16 +171,38 @@ async def _hydrate_pr(adapter, stub: PlatformPR, platform: str) -> PlatformPR:
         )
         resp.raise_for_status()
         data = resp.json()
+
+        source_branch = data.get("sourceRefName", "").replace("refs/heads/", "")
+        head_sha = data.get("lastMergeSourceCommit", {}).get("commitId", "")
+
+        # lastMergeSourceCommit only updates after ADO re-evaluates the merge,
+        # which can lag behind pushes.  The refs API reflects the real branch
+        # HEAD immediately, so prefer it.
+        try:
+            branch_head = await adapter.resolve_branch_head(
+                stub.project, stub.repo, source_branch,
+            )
+            if branch_head:
+                if branch_head != head_sha:
+                    log.info(
+                        "hydrate_sha_refreshed",
+                        lastMergeSource=head_sha[:12] if head_sha else "(empty)",
+                        branch_head=branch_head[:12],
+                    )
+                head_sha = branch_head
+        except Exception as exc:
+            log.debug("hydrate_branch_head_failed", error=str(exc))
+
         return PlatformPR(
             platform=Platform.ADO,
             pr_id=stub.pr_id,
             repo=stub.repo,
             repo_url=stub.repo_url,
-            source_branch=data.get("sourceRefName", "").replace("refs/heads/", ""),
+            source_branch=source_branch,
             target_branch=data.get("targetRefName", "").replace("refs/heads/", ""),
             author=data.get("createdBy", {}).get("uniqueName", ""),
             title=data.get("title", ""),
-            head_commit_sha=data.get("lastMergeSourceCommit", {}).get("commitId", ""),
+            head_commit_sha=head_sha,
             org=stub.org,
             project=stub.project,
         )

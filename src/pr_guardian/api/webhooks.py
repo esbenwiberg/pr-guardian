@@ -96,10 +96,19 @@ async def ado_webhook(request: Request):
     if not pr:
         return {"status": "ignored", "reason": "not a relevant PR event"}
 
+    adapter = create_adapter("ado")
+
+    # The webhook payload's lastMergeSourceCommit can lag behind pushes.
+    # Resolve the real branch HEAD so the review sees the latest code.
+    from pr_guardian.api.review import _hydrate_pr
+    try:
+        pr = await _hydrate_pr(adapter, pr, "ado")
+    except Exception as exc:
+        log.warn("webhook_hydrate_failed", error=str(exc))
+
     if review_queue.is_duplicate(pr, pr.head_commit_sha):
         return {"status": "duplicate", "pr_id": pr.pr_id}
 
-    adapter = create_adapter("ado")
     base_url = str(request.base_url).rstrip("/")
     dismissals = await _load_dismissals(pr)
     await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals))

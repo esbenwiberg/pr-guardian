@@ -20,6 +20,8 @@
     { name: 'Admin',         url: '/admin',         icon: '<path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/>' },
   ];
 
+  const TIP_DISMISSED_KEY = 'prg:agent-api-tip-dismissed';
+
   function isActive(url) {
     const p = window.location.pathname;
     if (url === '/dashboard') return p === '/' || p === '/dashboard';
@@ -28,6 +30,25 @@
 
   function icon(pathD) {
     return `<svg class="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">${pathD}</svg>`;
+  }
+
+  function agentApiTip() {
+    if (localStorage.getItem(TIP_DISMISSED_KEY)) return '';
+    return `
+      <div id="agent-api-tip" class="relative mb-2 rounded-lg border border-emerald-400/20 bg-emerald-400/[0.04] transition-all duration-150 hover:bg-emerald-400/[0.08] hover:border-emerald-400/30">
+        <button onclick="event.preventDefault();event.stopPropagation();this.closest('#agent-api-tip').remove();localStorage.setItem('${TIP_DISMISSED_KEY}','1')"
+                class="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded text-slate-500 hover:text-slate-300 hover:bg-slate-700/60 transition-colors z-10"
+                title="Dismiss">&times;</button>
+        <a href="/admin" class="group block p-2.5 no-underline">
+          <div class="flex items-center gap-2 mb-1 pr-5">
+            <svg class="w-3.5 h-3.5 text-emerald-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 5.25a3 3 0 0 1 3 3m3 0a6 6 0 0 1-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1 1 21.75 8.25Z"/></svg>
+            <span class="text-2xs font-semibold text-emerald-400">Agent API</span>
+            <span class="text-[9px] font-medium uppercase tracking-wider text-emerald-400/70 border border-emerald-400/30 rounded px-1 py-px leading-none">New</span>
+          </div>
+          <p class="text-2xs text-slate-400 leading-relaxed mb-1.5">Let CI bots and agents read findings, dismiss, and trigger re-reviews via API key.</p>
+          <span class="text-2xs text-emerald-400/80 group-hover:text-emerald-400 transition-colors">Create a key in Admin &rarr;</span>
+        </a>
+      </div>`;
   }
 
   const el = document.getElementById('sidebar');
@@ -49,6 +70,7 @@
       `).join('')}
     </nav>
     <div class="sidebar-footer hidden lg:block">
+      ${agentApiTip()}
       <button onclick="window.__cmdPalette?.open()" class="flex items-center gap-2 w-full px-3 py-1.5 text-2xs text-slate-500 hover:text-slate-300 transition-colors rounded-lg hover:bg-slate-800/60 mb-1">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
         <span>Search</span>

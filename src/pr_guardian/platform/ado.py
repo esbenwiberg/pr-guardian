@@ -48,6 +48,28 @@ class ADOAdapter:
             )
         return self._client
 
+    async def resolve_branch_head(
+        self, project: str, repo: str, branch: str,
+    ) -> str:
+        """Fetch the actual HEAD commit SHA of a branch via the refs API.
+
+        More reliable than ``lastMergeSourceCommit`` on the PR object, which
+        only updates after ADO re-evaluates the merge (can lag behind pushes).
+        """
+        client = self._get_client()
+        resp = await client.get(
+            f"{self._org_url}/{project}/_apis/git/repositories/{repo}/refs",
+            params={
+                "filter": f"heads/{branch}",
+                "api-version": "7.1",
+            },
+        )
+        resp.raise_for_status()
+        refs = resp.json().get("value", [])
+        if refs:
+            return refs[0].get("objectId", "")
+        return ""
+
     @staticmethod
     def normalize_webhook(payload: WebhookPayload) -> PlatformPR | None:
         """Normalize ADO webhook payload to PlatformPR."""
@@ -128,13 +150,80 @@ class ADOAdapter:
         last_iter_id = last_iter["id"]
 
         # Use commit SHAs from the iteration — branches may be deleted after merge
-        source_sha = last_iter.get("sourceRefCommit", {}).get("commitId", "")
+        iter_source_sha = last_iter.get("sourceRefCommit", {}).get("commitId", "")
         target_sha = last_iter.get("targetRefCommit", {}).get("commitId", "")
-        # Fall back to PR-level commit SHAs, then branch names
-        source_version = source_sha or pr.head_commit_sha or pr.source_branch
-        target_version = target_sha or pr.target_branch
-        source_version_type = "commit" if (source_sha or pr.head_commit_sha) else "branch"
-        target_version_type = "commit" if target_sha else "branch"
+
+        # Detect stale iteration: ADO may not have created a new iteration for
+        # the latest push yet, so the last iteration's sourceRefCommit lags
+        # behind the real branch HEAD (pr.head_commit_sha, resolved via refs).
+        iteration_stale = (
+            pr.head_commit_sha
+            and iter_source_sha
+            and iter_source_sha != pr.head_commit_sha
+        )
+
+        if iteration_stale:
+            log.warn(
+                "ado_stale_iteration",
+                pr_id=pr.pr_id,
+                iter_sha=iter_source_sha[:12],
+                branch_head=pr.head_commit_sha[:12],
+                msg="Iteration behind branch HEAD — using commits diff API",
+            )
+            # Fall back to commits diff API for the file list — it uses
+            # actual commit SHAs so it always reflects the latest push.
+            target_version = target_sha or pr.target_branch
+            target_version_type = "commit" if target_sha else "branch"
+            # Resolve target branch HEAD when we only have a branch name
+            if target_version_type == "branch":
+                try:
+                    t_head = await self.resolve_branch_head(
+                        pr.project, pr.repo, target_version,
+                    )
+                    if t_head:
+                        target_version = t_head
+                        target_version_type = "commit"
+                except Exception:
+                    pass
+            fallback_diff = await self.fetch_compare_diff(
+                pr.repo, target_version, pr.head_commit_sha,
+                project=pr.project,
+            )
+            diff_files = fallback_diff.files
+            source_version = pr.head_commit_sha
+            source_version_type = "commit"
+        else:
+            source_version = iter_source_sha or pr.head_commit_sha or pr.source_branch
+            target_version = target_sha or pr.target_branch
+            source_version_type = "commit" if (iter_source_sha or pr.head_commit_sha) else "branch"
+            target_version_type = "commit" if target_sha else "branch"
+
+            changes_url = (
+                f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+                f"/pullRequests/{pr.pr_id}/iterations/{last_iter_id}/changes"
+            )
+            resp = await client.get(changes_url, params={"api-version": "7.1"})
+            resp.raise_for_status()
+
+            try:
+                change_entries = resp.json().get("changeEntries", [])
+            except json.JSONDecodeError:
+                log.error("ado_changes_not_json", pr_id=pr.pr_id, body=resp.text[:200])
+                return Diff()
+
+            diff_files = []
+            for change in change_entries:
+                item = change.get("item", {})
+                change_type = change.get("changeType") or "edit"
+                status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
+                raw_path = item.get("path") or ""
+                diff_files.append(DiffFile(
+                    path=raw_path.lstrip("/"),
+                    status=status_map.get(change_type.lower(), "modified"),
+                    old_path=change.get("sourceServerItem"),
+                    additions=0,
+                    deletions=0,
+                ))
 
         log.debug(
             "ado_diff_versions",
@@ -143,34 +232,8 @@ class ADOAdapter:
             source_type=source_version_type,
             target=target_version[:12],
             target_type=target_version_type,
+            stale_fallback=iteration_stale,
         )
-
-        changes_url = (
-            f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
-            f"/pullRequests/{pr.pr_id}/iterations/{last_iter_id}/changes"
-        )
-        resp = await client.get(changes_url, params={"api-version": "7.1"})
-        resp.raise_for_status()
-
-        try:
-            change_entries = resp.json().get("changeEntries", [])
-        except json.JSONDecodeError:
-            log.error("ado_changes_not_json", pr_id=pr.pr_id, body=resp.text[:200])
-            return Diff()
-
-        diff_files: list[DiffFile] = []
-        for change in change_entries:
-            item = change.get("item", {})
-            change_type = change.get("changeType") or "edit"
-            status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
-            raw_path = item.get("path") or ""
-            diff_files.append(DiffFile(
-                path=raw_path.lstrip("/"),
-                status=status_map.get(change_type.lower(), "modified"),
-                old_path=change.get("sourceServerItem"),
-                additions=0,
-                deletions=0,
-            ))
 
         # Fetch file contents and compute patches using commit SHAs
         sem = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
