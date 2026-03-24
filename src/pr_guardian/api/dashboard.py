@@ -6,9 +6,12 @@ import os
 import uuid
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from pr_guardian.auth.dependencies import require_admin
+from pr_guardian.auth.identity import Identity
 
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
 from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
@@ -367,7 +370,7 @@ class PromptUpdate(BaseModel):
 
 
 @router.get("/prompts")
-async def list_prompts():
+async def list_prompts(identity: Identity = Depends(require_admin)):
     """All agent prompts with override status, plus shared system sections."""
     agents = await storage.get_all_prompts()
     return {
@@ -378,14 +381,14 @@ async def list_prompts():
 
 
 @router.put("/prompts/{agent_name}")
-async def update_prompt(agent_name: str, body: PromptUpdate):
+async def update_prompt(agent_name: str, body: PromptUpdate, identity: Identity = Depends(require_admin)):
     """Create or update a prompt override for an agent."""
     await storage.set_prompt_override(agent_name, body.content)
     return {"status": "saved", "agent_name": agent_name}
 
 
 @router.delete("/prompts/{agent_name}")
-async def reset_prompt(agent_name: str):
+async def reset_prompt(agent_name: str, identity: Identity = Depends(require_admin)):
     """Delete a prompt override, reverting to the file default."""
     deleted = await storage.delete_prompt_override(agent_name)
     return {"status": "reset" if deleted else "no_override", "agent_name": agent_name}
@@ -406,7 +409,7 @@ def _mask_key(key: str | None) -> str:
 
 
 @router.get("/settings")
-async def get_settings():
+async def get_settings(identity: Identity = Depends(require_admin)):
     """Current LLM provider settings (API keys are masked)."""
     try:
         config = await storage.get_global_config()
@@ -448,7 +451,7 @@ class SettingsUpdate(BaseModel):
 
 
 @router.put("/settings")
-async def update_settings(body: SettingsUpdate):
+async def update_settings(body: SettingsUpdate, identity: Identity = Depends(require_admin)):
     """Update LLM provider settings."""
     if body.active_provider not in ("anthropic", "azure-ai-foundry"):
         return {"status": "error", "detail": "Invalid provider"}

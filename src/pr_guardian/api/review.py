@@ -76,8 +76,18 @@ async def manual_review(req: ReviewRequest, request: Request):
 
     log.info("manual_review_started", platform=platform_name, pr_id=pr.pr_id, repo=pr.repo)
 
+    # Load dismissals from previous reviews so agents respect them
+    dismissals: list[dict] | None = None
+    try:
+        from pr_guardian.persistence import storage
+        dismissals = await storage.get_active_dismissals(
+            pr.pr_id, pr.repo, pr.platform.value,
+        )
+    except Exception:
+        pass
+
     base_url = str(request.base_url).rstrip("/")
-    asyncio.create_task(_run_review_background(pr, adapter, req.post_comment, base_url))
+    asyncio.create_task(_run_review_background(pr, adapter, req.post_comment, base_url, dismissals=dismissals))
 
     return ReviewResponse(
         status="queued",

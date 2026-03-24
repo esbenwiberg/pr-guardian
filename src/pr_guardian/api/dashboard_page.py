@@ -15,6 +15,7 @@ _REVIEW_DETAIL_HTML = _DASHBOARD_DIR / "review_detail.html"
 _SCANS_HTML = _DASHBOARD_DIR / "scans.html"
 _PROMPTS_HTML = _DASHBOARD_DIR / "prompts.html"
 _SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"
+_ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
@@ -78,3 +79,9 @@ async def api_reference_page():
 async def settings_page():
     """Serve the LLM provider settings page."""
     return _SETTINGS_HTML.read_text()
+
+
+@router.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    """Serve the admin management page."""
+    return _ADMIN_HTML.read_text()

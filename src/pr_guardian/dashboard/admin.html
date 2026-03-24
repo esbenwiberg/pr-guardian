@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — Admin</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<aside id="sidebar"></aside>
+<script src="/static/sidebar.js"></script>
+
+<!-- Main Content -->
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <h1 class="text-sm font-semibold text-slate-50">Admin</h1>
+    <span class="text-xs text-slate-400" id="identity-badge"></span>
+  </header>
+
+  <div class="max-w-[720px] mx-auto px-6 py-6 space-y-6">
+
+    <!-- API Keys Card -->
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">API Keys</h2>
+      <p class="text-xs text-slate-400 mb-5">Create keys for agents and CI bots to authenticate without OIDC. Keys are shown once at creation.</p>
+
+      <!-- Create Form -->
+      <div class="flex flex-wrap gap-3 items-end mb-5">
+        <div class="flex-1 min-w-[160px]">
+          <label class="text-xs font-medium text-slate-300 block mb-1">Name</label>
+          <input type="text" id="key-name" class="form-input w-full" placeholder="e.g. ci-bot, github-action">
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-300 block mb-1">Scopes</label>
+          <div class="flex gap-3 items-center h-[38px]">
+            <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+              <input type="checkbox" id="scope-read" checked disabled class="form-checkbox"> read
+            </label>
+            <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+              <input type="checkbox" id="scope-write" class="form-checkbox"> write
+            </label>
+          </div>
+        </div>
+        <div>
+          <label class="text-xs font-medium text-slate-300 block mb-1">Expires</label>
+          <select id="key-expiry" class="form-input">
+            <option value="">Never</option>
+            <option value="30">30 days</option>
+            <option value="90">90 days</option>
+            <option value="365">1 year</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm h-[38px]" onclick="createKey()">Create Key</button>
+      </div>
+
+      <!-- One-time key display -->
+      <div id="new-key-alert" class="hidden mb-5 p-4 rounded-lg border border-emerald-400/30 bg-emerald-400/[0.06]">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-emerald-400 text-sm font-semibold">Key created</span>
+          <span class="text-2xs text-slate-400">Copy it now — it won't be shown again</span>
+        </div>
+        <div class="flex gap-2 items-center">
+          <code class="flex-1 text-sm font-mono text-emerald-300 bg-slate-800/60 px-3 py-2 rounded select-all break-all" id="new-key-value"></code>
+          <button class="btn btn-sm btn-secondary shrink-0" onclick="copyKey()">Copy</button>
+        </div>
+      </div>
+
+      <!-- Keys Table -->
+      <div id="keys-loading" class="text-xs text-slate-400 py-4">Loading...</div>
+      <div id="keys-empty" class="hidden text-xs text-slate-400 py-4">No API keys yet.</div>
+      <table id="keys-table" class="hidden w-full text-xs">
+        <thead>
+          <tr class="text-left text-slate-400 border-b border-slate-700/50">
+            <th class="pb-2 font-medium">Name</th>
+            <th class="pb-2 font-medium">Prefix</th>
+            <th class="pb-2 font-medium">Scopes</th>
+            <th class="pb-2 font-medium">Created</th>
+            <th class="pb-2 font-medium">Last Used</th>
+            <th class="pb-2 font-medium">Status</th>
+            <th class="pb-2 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody id="keys-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Admins Card -->
+    <div class="card p-6">
+      <h2 class="text-[15px] font-semibold mb-1">Admins</h2>
+      <p class="text-xs text-slate-400 mb-5">Admins can manage API keys, prompts, and LLM settings. Add by email (must match Entra ID login).</p>
+
+      <!-- Add Form -->
+      <div class="flex gap-3 items-end mb-5">
+        <div class="flex-1">
+          <label class="text-xs font-medium text-slate-300 block mb-1">Email</label>
+          <input type="email" id="admin-email" class="form-input w-full" placeholder="user@example.com" onkeydown="if(event.key==='Enter')addAdmin()">
+        </div>
+        <button class="btn btn-primary btn-sm h-[38px]" onclick="addAdmin()">Add Admin</button>
+      </div>
+
+      <!-- Admins Table -->
+      <div id="admins-loading" class="text-xs text-slate-400 py-4">Loading...</div>
+      <div id="admins-empty" class="hidden text-xs text-slate-400 py-4">No admins configured.</div>
+      <table id="admins-table" class="hidden w-full text-xs">
+        <thead>
+          <tr class="text-left text-slate-400 border-b border-slate-700/50">
+            <th class="pb-2 font-medium">Email</th>
+            <th class="pb-2 font-medium">Added By</th>
+            <th class="pb-2 font-medium">Added</th>
+            <th class="pb-2 font-medium"></th>
+          </tr>
+        </thead>
+        <tbody id="admins-body"></tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
+  <div class="px-4 py-2 rounded-lg text-sm shadow-lg" id="toast-inner"></div>
+</div>
+
+<script>
+const API = '/api/admin';
+
+// --- Toast ---
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  const inner = document.getElementById('toast-inner');
+  inner.textContent = msg;
+  inner.className = 'px-4 py-2 rounded-lg text-sm shadow-lg ' + (
+    type === 'error' ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white'
+  );
+  t.classList.remove('hidden');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString() : '—'; }
+
+// --- Identity ---
+async function loadIdentity() {
+  try {
+    const r = await fetch(`${API}/me`);
+    if (r.status === 403) {
+      document.querySelector('.max-w-\\[720px\\]').innerHTML =
+        '<div class="card p-8 text-center"><p class="text-orange-400 font-semibold mb-2">Admin access required</p><p class="text-xs text-slate-400">You are not an admin. Contact an existing admin to be added.</p></div>';
+      return;
+    }
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const me = await r.json();
+    document.getElementById('identity-badge').textContent = `Signed in as ${me.display_name}`;
+    loadKeys();
+    loadAdmins();
+  } catch (e) {
+    showToast(`Auth error: ${e.message}`, 'error');
+  }
+}
+
+// --- API Keys ---
+async function loadKeys() {
+  try {
+    const r = await fetch(`${API}/api-keys`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const keys = await r.json();
+    document.getElementById('keys-loading').classList.add('hidden');
+
+    if (!keys.length) {
+      document.getElementById('keys-empty').classList.remove('hidden');
+      document.getElementById('keys-table').classList.add('hidden');
+      return;
+    }
+    document.getElementById('keys-empty').classList.add('hidden');
+    document.getElementById('keys-table').classList.remove('hidden');
+
+    document.getElementById('keys-body').innerHTML = keys.map(k => {
+      const revoked = !!k.revoked_at;
+      const expired = k.expires_at && new Date(k.expires_at) < new Date();
+      const status = revoked ? 'Revoked' : (expired ? 'Expired' : 'Active');
+      const statusCls = revoked || expired
+        ? 'text-red-400'
+        : 'text-emerald-400';
+      return `<tr class="border-b border-slate-700/30 ${revoked ? 'opacity-50' : ''}">
+        <td class="py-2 font-medium text-slate-200">${esc(k.name)}</td>
+        <td class="py-2 font-mono text-slate-400">${esc(k.key_prefix)}...</td>
+        <td class="py-2">${(k.scopes || []).join(', ')}</td>
+        <td class="py-2 text-slate-400">${fmtDate(k.created_at)}</td>
+        <td class="py-2 text-slate-400">${fmtDate(k.last_used_at)}</td>
+        <td class="py-2 ${statusCls}">${status}</td>
+        <td class="py-2 text-right">${!revoked ? `<button class="text-red-400 hover:text-red-300 transition-colors" onclick="revokeKey('${k.id}', '${esc(k.name)}')">Revoke</button>` : ''}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('keys-loading').textContent = 'Failed to load keys.';
+  }
+}
+
+async function createKey() {
+  const name = document.getElementById('key-name').value.trim();
+  if (!name) { showToast('Key name is required', 'error'); return; }
+
+  const scopes = ['read'];
+  if (document.getElementById('scope-write').checked) scopes.push('write');
+  const expiryVal = document.getElementById('key-expiry').value;
+  const expires_in_days = expiryVal ? parseInt(expiryVal) : null;
+
+  try {
+    const r = await fetch(`${API}/api-keys`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, scopes, expires_in_days }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    const data = await r.json();
+
+    // Show one-time key
+    document.getElementById('new-key-value').textContent = data.key;
+    document.getElementById('new-key-alert').classList.remove('hidden');
+
+    // Clear form + refresh table
+    document.getElementById('key-name').value = '';
+    document.getElementById('scope-write').checked = false;
+    document.getElementById('key-expiry').value = '';
+    showToast('API key created');
+    loadKeys();
+  } catch (e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
+function copyKey() {
+  const key = document.getElementById('new-key-value').textContent;
+  navigator.clipboard.writeText(key).then(
+    () => showToast('Copied to clipboard'),
+    () => showToast('Copy failed — select and copy manually', 'error')
+  );
+}
+
+async function revokeKey(id, name) {
+  if (!confirm(`Revoke API key "${name}"? This cannot be undone.`)) return;
+  try {
+    const r = await fetch(`${API}/api-keys/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    showToast(`Key "${name}" revoked`);
+    loadKeys();
+  } catch (e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
+// --- Admins ---
+async function loadAdmins() {
+  try {
+    const r = await fetch(`${API}/admins`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const admins = await r.json();
+    document.getElementById('admins-loading').classList.add('hidden');
+
+    if (!admins.length) {
+      document.getElementById('admins-empty').classList.remove('hidden');
+      document.getElementById('admins-table').classList.add('hidden');
+      return;
+    }
+    document.getElementById('admins-empty').classList.add('hidden');
+    document.getElementById('admins-table').classList.remove('hidden');
+
+    const canRemove = admins.length > 1;
+    document.getElementById('admins-body').innerHTML = admins.map(a => {
+      return `<tr class="border-b border-slate-700/30">
+        <td class="py-2 font-medium text-slate-200">${esc(a.email)}</td>
+        <td class="py-2 text-slate-400">${esc(a.added_by)}</td>
+        <td class="py-2 text-slate-400">${fmtDate(a.created_at)}</td>
+        <td class="py-2 text-right">${canRemove ? `<button class="text-red-400 hover:text-red-300 transition-colors" onclick="removeAdmin('${esc(a.email)}')">Remove</button>` : '<span class="text-slate-500 text-2xs">last admin</span>'}</td>
+      </tr>`;
+    }).join('');
+  } catch (e) {
+    document.getElementById('admins-loading').textContent = 'Failed to load admins.';
+  }
+}
+
+async function addAdmin() {
+  const email = document.getElementById('admin-email').value.trim().toLowerCase();
+  if (!email || !email.includes('@')) { showToast('Enter a valid email', 'error'); return; }
+
+  try {
+    const r = await fetch(`${API}/admins`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    document.getElementById('admin-email').value = '';
+    showToast(`${email} added as admin`);
+    loadAdmins();
+  } catch (e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
+async function removeAdmin(email) {
+  if (!confirm(`Remove ${email} as admin?`)) return;
+  try {
+    const r = await fetch(`${API}/admins/${encodeURIComponent(email)}`, { method: 'DELETE' });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    showToast(`${email} removed`);
+    loadAdmins();
+  } catch (e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
+// --- Init ---
+loadIdentity();
+</script>
+
+<script src="/static/command-palette.js"></script>
+</body>
+</html>

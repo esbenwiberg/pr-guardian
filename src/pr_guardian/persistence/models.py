@@ -275,3 +275,47 @@ class FindingDismissalRow(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+# ---------------------------------------------------------------------------
+# Admin & API key management
+# ---------------------------------------------------------------------------
+
+
+class AdminRow(Base):
+    """An admin user, identified by email."""
+
+    __tablename__ = "admins"
+
+    email: Mapped[str] = mapped_column(String(256), primary_key=True)
+    added_by: Mapped[str] = mapped_column(String(256), default="system")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ApiKeyRow(Base):
+    """An API key for machine-to-machine authentication."""
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    name: Mapped[str] = mapped_column(String(128))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    key_prefix: Mapped[str] = mapped_column(String(12))  # "prg_xxxx" for display
+    scopes: Mapped[list] = mapped_column(JSONB, default=lambda: ["read"])
+    created_by: Mapped[str] = mapped_column(String(256))
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

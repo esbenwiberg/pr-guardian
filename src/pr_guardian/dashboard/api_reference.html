@@ -41,9 +41,84 @@
       </p>
     </div>
 
+    <!-- Agent API -->
+    <div class="card p-6 border border-emerald-400/20">
+      <div class="flex items-center gap-2 mb-1">
+        <h3 class="text-[15px] font-semibold text-slate-50">Agent API</h3>
+        <span class="text-2xs font-mono px-1.5 py-0.5 rounded bg-emerald-400/10 text-emerald-400 border border-emerald-400/20">API Key</span>
+      </div>
+      <p class="text-xs text-slate-400 mb-4">Endpoints for external agents and CI bots. Authenticate with <code class="text-emerald-400">Authorization: Bearer prg_*</code>. Create keys in <a href="/admin" class="text-emerald-400 hover:underline">Admin</a>.</p>
+
+      <div class="space-y-5">
+        <div>
+          <p class="text-xs font-semibold text-slate-300 mb-2">Authentication</p>
+          <div class="cmd-block"><code class="cmd-code">curl -H "Authorization: Bearer prg_your_key_here" https://your-instance/api/agent/reviews</code></div>
+          <p class="text-2xs text-slate-500 mt-2">Scopes: <code class="text-emerald-400">read</code> (list/get reviews) | <code class="text-emerald-400">write</code> (dismiss, re-review, trigger review)</p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/agent/reviews</span></div>
+          <p class="text-xs text-slate-400 mb-1">List reviews. Scope: <code class="text-emerald-400 text-2xs">read</code></p>
+          <table class="param-table">
+            <tr><th>Param</th><th>Type</th><th>Description</th></tr>
+            <tr><td>repo</td><td>string</td><td>Filter by repository (e.g. owner/repo)</td></tr>
+            <tr><td>pr_id</td><td>string</td><td>Filter by PR number</td></tr>
+            <tr><td>limit</td><td>int</td><td>Max results (default 20)</td></tr>
+          </table>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/agent/reviews/{review_id}</span></div>
+          <p class="text-xs text-slate-400">Get a review with all findings. Scope: <code class="text-emerald-400 text-2xs">read</code></p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/agent/findings/{finding_id}/dismiss</span></div>
+          <p class="text-xs text-slate-400 mb-2">Dismiss a finding. Scope: <code class="text-emerald-400 text-2xs">write</code></p>
+          <div class="cmd-block"><code class="cmd-code">{"status": "false_positive", "comment": "Not applicable in this context"}</code></div>
+          <p class="text-2xs text-slate-500 mt-2">Status: <code class="text-emerald-400">by_design</code> | <code class="text-emerald-400">false_positive</code> | <code class="text-emerald-400">acknowledged</code> | <code class="text-emerald-400">will_fix</code></p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/agent/reviews/{review_id}/re-review</span></div>
+          <p class="text-xs text-slate-400">Re-evaluate existing findings against current code. Scope: <code class="text-emerald-400 text-2xs">write</code></p>
+        </div>
+
+        <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/agent/review</span></div>
+          <p class="text-xs text-slate-400 mb-2">Trigger a full review for a PR. Respects previously dismissed findings. Scope: <code class="text-emerald-400 text-2xs">write</code></p>
+          <div class="cmd-block"><code class="cmd-code">{"pr_url": "https://github.com/owner/repo/pull/123", "post_comment": true}</code></div>
+        </div>
+
+        <div>
+          <p class="text-xs font-semibold text-slate-300 mb-2">Example: Agent workflow</p>
+          <div class="cmd-block"><code class="cmd-code"># 1. Get latest review for a PR
+curl -H "Authorization: Bearer $KEY" \
+  "https://host/api/agent/reviews?repo=owner/repo&amp;pr_id=42&amp;limit=1"
+
+# 2. Read findings
+curl -H "Authorization: Bearer $KEY" \
+  "https://host/api/agent/reviews/REVIEW_ID"
+
+# 3. Dismiss a false positive
+curl -X POST -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"status":"false_positive","comment":"checked - not reachable"}' \
+  "https://host/api/agent/findings/FINDING_ID/dismiss"
+
+# 4. Request re-review
+curl -X POST -H "Authorization: Bearer $KEY" \
+  "https://host/api/agent/reviews/REVIEW_ID/re-review"</code></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Reviews -->
     <div class="card p-6">
-      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Reviews</h3>
+      <div class="flex items-center gap-2 mb-4">
+        <h3 class="text-[15px] font-semibold text-slate-50">Reviews</h3>
+        <span class="text-2xs font-mono px-1.5 py-0.5 rounded bg-blue-400/10 text-blue-400 border border-blue-400/20">Entra ID</span>
+      </div>
 
       <div class="space-y-5">
         <div>
@@ -95,7 +170,10 @@
 
     <!-- Finding Dismissals -->
     <div class="card p-6">
-      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Finding Dismissals</h3>
+      <div class="flex items-center gap-2 mb-4">
+        <h3 class="text-[15px] font-semibold text-slate-50">Finding Dismissals</h3>
+        <span class="text-2xs font-mono px-1.5 py-0.5 rounded bg-blue-400/10 text-blue-400 border border-blue-400/20">Entra ID</span>
+      </div>
 
       <div class="space-y-5">
         <div>
@@ -121,7 +199,10 @@
 
     <!-- Re-Review -->
     <div class="card p-6">
-      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Re-Review</h3>
+      <div class="flex items-center gap-2 mb-4">
+        <h3 class="text-[15px] font-semibold text-slate-50">Re-Review</h3>
+        <span class="text-2xs font-mono px-1.5 py-0.5 rounded bg-blue-400/10 text-blue-400 border border-blue-400/20">Entra ID</span>
+      </div>
 
       <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/dashboard/reviews/{review_id}/re-review</span></div>
       <p class="text-xs text-slate-400 mb-2">Focused re-evaluation of original findings. Fetches incremental diff, asks agents if findings are still valid. Does NOT run a full review or find new issues.</p>
@@ -160,7 +241,10 @@
 
     <!-- Prompts & Settings -->
     <div class="card p-6">
-      <h3 class="text-[15px] font-semibold text-slate-50 mb-4">Prompts &amp; Settings</h3>
+      <div class="flex items-center gap-2 mb-4">
+        <h3 class="text-[15px] font-semibold text-slate-50">Prompts &amp; Settings</h3>
+        <span class="text-2xs font-mono px-1.5 py-0.5 rounded bg-orange-400/10 text-orange-400 border border-orange-400/20">Admin</span>
+      </div>
 
       <div class="space-y-5">
         <div>

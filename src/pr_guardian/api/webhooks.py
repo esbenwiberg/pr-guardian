@@ -9,10 +9,24 @@ from fastapi import APIRouter, Header, HTTPException, Request
 
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.queue import ReviewQueue
+from pr_guardian.models.pr import PlatformPR
 from pr_guardian.platform.factory import create_adapter, normalize_webhook
 from pr_guardian.platform.models import WebhookPayload
 
 log = structlog.get_logger()
+
+
+async def _load_dismissals(pr: PlatformPR) -> list[dict] | None:
+    """Load active dismissals from DB for a PR, or None if DB unavailable."""
+    try:
+        from pr_guardian.persistence import storage
+        return await storage.get_active_dismissals(
+            pr.pr_id, pr.repo, pr.platform.value,
+        )
+    except Exception:
+        return None
+
+
 router = APIRouter(prefix="/api/webhooks", tags=["webhooks"])
 
 # Module-level queue (initialized in main.py lifespan)
@@ -60,7 +74,8 @@ async def github_webhook(
 
     adapter = create_adapter("github")
     base_url = str(request.base_url).rstrip("/")
-    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url))
+    dismissals = await _load_dismissals(pr)
+    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals))
 
     log.info("webhook_accepted", platform="github", pr_id=pr.pr_id)
     return {"status": "queued", "pr_id": pr.pr_id}
@@ -86,7 +101,8 @@ async def ado_webhook(request: Request):
 
     adapter = create_adapter("ado")
     base_url = str(request.base_url).rstrip("/")
-    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url))
+    dismissals = await _load_dismissals(pr)
+    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals))
 
     log.info("webhook_accepted", platform="ado", pr_id=pr.pr_id)
     return {"status": "queued", "pr_id": pr.pr_id}

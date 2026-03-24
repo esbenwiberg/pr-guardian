@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import hashlib
+import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import structlog
@@ -15,7 +16,9 @@ from pr_guardian.models.output import ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.persistence.database import async_session
 from pr_guardian.persistence.models import (
+    AdminRow,
     AgentResultRow,
+    ApiKeyRow,
     FindingDismissalRow,
     FindingRow,
     GlobalConfigRow,
@@ -861,4 +864,168 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
             }
             for a in row.agent_results
         ],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Admin management
+# ---------------------------------------------------------------------------
+
+
+async def is_admin(email: str) -> bool:
+    """Check whether an email is in the admin list."""
+    async with async_session() as session:
+        row = await session.get(AdminRow, email.lower())
+        return row is not None
+
+
+async def list_admins() -> list[dict[str, Any]]:
+    """Return all admin records."""
+    async with async_session() as session:
+        rows = (await session.scalars(
+            select(AdminRow).order_by(AdminRow.created_at)
+        )).all()
+        return [
+            {"email": r.email, "added_by": r.added_by, "created_at": r.created_at.isoformat()}
+            for r in rows
+        ]
+
+
+async def add_admin(email: str, added_by: str = "system") -> bool:
+    """Add an admin. Returns False if already exists."""
+    email = email.lower().strip()
+    async with async_session() as session:
+        existing = await session.get(AdminRow, email)
+        if existing:
+            return False
+        session.add(AdminRow(email=email, added_by=added_by))
+        await session.commit()
+        return True
+
+
+async def remove_admin(email: str) -> bool:
+    """Remove an admin. Returns False if not found."""
+    email = email.lower().strip()
+    async with async_session() as session:
+        row = await session.get(AdminRow, email)
+        if not row:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+async def admin_count() -> int:
+    """Return total number of admins."""
+    async with async_session() as session:
+        return await session.scalar(select(func.count()).select_from(AdminRow)) or 0
+
+
+# ---------------------------------------------------------------------------
+# API key management
+# ---------------------------------------------------------------------------
+
+
+def _hash_key(raw_key: str) -> str:
+    """SHA-256 hash of a raw API key."""
+    return hashlib.sha256(raw_key.encode()).hexdigest()
+
+
+async def create_api_key(
+    name: str,
+    scopes: list[str],
+    created_by: str,
+    expires_in_days: int | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Generate an API key, store the hash, return (full_key, metadata).
+
+    The full key is only returned once — it is never stored.
+    """
+    raw_key = "prg_" + secrets.token_hex(16)
+    key_hash = _hash_key(raw_key)
+    key_prefix = raw_key[:8]
+    expires_at = (
+        datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+        if expires_in_days
+        else None
+    )
+
+    row = ApiKeyRow(
+        name=name,
+        key_hash=key_hash,
+        key_prefix=key_prefix,
+        scopes=scopes,
+        created_by=created_by,
+        expires_at=expires_at,
+    )
+    async with async_session() as session:
+        session.add(row)
+        await session.commit()
+        return raw_key, _api_key_to_dict(row)
+
+
+async def validate_api_key(raw_key: str) -> dict[str, Any] | None:
+    """Validate a raw API key. Returns key metadata or None if invalid.
+
+    Updates last_used_at on success.
+    """
+    key_hash = _hash_key(raw_key)
+    now = datetime.now(timezone.utc)
+    async with async_session() as session:
+        row = await session.scalar(
+            select(ApiKeyRow).where(ApiKeyRow.key_hash == key_hash)
+        )
+        if not row:
+            return None
+        if row.revoked_at is not None:
+            return None
+        if row.expires_at is not None and row.expires_at < now:
+            return None
+        row.last_used_at = now
+        await session.commit()
+        return _api_key_to_dict(row)
+
+
+async def list_api_keys() -> list[dict[str, Any]]:
+    """List all API keys (hash never exposed)."""
+    async with async_session() as session:
+        rows = (await session.scalars(
+            select(ApiKeyRow).order_by(ApiKeyRow.created_at.desc())
+        )).all()
+        return [_api_key_to_dict(r) for r in rows]
+
+
+async def revoke_api_key(key_id: uuid.UUID) -> bool:
+    """Revoke an API key. Returns False if not found."""
+    async with async_session() as session:
+        row = await session.get(ApiKeyRow, key_id)
+        if not row:
+            return False
+        row.revoked_at = datetime.now(timezone.utc)
+        await session.commit()
+        return True
+
+
+async def delete_api_key(key_id: uuid.UUID) -> bool:
+    """Permanently delete an API key. Returns False if not found."""
+    async with async_session() as session:
+        row = await session.get(ApiKeyRow, key_id)
+        if not row:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+def _api_key_to_dict(row: ApiKeyRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "key_prefix": row.key_prefix,
+        "scopes": row.scopes,
+        "created_by": row.created_by,
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
+        "revoked_at": row.revoked_at.isoformat() if row.revoked_at else None,
+        "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
+        "created_at": row.created_at.isoformat(),
     }
