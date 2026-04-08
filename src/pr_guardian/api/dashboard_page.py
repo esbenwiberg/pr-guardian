@@ -17,6 +17,7 @@ _PROMPTS_HTML = _DASHBOARD_DIR / "prompts.html"
 _SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"
 _ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
+_HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 
@@ -31,6 +32,12 @@ async def dashboard():
 async def reviews_page():
     """Serve the reviews list page."""
     return _REVIEWS_HTML.read_text()
+
+
+@router.get("/reviews/{review_id}/human-review", response_class=HTMLResponse)
+async def human_review_page(review_id: str):
+    """Serve the human review (Chapters) page."""
+    return _HUMAN_REVIEW_HTML.read_text()
 
 
 @router.get("/reviews/{review_id}", response_class=HTMLResponse)

@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — Human Review</title>
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+/* ── Diff rendering ───────────────────────────────────── */
+.diff-block { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 12px; line-height: 1.5; overflow-x: auto; border-radius: 0.5rem; border: 1px solid rgba(51,65,85,0.5); }
+.diff-row { display: flex; white-space: pre; }
+.diff-row:hover { background: rgba(255,255,255,0.03); }
+.diff-ln { display: inline-block; min-width: 3rem; text-align: right; padding: 0 0.6rem; user-select: none; color: rgba(148,163,184,0.35); border-right: 1px solid rgba(51,65,85,0.4); margin-right: 0.5rem; flex-shrink: 0; }
+.diff-hunk { background: rgba(30,41,59,0.7); color: #94a3b8; padding: 2px 0.75rem; font-style: italic; border-top: 1px solid rgba(51,65,85,0.5); border-bottom: 1px solid rgba(51,65,85,0.5); }
+.diff-add { background: rgba(16,185,129,0.08); color: #6ee7b7; }
+.diff-add .diff-ln { background: rgba(16,185,129,0.06); color: rgba(110,231,183,0.4); }
+.diff-del { background: rgba(239,68,68,0.08); color: #fca5a5; }
+.diff-del .diff-ln { background: rgba(239,68,68,0.06); color: rgba(252,165,165,0.4); }
+.diff-ctx { color: #94a3b8; }
+.diff-content { padding: 0 0.5rem; flex: 1; }
+
+/* ── Finding callout (inline) ─────────────────────────── */
+.finding-callout { margin: 4px 8px 8px; border-radius: 6px; border: 1px solid; padding: 8px 12px; font-family: inherit; font-size: 12px; }
+.finding-callout.sev-critical { border-color: rgba(248,113,113,0.4); background: rgba(239,68,68,0.07); }
+.finding-callout.sev-high     { border-color: rgba(251,146,60,0.4);  background: rgba(249,115,22,0.07); }
+.finding-callout.sev-medium   { border-color: rgba(250,204,21,0.3);  background: rgba(234,179,8,0.06); }
+.finding-callout.sev-low      { border-color: rgba(96,165,250,0.3);  background: rgba(59,130,246,0.06); }
+.finding-callout-label { font-weight: 700; margin-right: 6px; }
+.fc-critical { color: #f87171; }
+.fc-high     { color: #fb923c; }
+.fc-medium   { color: #facc15; }
+.fc-low      { color: #60a5fa; }
+.cert-tag { display: inline-block; font-size: 10px; padding: 1px 5px; border-radius: 3px; background: rgba(148,163,184,0.1); color: #94a3b8; margin-left: 4px; vertical-align: middle; }
+.conv-label { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px; margin-right: 4px; }
+.conv-issue      { background: rgba(239,68,68,0.15);  color: #fca5a5; }
+.conv-suggestion { background: rgba(249,115,22,0.15); color: #fdba74; }
+.conv-question   { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+.conv-nit        { background: rgba(100,116,139,0.15);color: #94a3b8; }
+
+/* ── Chapter cards ────────────────────────────────────── */
+.chapter-card { border-radius: 10px; border: 1px solid rgba(51,65,85,0.6); background: rgba(15,23,42,0.6); margin-bottom: 1.25rem; overflow: hidden; }
+.chapter-card.active { border-color: rgba(99,102,241,0.5); box-shadow: 0 0 0 1px rgba(99,102,241,0.2); }
+.chapter-card.done { border-color: rgba(16,185,129,0.3); opacity: 0.7; }
+.chapter-header { display: flex; align-items: center; gap: 10px; padding: 14px 18px; cursor: pointer; user-select: none; }
+.chapter-header:hover { background: rgba(255,255,255,0.03); }
+.chapter-num { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; background: rgba(99,102,241,0.15); color: #a5b4fc; }
+.chapter-num.done { background: rgba(16,185,129,0.15); color: #34d399; }
+.chapter-body { border-top: 1px solid rgba(51,65,85,0.5); }
+
+/* ── Progress bar ─────────────────────────────────────── */
+.progress-rail { height: 4px; background: rgba(51,65,85,0.6); border-radius: 9999px; overflow: hidden; }
+.progress-fill { height: 100%; background: linear-gradient(90deg,#6366f1,#8b5cf6); border-radius: 9999px; transition: width 0.4s ease; }
+
+/* ── Role badges ──────────────────────────────────────── */
+.role-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; }
+.role-PRODUCTION { background: rgba(99,102,241,0.15); color: #a5b4fc; }
+.role-TEST        { background: rgba(34,197,94,0.12);  color: #86efac; }
+.role-INFRA       { background: rgba(234,179,8,0.12);  color: #fde047; }
+.role-CONFIG      { background: rgba(234,179,8,0.10);  color: #fde047; }
+.role-DOCS        { background: rgba(148,163,184,0.12);color: #94a3b8; }
+.role-BUILD       { background: rgba(148,163,184,0.10);color: #94a3b8; }
+.role-DEPENDENCY  { background: rgba(148,163,184,0.10);color: #94a3b8; }
+.role-GENERATED   { background: rgba(100,116,139,0.10);color: #64748b; }
+
+/* ── Misc ─────────────────────────────────────────────── */
+.file-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid rgba(51,65,85,0.3); font-size: 12px; }
+.file-row:last-child { border-bottom: none; }
+.finding-count-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dismissed-drawer { border-top: 1px dashed rgba(51,65,85,0.6); background: rgba(15,23,42,0.4); }
+</style>
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<aside id="sidebar"></aside>
+<script src="/static/sidebar.js"></script>
+
+<div class="ml-16 lg:ml-64">
+
+<!-- Header -->
+<header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+  <div class="flex items-center gap-2 text-sm">
+    <a href="/reviews" class="text-slate-400 hover:text-slate-50 transition-colors">Reviews</a>
+    <span class="text-slate-600">/</span>
+    <a id="hdr-review-link" href="#" class="text-slate-400 hover:text-slate-50 transition-colors">Findings</a>
+    <span class="text-slate-600">/</span>
+    <span class="font-semibold text-slate-50">Human Review</span>
+  </div>
+  <div class="flex items-center gap-3">
+    <!-- Progress shown in chapters phase -->
+    <div id="hdr-progress" style="display:none" class="flex items-center gap-3">
+      <span class="text-xs text-slate-400" id="hdr-progress-text"></span>
+      <div class="progress-rail w-32"><div class="progress-fill" id="hdr-progress-bar" style="width:0%"></div></div>
+    </div>
+    <a id="hdr-pr-link" href="#" target="_blank" class="btn btn-sm btn-secondary" style="display:none">View PR</a>
+  </div>
+</header>
+
+<!-- Loading / error states -->
+<div id="loading" class="text-center py-20 text-slate-400 text-sm">Loading review data...</div>
+<div id="error"   class="text-center py-20 text-orange-400" style="display:none"></div>
+
+<!-- ════════════════════════════════════════════════════════
+     PHASE 1: ORIENT
+     Shows: AI summary, file overview, effort estimate.
+     ════════════════════════════════════════════════════════ -->
+<div id="phase-orient" style="display:none" class="max-w-4xl mx-auto px-6 py-8">
+
+  <!-- PR header card -->
+  <div class="card mb-6">
+    <div class="card-body flex items-start gap-4">
+      <span class="text-4xl" id="orient-emoji"></span>
+      <div class="flex-1 min-w-0">
+        <div class="text-lg font-bold truncate" id="orient-title"></div>
+        <div class="text-sm text-slate-400 mt-1" id="orient-meta"></div>
+      </div>
+      <div class="flex flex-col items-end gap-2">
+        <div id="orient-effort" class="text-right"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI summary -->
+  <div id="orient-summary-wrap" style="display:none" class="mb-6">
+    <h3 class="text-sm font-semibold text-slate-300 mb-2">AI Summary</h3>
+    <div class="card card-compact">
+      <div class="card-body text-sm leading-relaxed text-slate-300" id="orient-summary"></div>
+    </div>
+  </div>
+
+  <!-- Severity overview -->
+  <div class="grid grid-cols-4 gap-3 mb-6" id="orient-sev-grid">
+    <div class="stat-card border-red-400/20"><div class="stat-card-label">Critical</div><div class="stat-card-value text-red-400" id="oc-critical">0</div></div>
+    <div class="stat-card border-orange-400/20"><div class="stat-card-label">High</div><div class="stat-card-value text-orange-400" id="oc-high">0</div></div>
+    <div class="stat-card border-yellow-400/20"><div class="stat-card-label">Medium</div><div class="stat-card-value text-yellow-400" id="oc-medium">0</div></div>
+    <div class="stat-card border-blue-400/20"><div class="stat-card-label">Low</div><div class="stat-card-value text-blue-400" id="oc-low">0</div></div>
+  </div>
+
+  <!-- File overview table -->
+  <div class="mb-6">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold text-slate-300">Files Changed</h3>
+      <span class="text-xs text-slate-500" id="orient-file-count"></span>
+    </div>
+    <div class="card overflow-hidden p-0">
+      <div class="file-row bg-slate-800/60 text-xs text-slate-500 font-semibold">
+        <span class="flex-1">File</span>
+        <span class="w-16 text-right">+/−</span>
+        <span class="w-14 text-right">Findings</span>
+        <span class="w-16 text-right">Role</span>
+      </div>
+      <div id="orient-file-list" class="max-h-80 overflow-y-auto"></div>
+    </div>
+  </div>
+
+  <!-- Chapter preview -->
+  <div class="mb-8">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="text-sm font-semibold text-slate-300">Review Plan</h3>
+      <span class="text-xs text-slate-500" id="orient-chapter-count"></span>
+    </div>
+    <div id="orient-chapter-list" class="space-y-2"></div>
+  </div>
+
+  <!-- CTA -->
+  <div class="flex items-center justify-between">
+    <a id="orient-back-link" href="#" class="btn btn-sm btn-ghost text-slate-400">← Back to Findings</a>
+    <button onclick="startChapters()" class="btn btn-primary px-8 py-2.5 text-base">Start Review →</button>
+  </div>
+
+</div><!-- /#phase-orient -->
+
+
+<!-- ════════════════════════════════════════════════════════
+     PHASE 2: CHAPTERS
+     ════════════════════════════════════════════════════════ -->
+<div id="phase-chapters" style="display:none" class="max-w-5xl mx-auto px-6 py-6">
+
+  <div id="chapters-container"></div>
+
+  <!-- Done state -->
+  <div id="review-done" style="display:none" class="text-center py-16">
+    <div class="text-5xl mb-4">✅</div>
+    <div class="text-xl font-bold mb-2">Review Complete</div>
+    <div class="text-sm text-slate-400 mb-6" id="done-summary"></div>
+    <a id="done-back-link" href="#" class="btn btn-primary">Back to Findings</a>
+  </div>
+
+</div><!-- /#phase-chapters -->
+
+</div><!-- /.ml-16 -->
+
+<!-- Dismiss modal (reused from review_detail) -->
+<div id="dismiss-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeDismiss()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-md">
+      <div class="dialog-header">
+        <h2 class="text-base font-semibold">Dismiss Finding</h2>
+        <button class="btn btn-ghost btn-sm" onclick="closeDismiss()">&times;</button>
+      </div>
+      <div class="dialog-body space-y-4">
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Status</label>
+          <select id="dismiss-status" class="form-select w-full text-sm bg-slate-800 border border-slate-600 rounded px-3 py-2 text-slate-200">
+            <option value="false_positive">False positive</option>
+            <option value="by_design">By design</option>
+            <option value="acknowledged">Acknowledged</option>
+            <option value="will_fix">Will fix</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-slate-400 mb-1">Comment (optional)</label>
+          <textarea id="dismiss-comment" class="form-textarea w-full text-sm bg-slate-800 border border-slate-600 rounded px-3 py-2 text-slate-200 min-h-[80px]" placeholder="e.g. 'Uses parameterised queries, safe from injection'"></textarea>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary" onclick="closeDismiss()">Cancel</button>
+        <button class="btn btn-primary" id="dismiss-submit-btn" onclick="submitDismiss()">Dismiss Finding</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast-container" class="toast-container"></div>
+
+<script>
+// ── Constants ──────────────────────────────────────────────────────────
+const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
+const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+const ROLE_ORDER = { PRODUCTION: 0, CONFIG: 1, BUILD: 2, INFRA: 3, TEST: 4, DOCS: 5, DEPENDENCY: 6, GENERATED: 7 };
+
+// ── State ──────────────────────────────────────────────────────────────
+let reviewData  = null;
+let diffData    = null;
+let chapters    = [];
+let chapterDone = [];
+let pendingDismissId = null;
+
+// ── Bootstrap ──────────────────────────────────────────────────────────
+async function init() {
+  if (!REVIEW_ID) { showError('No review ID in URL.'); return; }
+
+  let [reviewResp, diffResp] = await Promise.allSettled([
+    fetch(`/api/dashboard/reviews/${REVIEW_ID}`),
+    fetch(`/api/dashboard/reviews/${REVIEW_ID}/diff`),
+  ]);
+
+  if (reviewResp.status === 'rejected') { showError('Failed to load review: ' + reviewResp.reason); return; }
+  const reviewJson = await reviewResp.value.json();
+  if (reviewJson.error) { showError(reviewJson.error); return; }
+  reviewData = reviewJson;
+
+  if (diffResp.status === 'fulfilled' && diffResp.value.ok) {
+    diffData = await diffResp.value.json();
+  }
+
+  buildOrientScreen();
+}
+
+// ── File-role detection (mirrors discovery/file_roles.py) ──────────────
+function detectRole(path) {
+  const p = path;
+  const pl = p.toLowerCase();
+  if (/\/(tests?|spec|__tests?|__specs?)\//i.test(p) ||
+      /\.(test|spec)\.[a-z]+$/i.test(p) ||
+      /_(test|spec)\.[a-z]+$/i.test(p)) return 'TEST';
+  if (/dockerfile/i.test(pl) || /docker-compose/i.test(pl) ||
+      /\.github\//i.test(pl) || /\/(ci|circleci|github)\//i.test(pl) ||
+      /jenkinsfile/i.test(pl) || /\.travis\.yml/i.test(pl)) return 'INFRA';
+  if (/\/(docs?|documentation|wiki)\//i.test(pl) ||
+      /^readme/i.test(pl.split('/').pop()) ||
+      /\.(md|rst|txt)$/i.test(pl)) return 'DOCS';
+  if (/(package-lock\.json|yarn\.lock|poetry\.lock|cargo\.lock|composer\.lock|gemfile\.lock)/i.test(pl)) return 'GENERATED';
+  if (/(requirements.*\.txt|package\.json|pyproject\.toml|go\.mod|cargo\.toml|pom\.xml|gemfile|composer\.json)$/i.test(pl)) return 'DEPENDENCY';
+  if (/(makefile|build\.gradle|cmakefile|setup\.py|setup\.cfg|\.bazel|buck|\.mk)$/i.test(pl)) return 'BUILD';
+  if (/\.(env|config|cfg|ini|yaml|yml|toml|json|conf)$/i.test(pl) &&
+      !/package\.json$|pyproject\.toml$/i.test(pl)) return 'CONFIG';
+  return 'PRODUCTION';
+}
+
+// ── Build flat list of findings per file ───────────────────────────────
+function buildFindingsByFile() {
+  const map = {}; // path -> [finding, ...]
+  for (const agent of (reviewData.agent_results || [])) {
+    for (const f of (agent.findings || [])) {
+      if (!f.file) continue;
+      if (!map[f.file]) map[f.file] = [];
+      map[f.file].push({ ...f, agent_name: agent.agent_name });
+    }
+  }
+  return map;
+}
+
+// ── Severity helpers ───────────────────────────────────────────────────
+function maxSeverity(findings) {
+  if (!findings || !findings.length) return null;
+  return findings.reduce((best, f) => {
+    const s = f.severity || 'low';
+    return (SEV_ORDER[s] ?? 9) < (SEV_ORDER[best] ?? 9) ? s : best;
+  }, 'low');
+}
+
+// ── Chapter computation ────────────────────────────────────────────────
+function computeChapters(files, findingsByFile) {
+  // 1. Annotate files
+  const annotated = files.map(f => ({
+    ...f,
+    role: detectRole(f.path),
+    locs: (f.additions || 0) + (f.deletions || 0),
+    findings: findingsByFile[f.path] || [],
+  }));
+
+  // 2. Group by top-2 path prefix
+  const groups = {};
+  for (const f of annotated) {
+    const parts = f.path.split('/');
+    const prefix = parts.length > 2 ? parts.slice(0, 2).join('/') : parts[0] || 'root';
+    if (!groups[prefix]) groups[prefix] = [];
+    groups[prefix].push(f);
+  }
+
+  // 3. Convert to chapter list
+  let chaps = Object.entries(groups).map(([prefix, files]) => ({
+    prefix,
+    files,
+    locs: files.reduce((s, f) => s + f.locs, 0),
+    findings: files.flatMap(f => f.findings),
+    maxSev: maxSeverity(files.flatMap(f => f.findings)) || 'none',
+    hasProduction: files.some(f => f.role === 'PRODUCTION'),
+  }));
+
+  // 4. Merge tiny chapters (< 80 LOC) into previous
+  const merged = [];
+  for (const c of chaps) {
+    const prev = merged[merged.length - 1];
+    if (c.locs < 80 && prev && prev.locs + c.locs < 600) {
+      prev.files.push(...c.files);
+      prev.findings.push(...c.findings);
+      prev.locs += c.locs;
+      if ((SEV_ORDER[c.maxSev] ?? 9) < (SEV_ORDER[prev.maxSev] ?? 9)) prev.maxSev = c.maxSev;
+      if (c.hasProduction) prev.hasProduction = true;
+      prev.prefix += '+' + c.prefix;
+    } else {
+      merged.push({ ...c });
+    }
+  }
+  chaps = merged;
+
+  // 5. Split large chapters (> 500 LOC) — simple halving
+  const final = [];
+  for (const c of chaps) {
+    if (c.locs > 500 && c.files.length > 1) {
+      const mid = Math.ceil(c.files.length / 2);
+      const a = c.files.slice(0, mid);
+      const b = c.files.slice(mid);
+      const makeC = (files, suffix) => ({
+        prefix: c.prefix + suffix,
+        files,
+        locs: files.reduce((s, f) => s + f.locs, 0),
+        findings: files.flatMap(f => f.findings),
+        maxSev: maxSeverity(files.flatMap(f => f.findings)) || 'none',
+        hasProduction: files.some(f => f.role === 'PRODUCTION'),
+      });
+      final.push(makeC(a, ' (1/2)'), makeC(b, ' (2/2)'));
+    } else {
+      final.push(c);
+    }
+  }
+
+  // 6. Sort: production+critical first, then by severity, then by prefix
+  final.sort((a, b) => {
+    const sp = (Number(!a.hasProduction) - Number(!b.hasProduction));
+    if (sp !== 0) return sp;
+    const ss = (SEV_ORDER[a.maxSev] ?? 9) - (SEV_ORDER[b.maxSev] ?? 9);
+    if (ss !== 0) return ss;
+    return a.prefix.localeCompare(b.prefix);
+  });
+
+  return final;
+}
+
+// ── Severity badge helpers ─────────────────────────────────────────────
+function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+function sevColor(s) {
+  return { critical:'text-red-400', high:'text-orange-400', medium:'text-yellow-400', low:'text-blue-400' }[s] || 'text-slate-400';
+}
+function sevDot(s) {
+  return { critical:'bg-red-400', high:'bg-orange-400', medium:'bg-yellow-400', low:'bg-blue-400', none:'bg-slate-700' }[s] || 'bg-slate-600';
+}
+function convLabel(f) {
+  if (!f.certainty && !f.severity) return '';
+  if ((SEV_ORDER[f.severity] ?? 9) <= 1) return '<span class="conv-label conv-issue">[issue]</span>';
+  if (f.certainty === 'detected') return '<span class="conv-label conv-suggestion">[suggestion]</span>';
+  if (f.certainty === 'uncertain') return '<span class="conv-label conv-question">[question]</span>';
+  if ((SEV_ORDER[f.severity] ?? 9) >= 3) return '<span class="conv-label conv-nit">[nit]</span>';
+  return '<span class="conv-label conv-suggestion">[suggestion]</span>';
+}
+
+// ── Phase 1: Orient screen ─────────────────────────────────────────────
+function buildOrientScreen() {
+  const d = reviewData;
+  const files = (diffData?.files) || [];
+  const findingsByFile = buildFindingsByFile();
+
+  // Tally severities
+  const sevCounts = { critical:0, high:0, medium:0, low:0 };
+  let dismissed = 0;
+  for (const agent of (d.agent_results || [])) {
+    for (const f of (agent.findings || [])) {
+      if (f.dismissal) { dismissed++; continue; }
+      sevCounts[f.severity] = (sevCounts[f.severity] || 0) + 1;
+    }
+  }
+  document.getElementById('oc-critical').textContent = sevCounts.critical;
+  document.getElementById('oc-high').textContent     = sevCounts.high;
+  document.getElementById('oc-medium').textContent   = sevCounts.medium;
+  document.getElementById('oc-low').textContent      = sevCounts.low;
+
+  // PR header
+  const emoji = { auto_approve:'✅', human_review:'👀', reject:'❌', hard_block:'🚫' }[d.decision] || '🔍';
+  document.getElementById('orient-emoji').textContent = emoji;
+  document.getElementById('orient-title').textContent = `${d.repo} #${d.pr_id}${d.title ? ' — ' + d.title : ''}`;
+  document.getElementById('orient-meta').textContent = `by ${d.author || 'unknown'} · ${d.commits || 0} commits · ${files.length || '?'} files`;
+
+  // Effort estimate
+  const totalLoc = files.reduce((s, f) => s + (f.additions||0) + (f.deletions||0), 0);
+  const estMins = Math.max(5, Math.round(totalLoc / 40));
+  const effortEl = document.getElementById('orient-effort');
+  effortEl.innerHTML = `<div class="text-2xl font-bold ${estMins > 60 ? 'text-orange-400' : 'text-slate-200'}">${estMins}m</div>
+    <div class="text-xs text-slate-500">${totalLoc.toLocaleString()} LOC changed</div>`;
+
+  // Dismissed count note
+  if (dismissed > 0) {
+    effortEl.innerHTML += `<div class="text-xs text-slate-500 mt-1">${dismissed} finding${dismissed!==1?'s':''} already dismissed</div>`;
+  }
+
+  // PR link
+  if (d.pr_url) {
+    document.getElementById('hdr-pr-link').href = d.pr_url;
+    document.getElementById('hdr-pr-link').style.display = '';
+  }
+  document.getElementById('hdr-review-link').href = `/reviews/${REVIEW_ID}`;
+  document.getElementById('orient-back-link').href = `/reviews/${REVIEW_ID}`;
+  document.getElementById('done-back-link').href   = `/reviews/${REVIEW_ID}`;
+
+  // AI summary
+  const summaries = (d.agent_results || []).map(a => a.summary).filter(Boolean);
+  if (summaries.length) {
+    document.getElementById('orient-summary').textContent = summaries[0];
+    document.getElementById('orient-summary-wrap').style.display = '';
+  }
+
+  // Compute chapters
+  chapters = computeChapters(files, findingsByFile);
+  chapterDone = new Array(chapters.length).fill(false);
+
+  // File list
+  const fileListEl = document.getElementById('orient-file-list');
+  const annotatedFiles = files.map(f => ({ ...f, role: detectRole(f.path), findings: findingsByFile[f.path] || [] }));
+  // Sort by role order then path
+  annotatedFiles.sort((a, b) => (ROLE_ORDER[a.role]??9) - (ROLE_ORDER[b.role]??9) || a.path.localeCompare(b.path));
+  document.getElementById('orient-file-count').textContent = `${files.length} files`;
+
+  fileListEl.innerHTML = annotatedFiles.map(f => {
+    const active = f.findings.filter(x => !x.dismissal);
+    const dot = active.length > 0
+      ? `<span class="finding-count-dot ${sevDot(maxSeverity(active))}"></span>`
+      : '<span class="finding-count-dot bg-transparent"></span>';
+    const added = f.additions > 0 ? `<span class="text-emerald-400">+${f.additions}</span>` : '';
+    const deled = f.deletions > 0 ? `<span class="text-red-400">-${f.deletions}</span>` : '';
+    return `<div class="file-row">
+      ${dot}
+      <span class="font-mono text-slate-300 flex-1 truncate" title="${esc(f.path)}">${esc(f.path)}</span>
+      <span class="w-16 text-right text-xs">${added}${added&&deled?' ':''}${deled}</span>
+      <span class="w-14 text-right text-xs ${active.length ? sevColor(maxSeverity(active)) : 'text-slate-600'}">${active.length || ''}</span>
+      <span class="w-16 text-right"><span class="role-badge role-${f.role}">${f.role}</span></span>
+    </div>`;
+  }).join('');
+
+  // Chapter preview list
+  const chapListEl = document.getElementById('orient-chapter-list');
+  document.getElementById('orient-chapter-count').textContent = `${chapters.length} chapters`;
+  chapListEl.innerHTML = chapters.map((c, i) => {
+    const fCount = c.findings.filter(f => !f.dismissal).length;
+    const locStr = c.locs > 0 ? `${c.locs} LOC` : '';
+    const sevClass = sevColor(c.maxSev);
+    const dots = c.files.map(f => `<span class="role-badge role-${f.role}">${f.path.split('/').pop()}</span>`).slice(0, 5).join(' ');
+    return `<div class="flex items-center gap-3 px-4 py-2.5 rounded-lg bg-slate-800/40 border border-slate-700/40">
+      <span class="w-6 h-6 rounded-full bg-slate-700/60 text-slate-400 flex items-center justify-center text-xs font-bold flex-shrink-0">${i+1}</span>
+      <span class="font-mono text-slate-300 text-sm flex-1 truncate">${esc(c.prefix)}</span>
+      <span class="text-xs text-slate-500">${c.files.length} file${c.files.length!==1?'s':''}</span>
+      ${locStr ? `<span class="text-xs text-slate-500">${locStr}</span>` : ''}
+      ${fCount > 0 ? `<span class="text-xs font-semibold ${sevClass}">${fCount} finding${fCount!==1?'s':''}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('phase-orient').style.display = '';
+}
+
+// ── Phase 2: Start chapters ────────────────────────────────────────────
+function startChapters() {
+  document.getElementById('phase-orient').style.display = 'none';
+  document.getElementById('phase-chapters').style.display = '';
+  document.getElementById('hdr-progress').style.display = '';
+
+  renderAllChapters();
+  updateProgress();
+
+  // Scroll to top and expand first chapter
+  window.scrollTo(0, 0);
+  const first = document.getElementById(`ch-body-0`);
+  if (first) first.style.display = '';
+}
+
+function updateProgress() {
+  const done = chapterDone.filter(Boolean).length;
+  const total = chapters.length;
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  document.getElementById('hdr-progress-text').textContent = `${done} / ${total} chapters`;
+  document.getElementById('hdr-progress-bar').style.width = pct + '%';
+  if (done === total && total > 0) showDoneScreen();
+}
+
+function showDoneScreen() {
+  document.getElementById('chapters-container').style.display = 'none';
+  const total = chapters.reduce((s, c) => s + c.findings.filter(f => !f.dismissal).length, 0);
+  document.getElementById('done-summary').textContent = `You reviewed ${chapters.length} chapters and triaged ${total} findings.`;
+  document.getElementById('review-done').style.display = '';
+}
+
+// ── Render all chapter cards (collapsed initially) ─────────────────────
+function renderAllChapters() {
+  const container = document.getElementById('chapters-container');
+  container.innerHTML = chapters.map((c, i) => renderChapterCard(c, i)).join('');
+}
+
+function chapterTitle(c) {
+  const parts = c.prefix.split('+');
+  return parts.map(p => p.trim()).join(', ');
+}
+
+function renderChapterCard(c, i) {
+  const fCount = c.findings.filter(f => !f.dismissal).length;
+  const dismissedCount = c.findings.filter(f => f.dismissal).length;
+  const sevClass = sevColor(c.maxSev);
+  const isTestInfra = c.files.every(f => ['TEST','INFRA','DOCS','BUILD','GENERATED','DEPENDENCY'].includes(f.role));
+
+  const roleList = [...new Set(c.files.map(f => f.role))];
+
+  return `<div class="chapter-card" id="ch-card-${i}">
+    <div class="chapter-header" onclick="toggleChapter(${i})">
+      <div class="chapter-num" id="ch-num-${i}">${i+1}</div>
+      <div class="flex-1 min-w-0">
+        <div class="font-semibold text-sm text-slate-200 truncate">${esc(chapterTitle(c))}</div>
+        <div class="flex items-center gap-2 mt-0.5 flex-wrap">
+          ${roleList.map(r => `<span class="role-badge role-${r}">${r}</span>`).join('')}
+          <span class="text-xs text-slate-500">${c.files.length} file${c.files.length!==1?'s':''} · ${c.locs} LOC</span>
+        </div>
+      </div>
+      ${fCount > 0 ? `<span class="text-xs font-semibold ${sevClass} flex-shrink-0">${fCount} finding${fCount!==1?'s':''}</span>` : ''}
+      <span class="text-slate-500 text-xs" id="ch-toggle-${i}">▶</span>
+    </div>
+    <div class="chapter-body" id="ch-body-${i}" style="display:none">
+      ${isTestInfra ? `<div class="flex items-center justify-between px-5 py-3 bg-slate-800/40 border-b border-slate-700/30">
+        <span class="text-xs text-slate-400">Non-production chapter — quick-scan only needed</span>
+        <button class="btn btn-sm btn-secondary" onclick="acknowledgeChapter(${i})">Acknowledge & Continue →</button>
+      </div>` : ''}
+      <div id="ch-files-${i}">${renderChapterFiles(c, i)}</div>
+      ${dismissedCount > 0 ? `<div class="dismissed-drawer">
+        <div class="flex items-center gap-2 px-5 py-2.5 cursor-pointer text-xs text-slate-500 hover:text-slate-400" onclick="toggleDismissed(${i})">
+          <span id="dism-toggle-${i}">▶</span> ${dismissedCount} dismissed finding${dismissedCount!==1?'s':''} (hidden)
+        </div>
+        <div id="dism-list-${i}" style="display:none" class="px-4 pb-3">
+          ${c.findings.filter(f=>f.dismissal).map(f=>renderFindingCallout(f, true)).join('')}
+        </div>
+      </div>` : ''}
+      <div class="flex items-center justify-between px-5 py-4 border-t border-slate-700/30 bg-slate-900/40">
+        ${i > 0 ? `<button class="btn btn-sm btn-ghost text-slate-400" onclick="goToChapter(${i-1})">← Previous</button>` : '<span></span>'}
+        <button class="btn btn-sm btn-primary" onclick="markChapterDone(${i})"
+          id="ch-done-btn-${i}">Chapter Done →</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderChapterFiles(c, chapIdx) {
+  return c.files.map(f => {
+    const fileFindings = f.findings.filter(x => !x.dismissal);
+    const patch = (diffData?.files || []).find(d => d.path === f.path)?.patch || '';
+
+    return `<div class="border-b border-slate-700/30 last:border-b-0">
+      <div class="flex items-center gap-3 px-5 py-3 bg-slate-800/20">
+        <span class="role-badge role-${f.role}">${f.role}</span>
+        <span class="font-mono text-sm text-slate-200 flex-1">${esc(f.path)}</span>
+        <span class="text-xs text-emerald-400">${f.additions ? '+'+f.additions : ''}</span>
+        <span class="text-xs text-red-400">${f.deletions ? '-'+f.deletions : ''}</span>
+        ${fileFindings.length ? `<span class="text-xs font-semibold ${sevColor(maxSeverity(fileFindings))}">${fileFindings.length} finding${fileFindings.length!==1?'s':''}</span>` : ''}
+      </div>
+      ${patch ? renderDiff(patch, fileFindings) : (f.status === 'removed'
+        ? '<div class="px-5 py-3 text-xs text-slate-500 italic">File removed</div>'
+        : '<div class="px-5 py-3 text-xs text-slate-500 italic">Diff not available</div>')}
+      ${!patch && fileFindings.length ? `<div class="px-4 pb-3">${fileFindings.map(f=>renderFindingCallout(f,false)).join('')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
+// ── Diff renderer ──────────────────────────────────────────────────────
+function renderDiff(patch, findings) {
+  const findingsByLine = {};
+  for (const f of findings) {
+    if (f.line) {
+      (findingsByLine[f.line] = findingsByLine[f.line] || []).push(f);
+    }
+  }
+
+  const lines = patch.split('\n');
+  let html = '<div class="diff-block mx-4 my-2 mb-4">';
+  let newLn = 0;
+
+  for (let idx = 0; idx < lines.length; idx++) {
+    const line = lines[idx];
+    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) {
+      newLn = parseInt(hunk[1]) - 1;
+      html += `<div class="diff-row diff-hunk"><span class="diff-content">${esc(line)}</span></div>`;
+    } else if (line.startsWith('+++') || line.startsWith('---')) {
+      // file header lines — skip silently
+    } else if (line.startsWith('+')) {
+      newLn++;
+      html += `<div class="diff-row diff-add"><span class="diff-ln">${newLn}</span><span class="diff-content">${esc(line)}</span></div>`;
+      const fh = findingsByLine[newLn];
+      if (fh) fh.forEach(f => { html += renderFindingCallout(f, false); });
+    } else if (line.startsWith('-')) {
+      html += `<div class="diff-row diff-del"><span class="diff-ln"></span><span class="diff-content">${esc(line)}</span></div>`;
+    } else if (line.startsWith('\\')) {
+      // no-newline marker
+    } else {
+      newLn++;
+      html += `<div class="diff-row diff-ctx"><span class="diff-ln">${newLn}</span><span class="diff-content">${esc(line)}</span></div>`;
+    }
+  }
+
+  html += '</div>';
+
+  // Any findings without a matching line — append after diff
+  const unmatched = findings.filter(f => !f.line || !findingsByLine[f.line]);
+  if (unmatched.length) {
+    html += `<div class="px-4 pb-4">${unmatched.map(f => renderFindingCallout(f, false)).join('')}</div>`;
+  }
+
+  return html;
+}
+
+// ── Finding callout (inline in diff) ──────────────────────────────────
+function renderFindingCallout(f, isDismissed) {
+  const sev = f.severity || 'low';
+  const loc = f.line ? `:${f.line}` : '';
+  const dismissedFaded = isDismissed ? ' opacity-50' : '';
+  const label = convLabel(f);
+  const certTag = f.certainty ? `<span class="cert-tag">${esc(f.certainty)}</span>` : '';
+  const dismissBtn = (!isDismissed && f.id)
+    ? `<button class="ml-auto btn btn-xs btn-ghost text-slate-500 hover:text-orange-400 flex-shrink-0" onclick="openDismiss('${f.id}')" title="Dismiss finding">Dismiss</button>`
+    : '';
+  const suggestionHtml = f.suggestion
+    ? `<div class="mt-1.5 text-slate-300 italic text-xs leading-relaxed">${esc(f.suggestion)}</div>`
+    : '';
+  const cweHtml = f.cwe ? `<span class="text-slate-600 text-xs ml-1">${esc(f.cwe)}</span>` : '';
+
+  return `<div class="finding-callout sev-${sev}${dismissedFaded}">
+    <div class="flex items-start gap-1.5 flex-wrap">
+      ${label}
+      <span class="fc-${sev} font-semibold">${esc(sev.toUpperCase())}</span>
+      ${certTag}
+      ${f.category ? `<span class="text-slate-400">${esc(f.category)}</span>` : ''}
+      ${cweHtml}
+      ${loc ? `<span class="font-mono text-slate-500 text-xs">${esc(loc)}</span>` : ''}
+      ${dismissBtn}
+    </div>
+    <div class="mt-1 text-slate-200 leading-relaxed">${esc(f.description || '')}</div>
+    ${suggestionHtml}
+    ${isDismissed && f.dismissal ? `<div class="mt-1.5 text-xs text-amber-600">Dismissed: ${esc(f.dismissal.status || '')}${f.dismissal.comment ? ' — '+esc(f.dismissal.comment) : ''}</div>` : ''}
+  </div>`;
+}
+
+// ── Chapter interactions ───────────────────────────────────────────────
+function toggleChapter(i) {
+  const body = document.getElementById(`ch-body-${i}`);
+  const toggle = document.getElementById(`ch-toggle-${i}`);
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : '';
+  toggle.textContent = open ? '▶' : '▼';
+}
+
+function markChapterDone(i) {
+  chapterDone[i] = true;
+  const card  = document.getElementById(`ch-card-${i}`);
+  const num   = document.getElementById(`ch-num-${i}`);
+  const body  = document.getElementById(`ch-body-${i}`);
+  const toggle = document.getElementById(`ch-toggle-${i}`);
+  if (card)  { card.classList.remove('active'); card.classList.add('done'); }
+  if (num)   { num.classList.add('done'); num.textContent = '✓'; }
+  if (body)  body.style.display = 'none';
+  if (toggle) toggle.textContent = '▶';
+  updateProgress();
+  // Auto-scroll to + open next
+  goToChapter(i + 1);
+}
+
+function acknowledgeChapter(i) {
+  // Batch-acknowledge: mark all non-dismissed findings as 'acknowledged' then mark done
+  const ids = chapters[i].findings.filter(f => !f.dismissal && f.id).map(f => f.id);
+  if (ids.length) {
+    Promise.all(ids.map(id =>
+      fetch(`/api/dashboard/findings/${id}/dismiss`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'acknowledged', comment: 'Batch acknowledged via human review mode' }),
+      })
+    )).catch(() => {}); // fire-and-forget
+  }
+  markChapterDone(i);
+}
+
+function goToChapter(i) {
+  if (i < 0 || i >= chapters.length) return;
+  const card = document.getElementById(`ch-card-${i}`);
+  const body = document.getElementById(`ch-body-${i}`);
+  const toggle = document.getElementById(`ch-toggle-${i}`);
+  if (!chapterDone[i]) {
+    if (card)  card.classList.add('active');
+    if (body)  body.style.display = '';
+    if (toggle) toggle.textContent = '▼';
+  }
+  card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function toggleDismissed(i) {
+  const list = document.getElementById(`dism-list-${i}`);
+  const tog  = document.getElementById(`dism-toggle-${i}`);
+  if (!list) return;
+  const open = list.style.display !== 'none';
+  list.style.display = open ? 'none' : '';
+  if (tog) tog.textContent = open ? '▶' : '▼';
+}
+
+// ── Dismiss logic ──────────────────────────────────────────────────────
+function openDismiss(findingId) {
+  pendingDismissId = findingId;
+  document.getElementById('dismiss-comment').value = '';
+  document.getElementById('dismiss-status').value = 'false_positive';
+  document.getElementById('dismiss-modal').classList.remove('hidden');
+}
+
+function closeDismiss() {
+  pendingDismissId = null;
+  document.getElementById('dismiss-modal').classList.add('hidden');
+}
+
+async function submitDismiss() {
+  if (!pendingDismissId) return;
+  const status  = document.getElementById('dismiss-status').value;
+  const comment = document.getElementById('dismiss-comment').value.trim();
+  const btn = document.getElementById('dismiss-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Dismissing...';
+  try {
+    const resp = await fetch(`/api/dashboard/findings/${pendingDismissId}/dismiss`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, comment: comment || undefined }),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    showToast('Finding dismissed', 'success');
+    closeDismiss();
+    // Refresh the page data to reflect dismissal
+    location.reload();
+  } catch(e) {
+    showToast('Dismiss failed: ' + e.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Dismiss Finding';
+  }
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────
+function showToast(msg, type='info') {
+  let c = document.getElementById('toast-container');
+  if (!c) { c = document.createElement('div'); c.id = 'toast-container'; c.className = 'toast-container'; document.body.appendChild(c); }
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  c.appendChild(t);
+  setTimeout(() => t.remove(), 3500);
+}
+
+function showError(msg) {
+  document.getElementById('loading').style.display = 'none';
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.style.display = '';
+}
+
+init();
+</script>
+</body>
+</html>
