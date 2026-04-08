@@ -173,6 +173,23 @@ class TestDecisionMatrix:
         result = decide(ctx, [agent], RiskTier.HIGH, GuardianConfig())
         assert result.decision in (Decision.HUMAN_REVIEW, Decision.REJECT)
 
+    def test_verdict_explanation_preserved_on_flag_human(self):
+        explanation = "SQL injection risk in user input handling. Focus on parameterized query usage."
+        agent = AgentResult(
+            agent_name="security_privacy",
+            verdict=Verdict.FLAG_HUMAN,
+            findings=[_make_finding(severity=Severity.HIGH)],
+            verdict_explanation=explanation,
+        )
+        ctx = _make_context()
+        result = decide(ctx, [agent], RiskTier.HIGH, GuardianConfig())
+        assert result.decision in (Decision.HUMAN_REVIEW, Decision.REJECT)
+        assert result.agent_results[0].verdict_explanation == explanation
+
+    def test_verdict_explanation_defaults_to_none(self):
+        agent = AgentResult(agent_name="test", verdict=Verdict.PASS)
+        assert agent.verdict_explanation is None
+
     def test_blocked_branch_overrides_auto_approve(self):
         ctx = _make_context(
             pr=PlatformPR(

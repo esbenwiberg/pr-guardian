@@ -140,6 +140,7 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
                 verdict=ar.verdict.value[:16],
                 languages_reviewed=ar.languages_reviewed,
                 error=ar.error,
+                verdict_explanation=ar.verdict_explanation,
             )
             session.add(ar_row)
             await session.flush()  # get the id
@@ -846,6 +847,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
                 "verdict": a.verdict,
                 "languages_reviewed": a.languages_reviewed,
                 "error": a.error,
+                "verdict_explanation": a.verdict_explanation,
                 "findings": [
                     {
                         "id": str(f.id),
