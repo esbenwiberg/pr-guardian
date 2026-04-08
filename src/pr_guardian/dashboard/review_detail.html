@@ -68,6 +68,16 @@
       </div>
     </div>
 
+    <!-- Override reasons (why human review is required) -->
+    <div id="override-reasons-section" style="display:none" class="mb-6">
+      <div class="card border-l-[3px] border-l-orange-400/50 bg-orange-400/[0.03]">
+        <div class="px-5 py-3.5">
+          <div class="text-sm font-semibold text-orange-400 mb-2">Why This PR Needs Human Review</div>
+          <ul class="space-y-1.5 text-sm text-slate-300" id="override-reasons-list"></ul>
+        </div>
+      </div>
+    </div>
+
     <!-- Mechanical checks -->
     <div id="mech-section" style="display:none" class="mb-6">
       <h3 class="text-base font-semibold mb-3">Mechanical Checks</h3>
@@ -249,6 +259,17 @@ function render(d) {
     document.getElementById('summary-text').textContent = d.summary;
   }
 
+  // Override reasons
+  const overrideReasons = d.override_reasons || [];
+  if (overrideReasons.length > 0) {
+    document.getElementById('override-reasons-section').style.display = '';
+    document.getElementById('override-reasons-list').innerHTML = overrideReasons
+      .map(r => `<li class="flex items-start gap-2">
+        <span class="text-orange-400 mt-0.5 shrink-0">&#9679;</span>
+        <span>${esc(r)}</span>
+      </li>`).join('');
+  }
+
   // Mechanical checks
   if (d.mechanical_results && d.mechanical_results.length) {
     document.getElementById('mech-section').style.display = '';
@@ -297,6 +318,8 @@ function render(d) {
       const hasFindings = findings.length > 0;
       const verdictBorder = agent.verdict === 'pass' ? 'border-l-emerald-400/50' : agent.verdict === 'warn' ? 'border-l-orange-400/50' : agent.verdict === 'flag_human' ? 'border-l-red-400/50' : '';
       const verdictBg = agent.verdict === 'pass' ? '' : agent.verdict === 'warn' ? 'bg-orange-400/[0.02]' : agent.verdict === 'flag_human' ? 'bg-red-400/[0.03]' : '';
+      const explanation = agent.verdict_explanation;
+      const showExplanation = explanation && agent.verdict !== 'pass';
       return `
         <div class="card mb-4 overflow-hidden border-l-[3px] ${verdictBorder} ${verdictBg}" data-agent-idx="${ai}">
           <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/40 transition-colors" onclick="toggleAgent(${ai})">
@@ -306,6 +329,12 @@ function render(d) {
             <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
             ${hasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
+          ${showExplanation ? `
+          <div class="px-5 py-3 bg-slate-800/30 border-t border-slate-700/30 text-sm text-slate-300">
+            <span class="text-xs font-semibold uppercase tracking-wider text-slate-500 mr-2">Review focus:</span>
+            ${esc(explanation)}
+          </div>
+          ` : ''}
           <div class="findings-collapse border-t border-slate-700/50" id="findings-${ai}">
             <div class="overflow-hidden">
               <div class="py-1">

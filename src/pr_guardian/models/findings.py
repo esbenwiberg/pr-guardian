@@ -60,6 +60,7 @@ class AgentResult:
     findings: list[Finding] = field(default_factory=list)
     cross_language_findings: list[Finding] = field(default_factory=list)
     error: str | None = None
+    verdict_explanation: str | None = None
 
     # Optional agent-specific extras
     extras: dict = field(default_factory=dict)

@@ -107,6 +107,7 @@ class AgentResultRow(Base):
     verdict: Mapped[str] = mapped_column(String(16))
     languages_reviewed: Mapped[list] = mapped_column(JSONB, default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verdict_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     review: Mapped[ReviewRow] = relationship(back_populates="agent_results")
 

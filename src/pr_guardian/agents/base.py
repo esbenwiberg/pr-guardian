@@ -39,6 +39,7 @@ IMPORTANT — SCOPE RULES:
 Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching this schema:
 {
   "verdict": "pass | warn | flag_human",
+  "verdict_explanation": "string or null — required when verdict is warn or flag_human. 1-2 sentence summary of WHY you chose this verdict and WHAT the human reviewer should focus on. Set to null when verdict is pass.",
   "languages_reviewed": ["python", "typescript"],
   "findings": [
     {
@@ -63,7 +64,8 @@ Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching th
   ],
   "cross_language_findings": []
 }
-If no issues found, return {"verdict": "pass", "languages_reviewed": [...], "findings": [], "cross_language_findings": []}.
+If no issues found, return {"verdict": "pass", "verdict_explanation": null, "languages_reviewed": [...], "findings": [], "cross_language_findings": []}.
+When verdict is "warn" or "flag_human", you MUST include "verdict_explanation" with a 1-2 sentence summary explaining why you chose this verdict and what the reviewer should focus on.
 """
 
 
@@ -366,6 +368,7 @@ class BaseAgent:
             languages_reviewed=data.get("languages_reviewed", languages),
             findings=findings,
             cross_language_findings=cross_lang,
+            verdict_explanation=data.get("verdict_explanation"),
         )
 
     def _parse_finding(self, data: dict) -> Finding:
