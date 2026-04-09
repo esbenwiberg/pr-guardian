@@ -15,6 +15,7 @@ from pathlib import Path
 import structlog
 
 from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.decision.dedup import cluster_potential_duplicates, merge_findings
 from pr_guardian.llm.factory import create_llm_client, resolve_model
 from pr_guardian.llm.protocol import LLMClient
 from pr_guardian.models.context import ReviewContext
@@ -42,24 +43,43 @@ def _load_validator_prompt() -> str:
 
 def _flatten_findings(
     agent_results: list[AgentResult],
+    include_cross_language: bool = False,
 ) -> list[tuple[str, int, Finding]]:
-    """Flatten findings across agents into (agent_name, local_index, finding) tuples."""
+    """Flatten findings across agents into (agent_name, local_index, finding) tuples.
+
+    When include_cross_language is True, cross_language_findings are appended
+    after the regular findings with local indices continuing from len(findings).
+    """
     flat: list[tuple[str, int, Finding]] = []
     for result in agent_results:
         for i, finding in enumerate(result.findings):
             flat.append((result.agent_name, i, finding))
+        if include_cross_language:
+            offset = len(result.findings)
+            for i, finding in enumerate(result.cross_language_findings):
+                flat.append((result.agent_name, offset + i, finding))
     return flat
 
 
-def _build_findings_text(flat: list[tuple[str, int, Finding]]) -> str:
-    """Serialize findings into text for the validator prompt."""
+def _build_findings_text(
+    flat: list[tuple[str, int, Finding]],
+    clusters: dict[int, int] | None = None,
+) -> str:
+    """Serialize findings into text for the validator prompt.
+
+    When clusters is provided, findings that belong to a duplicate cluster
+    get a ``cluster=N`` annotation so the LLM can make merge decisions.
+    """
     lines: list[str] = []
     for global_idx, (agent_name, _, finding) in enumerate(flat):
+        cluster_tag = ""
+        if clusters and global_idx in clusters:
+            cluster_tag = f" cluster={clusters[global_idx]}"
         lines.append(
             f"[{global_idx}] agent={agent_name} "
             f"severity={finding.severity.value} "
             f"certainty={finding.certainty.value} "
-            f"category={finding.category}\n"
+            f"category={finding.category}{cluster_tag}\n"
             f"  file: {finding.file}:{finding.line or '?'}\n"
             f"  description: {finding.description}\n"
             f"  suggestion: {finding.suggestion}"
@@ -86,9 +106,10 @@ def _build_diff_summary(context: ReviewContext, max_chars: int = 60_000) -> str:
 def _build_user_message(
     flat: list[tuple[str, int, Finding]],
     context: ReviewContext,
+    clusters: dict[int, int] | None = None,
 ) -> str:
     """Build the user message: findings list + diff."""
-    findings_text = _build_findings_text(flat)
+    findings_text = _build_findings_text(flat, clusters)
     diff_text = _build_diff_summary(context)
     return (
         f"## Findings to validate ({len(flat)} total)\n\n"
@@ -116,10 +137,11 @@ def _apply_validations(
     agent_results: list[AgentResult],
     flat: list[tuple[str, int, Finding]],
     validations: list[dict],
-) -> tuple[list[AgentResult], int, int]:
+    agent_weights: dict[str, float] | None = None,
+) -> tuple[list[AgentResult], int, int, int]:
     """Apply validator decisions to agent results.
 
-    Returns (new_agent_results, dismissed_count, downgraded_count).
+    Returns (new_agent_results, dismissed_count, downgraded_count, merged_count).
     """
     # Build a lookup: global_index -> action
     actions: dict[int, dict] = {}
@@ -132,6 +154,9 @@ def _apply_validations(
     dismiss_set: set[tuple[str, int]] = set()
     downgrade_map: dict[tuple[str, int], str] = {}
 
+    # Collect merge groups: merge_target_global_idx -> [source_global_idx, ...]
+    merge_groups: dict[int, list[int]] = {}
+
     for global_idx, (agent_name, local_idx, _) in enumerate(flat):
         action_data = actions.get(global_idx)
         if not action_data:
@@ -143,6 +168,39 @@ def _apply_validations(
             new_sev = action_data.get("downgraded_severity")
             if new_sev and new_sev in ("low", "medium", "high", "critical"):
                 downgrade_map[(agent_name, local_idx)] = new_sev
+        elif action == "merge":
+            target = action_data.get("merge_into")
+            if isinstance(target, int) and 0 <= target < len(flat):
+                merge_groups.setdefault(target, []).append(global_idx)
+
+    # Process merges: for each target, merge all source findings into it
+    # The merged-away findings are treated like dismissals (removed from output)
+    merge_dismiss_set: set[tuple[str, int]] = set()
+    merge_replacements: dict[tuple[str, int], Finding] = {}
+    merged_count = 0
+
+    for target_idx, source_indices in merge_groups.items():
+        target_agent, target_local, target_finding = flat[target_idx]
+        sources = [
+            (flat[si][0], flat[si][2]) for si in source_indices
+        ]
+
+        merged_finding = merge_findings(
+            keeper_agent=target_agent,
+            keeper=target_finding,
+            merged=sources,
+            agent_weights=agent_weights,
+        )
+
+        # Replace the target finding with the merged version
+        merge_replacements[(target_agent, target_local)] = merged_finding
+
+        # Mark source findings for removal
+        for si in source_indices:
+            src_agent, src_local, _ = flat[si]
+            merge_dismiss_set.add((src_agent, src_local))
+
+        merged_count += len(source_indices)
 
     dismissed_count = len(dismiss_set)
     downgraded_count = len(downgrade_map)
@@ -153,9 +211,11 @@ def _apply_validations(
         new_findings: list[Finding] = []
         for local_idx, finding in enumerate(result.findings):
             key = (result.agent_name, local_idx)
-            if key in dismiss_set:
+            if key in dismiss_set or key in merge_dismiss_set:
                 continue
-            if key in downgrade_map:
+            if key in merge_replacements:
+                finding = merge_replacements[key]
+            elif key in downgrade_map:
                 finding = replace(
                     finding,
                     severity=Severity(downgrade_map[key]),
@@ -176,7 +236,7 @@ def _apply_validations(
         )
         new_results.append(new_result)
 
-    return new_results, dismissed_count, downgraded_count
+    return new_results, dismissed_count, downgraded_count, merged_count
 
 
 async def validate_findings(
@@ -199,16 +259,29 @@ async def validate_findings(
     if not validator_cfg.enabled:
         return agent_results, meta
 
-    flat = _flatten_findings(agent_results)
+    flat = _flatten_findings(agent_results, include_cross_language=True)
     if len(flat) < validator_cfg.min_findings_to_validate:
         return agent_results, meta
 
+    # Pre-group potential duplicates for the validator
+    clusters: dict[int, int] | None = None
+    if validator_cfg.dedup_enabled and len(flat) >= 2:
+        clusters = cluster_potential_duplicates(
+            flat,
+            line_threshold=validator_cfg.line_proximity_threshold,
+        )
+        if not clusters:
+            clusters = None  # No clusters found, skip annotation
+
     system_prompt = _load_validator_prompt()
-    user_message = _build_user_message(flat, context)
+    user_message = _build_user_message(flat, context, clusters)
 
     # Resolve model — use override if configured, else default
     model = validator_cfg.model_override or resolve_model(config, "validator")
     llm = llm_client or create_llm_client(config)
+
+    # Load agent weights for merge priority
+    agent_weights = config.weights if hasattr(config, "weights") else None
 
     try:
         response = await llm.complete(
@@ -224,14 +297,16 @@ async def validate_findings(
         data = json.loads(extracted)
         validations = data.get("validations", [])
 
-        new_results, dismissed, downgraded = _apply_validations(
-            agent_results, flat, validations,
+        new_results, dismissed, downgraded, merged = _apply_validations(
+            agent_results, flat, validations, agent_weights,
         )
 
         meta.update(
             validator_ran=True,
             dismissed=dismissed,
             downgraded=downgraded,
+            merged=merged,
+            clusters_found=len(set(clusters.values())) if clusters else 0,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
         )
@@ -241,6 +316,7 @@ async def validate_findings(
             total_findings=len(flat),
             dismissed=dismissed,
             downgraded=downgraded,
+            merged=merged,
         )
         return new_results, meta
 

@@ -59,6 +59,13 @@ agents:
   max_context_tokens: 120000
   timeout_seconds: 120
 
+validator:
+  enabled: true
+  scan_enabled: true
+  min_findings_to_validate: 1
+  dedup_enabled: true
+  line_proximity_threshold: 5
+
 feedback:
   enabled: true
   log_all_decisions: true

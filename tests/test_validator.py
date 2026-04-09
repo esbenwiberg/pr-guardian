@@ -58,7 +58,7 @@ class TestApplyValidations:
             {"index": 0, "action": "dismiss", "reason": "False positive"},
             {"index": 1, "action": "keep", "reason": "Real issue"},
         ]
-        new_results, dismissed, downgraded = _apply_validations(results, flat, validations)
+        new_results, dismissed, downgraded, _merged = _apply_validations(results, flat, validations)
         assert dismissed == 1
         assert downgraded == 0
         assert len(new_results[0].findings) == 1
@@ -71,7 +71,7 @@ class TestApplyValidations:
             {"index": 0, "action": "downgrade", "reason": "Overstated",
              "downgraded_severity": "medium"},
         ]
-        new_results, dismissed, downgraded = _apply_validations(results, flat, validations)
+        new_results, dismissed, downgraded, _merged = _apply_validations(results, flat, validations)
         assert dismissed == 0
         assert downgraded == 1
         assert new_results[0].findings[0].severity == Severity.MEDIUM
@@ -80,7 +80,7 @@ class TestApplyValidations:
         results = [_agent("sec", [_finding()], verdict=Verdict.WARN)]
         flat = _flatten_findings(results)
         validations = [{"index": 0, "action": "dismiss", "reason": "Noise"}]
-        new_results, _, _ = _apply_validations(results, flat, validations)
+        new_results, _, _, _ = _apply_validations(results, flat, validations)
         assert new_results[0].verdict == Verdict.PASS
         assert len(new_results[0].findings) == 0
 
@@ -88,7 +88,7 @@ class TestApplyValidations:
         results = [_agent("sec", [_finding()], verdict=Verdict.FLAG_HUMAN)]
         flat = _flatten_findings(results)
         validations = [{"index": 0, "action": "dismiss", "reason": "Noise"}]
-        new_results, _, _ = _apply_validations(results, flat, validations)
+        new_results, _, _, _ = _apply_validations(results, flat, validations)
         assert new_results[0].verdict == Verdict.FLAG_HUMAN
 
     def test_out_of_range_index_ignored(self):
@@ -98,7 +98,7 @@ class TestApplyValidations:
             {"index": 99, "action": "dismiss", "reason": "Bad index"},
             {"index": 0, "action": "keep", "reason": "Valid"},
         ]
-        new_results, dismissed, _ = _apply_validations(results, flat, validations)
+        new_results, dismissed, _, _ = _apply_validations(results, flat, validations)
         assert dismissed == 0
         assert len(new_results[0].findings) == 1
 
@@ -110,7 +110,7 @@ class TestApplyValidations:
             {"index": 0, "action": "dismiss", "reason": "Noise"},
             # index 1 missing
         ]
-        new_results, dismissed, _ = _apply_validations(results, flat, validations)
+        new_results, dismissed, _, _ = _apply_validations(results, flat, validations)
         assert dismissed == 1
         assert len(new_results[0].findings) == 1
         assert new_results[0].findings[0].description == "b"
@@ -122,7 +122,7 @@ class TestApplyValidations:
             {"index": 0, "action": "downgrade", "reason": "Bad",
              "downgraded_severity": "not_a_severity"},
         ]
-        new_results, _, downgraded = _apply_validations(results, flat, validations)
+        new_results, _, downgraded, _ = _apply_validations(results, flat, validations)
         assert downgraded == 0
         assert new_results[0].findings[0].severity == Severity.HIGH
 
@@ -138,7 +138,7 @@ class TestApplyValidations:
             {"index": 1, "action": "keep", "reason": "Real"},
             {"index": 2, "action": "dismiss", "reason": "Nitpick"},
         ]
-        new_results, dismissed, _ = _apply_validations(results, flat, validations)
+        new_results, dismissed, _, _ = _apply_validations(results, flat, validations)
         assert dismissed == 2
         assert len(new_results[0].findings) == 0  # sec agent: all dismissed
         assert len(new_results[1].findings) == 1  # perf agent: kept perf-a

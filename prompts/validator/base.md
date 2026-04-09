@@ -27,6 +27,15 @@ You represent the developer's perspective. Developers lose trust in review tools
 - CRITICAL is reserved for findings with a concrete exploit path or data loss scenario visible in the diff.
 - If a finding is real but low-impact, downgrade rather than dismiss.
 
+## Duplicate detection
+
+Some findings are annotated with `cluster=N`, meaning heuristics flagged them as potentially describing the same issue. For each cluster:
+
+- If the findings describe the **SAME root cause**: mark all but the best one with action `"merge"`, setting `"merge_into"` to the index of the finding to keep. Choose the most specific, actionable, and highest-severity version as the keeper.
+- If they describe **DIFFERENT issues** that happen to be near each other in the code: keep them independently (use `"keep"` as normal).
+
+Findings WITHOUT a cluster annotation are standalone — evaluate them normally with keep/dismiss/downgrade. Do NOT use the merge action on findings that lack a cluster annotation.
+
 ## Output format
 
 Respond with ONLY raw valid JSON (no markdown fences, no commentary):
@@ -35,9 +44,10 @@ Respond with ONLY raw valid JSON (no markdown fences, no commentary):
   "validations": [
     {
       "index": 0,
-      "action": "keep | dismiss | downgrade",
+      "action": "keep | dismiss | downgrade | merge",
       "reason": "Brief explanation (1-2 sentences)",
-      "downgraded_severity": "low | medium | high | critical | null"
+      "downgraded_severity": "low | medium | high | critical | null",
+      "merge_into": null
     }
   ]
 }
@@ -45,4 +55,5 @@ Respond with ONLY raw valid JSON (no markdown fences, no commentary):
 
 - `index` matches the position in the findings list provided to you (0-based).
 - `downgraded_severity` is required when action is "downgrade", null otherwise.
+- `merge_into` is required when action is "merge" — set it to the index of the finding this one duplicates. Null otherwise.
 - Every finding must have exactly one entry. Do not skip any.

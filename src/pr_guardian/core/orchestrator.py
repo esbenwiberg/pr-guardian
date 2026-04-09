@@ -426,9 +426,15 @@ async def _run_pipeline(
             result.total_input_tokens = total_input_tokens
             result.total_output_tokens = total_output_tokens
             result.cost_usd = round(total_cost, 6)
-            _plog("info", "noise_reduction",
-                  f"Validator: {dismissed} dismissed, {downgraded} downgraded "
-                  f"out of {remaining_finding_count} finding(s).")
+            merged = validator_meta.get("merged", 0)
+            clusters_found = validator_meta.get("clusters_found", 0)
+            parts = [
+                f"Validator: {dismissed} dismissed, {downgraded} downgraded",
+            ]
+            if merged:
+                parts.append(f"{merged} merged ({clusters_found} cluster(s))")
+            parts.append(f"out of {remaining_finding_count} finding(s).")
+            _plog("info", "noise_reduction", ", ".join(parts))
         if validator_meta.get("error"):
             _plog("warn", "noise_reduction",
                   f"Validator error (findings kept as-is): {validator_meta['error']}")
@@ -441,16 +447,24 @@ async def _run_pipeline(
                 match_dismissals_to_findings,
                 archive_stale_dismissals,
             )
-            # Build list of all findings with agent_name for matching
+            # Build list of all findings with agent_name for matching.
+            # For merged findings, also register contributing agents' signatures
+            # so that dismissals from any contributing agent carry forward.
             all_findings_flat = []
             active_sigs: set[str] = set()
             for ar in result.agent_results:
                 for f in ar.findings:
+                    agent_name = f.primary_agent or ar.agent_name
                     entry = {
-                        "file": f.file, "category": f.category, "agent_name": ar.agent_name,
+                        "file": f.file, "category": f.category, "agent_name": agent_name,
                     }
                     all_findings_flat.append(entry)
-                    active_sigs.add(_fsig(f.file, f.category, ar.agent_name))
+                    active_sigs.add(_fsig(f.file, f.category, agent_name))
+                    # Register contributing agents so their dismissals match too
+                    for contrib in f.contributing_agents:
+                        contrib_name = contrib.get("agent_name", "")
+                        if contrib_name and contrib_name != agent_name:
+                            active_sigs.add(_fsig(f.file, f.category, contrib_name))
 
             matched = await match_dismissals_to_findings(
                 pr.pr_id, pr.repo, pr.platform.value, all_findings_flat,
