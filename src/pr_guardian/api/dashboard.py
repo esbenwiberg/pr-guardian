@@ -113,6 +113,52 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     return row
 
 
+@router.get("/reviews/{review_id}/diff")
+async def dashboard_review_diff(review_id: uuid.UUID):
+    """Fetch the PR diff for a review on-demand from the platform.
+
+    The patch data is not stored in the DB, so we re-fetch it live from
+    GitHub / ADO using the PR URL recorded on the review row.
+    """
+    row = await storage.get_review(review_id)
+    if not row:
+        raise HTTPException(404, "Review not found")
+    if not row.get("pr_url"):
+        raise HTTPException(422, "Review has no PR URL — cannot fetch diff")
+
+    from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
+    from pr_guardian.platform.factory import create_adapter
+
+    stub, platform_name = _parse_pr_url(row["pr_url"])
+    adapter = create_adapter(platform_name)
+
+    try:
+        pr = await _hydrate_pr(adapter, stub, platform_name)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to fetch PR info: {e}")
+
+    try:
+        diff = await adapter.fetch_diff(pr)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch diff from platform: {e}")
+
+    return {
+        "pr_id": row["pr_id"],
+        "repo": row["repo"],
+        "files": [
+            {
+                "path": f.path,
+                "status": f.status,
+                "old_path": f.old_path,
+                "additions": f.additions,
+                "deletions": f.deletions,
+                "patch": f.patch,
+            }
+            for f in diff.files
+        ],
+    }
+
+
 @router.get("/active")
 async def dashboard_active():
     """Currently in-progress reviews."""

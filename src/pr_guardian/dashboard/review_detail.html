@@ -36,6 +36,7 @@
         <div class="text-sm text-slate-400 mt-1" id="banner-meta"></div>
       </div>
       <a id="pr-link" class="btn btn-sm btn-secondary" target="_blank">View PR</a>
+      <a id="human-review-btn" class="btn btn-sm btn-primary" style="display:none" title="Open the Chapter-based human review interface">Open Review Mode</a>
       <div class="flex items-center gap-2">
         <span class="text-xs text-slate-400" id="dismissal-count" style="display:none">0 findings dismissed</span>
         <button id="re-review-btn" class="btn btn-sm btn-primary" onclick="triggerReReview()" style="display:none" title="Re-evaluate existing findings against new code changes">Re-evaluate findings</button>
@@ -355,6 +356,11 @@ function render(d) {
   }
   if (d.pr_url) {
     document.getElementById('full-review-btn').style.display = '';
+  }
+  if (d.decision === 'human_review') {
+    const hrBtn = document.getElementById('human-review-btn');
+    hrBtn.href = `/reviews/${REVIEW_ID}/human-review`;
+    hrBtn.style.display = '';
   }
   if (dCount > 0) {
     const el = document.getElementById('dismissal-count');
