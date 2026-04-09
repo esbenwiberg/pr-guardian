@@ -208,6 +208,8 @@ class ValidatorConfig(BaseModel):
     scan_enabled: bool = True
     min_findings_to_validate: int = 1
     model_override: str | None = None  # e.g. use a cheaper model for validation
+    dedup_enabled: bool = True  # Cross-agent duplicate detection via merge action
+    line_proximity_threshold: int = 5  # Max line distance for clustering
 
 
 class RecentChangesConfig(BaseModel):

@@ -50,6 +50,11 @@ class Finding:
     compliance: str | None = None
     evidence_basis: EvidenceBasis = field(default_factory=EvidenceBasis)
 
+    # Cross-agent dedup fields (populated when findings are merged)
+    primary_agent: str | None = None
+    contributing_agents: list[dict] = field(default_factory=list)
+    merged_from_count: int = 0
+
 
 @dataclass
 class AgentResult:
