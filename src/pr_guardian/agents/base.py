@@ -113,11 +113,18 @@ class BaseAgent:
         findings: list[dict],
         incremental_diff: str,
         pr_metadata: dict,
+        *,
+        current_file_contents: dict[str, str] | None = None,
     ) -> list[dict]:
         """Re-evaluate existing findings against incremental changes.
 
         Returns a list of evaluation dicts with status (kept/resolved/updated)
         for each input finding.
+
+        Args:
+            current_file_contents: Mapping of file path → current content at HEAD.
+                Used so the agent can see the actual code state, even when the
+                incremental diff has no patch content.
         """
         model = resolve_model(self.config, self.agent_name)
         llm = self._get_llm()
@@ -152,6 +159,27 @@ class BaseAgent:
         else:
             parts.append("\n## Changes Since Last Review\n")
             parts.append("*No new commits since the last review. Re-evaluate findings on their own merits.*")
+
+        # Include current file content so the agent can verify findings against
+        # the actual code at HEAD (critical when patches are missing or the
+        # incremental diff fetch failed).
+        finding_files = {f.get("file", "") for f in findings} - {""}
+        relevant_contents = {
+            fp: content
+            for fp, content in (current_file_contents or {}).items()
+            if fp in finding_files
+        }
+        if relevant_contents:
+            parts.append("\n## Current File Content (at HEAD)\n")
+            parts.append("Use this to verify whether each finding still exists in the code.\n")
+            for fp, content in sorted(relevant_contents.items()):
+                # Truncate very large files to avoid blowing the context window
+                max_lines = 300
+                lines = content.splitlines()
+                if len(lines) > max_lines:
+                    content = "\n".join(lines[:max_lines]) + f"\n... ({len(lines) - max_lines} more lines truncated)"
+                parts.append(f"### {fp}")
+                parts.append(f"```\n{content}\n```\n")
 
         user_message = "\n".join(parts)
 

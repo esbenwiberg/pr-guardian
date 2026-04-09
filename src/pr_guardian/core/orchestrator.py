@@ -701,6 +701,42 @@ async def _run_re_review_pipeline(
         await _save_result(storage, review_db_id, result, _emit)
         return result
 
+    # --- Step 2b: Fetch current file content for files referenced by findings ---
+    # This ensures the agent can see the actual code at HEAD, even when the
+    # incremental diff has no patch content (ADO) or the compare API failed
+    # (e.g. force-push rewrote old_sha out of existence).
+    await _update_stage("discovery", "Fetching current file content for finding locations")
+
+    finding_files: set[str] = set()
+    for fs in agent_findings.values():
+        for f in fs:
+            file_path = f.get("file", "")
+            if file_path:
+                finding_files.add(file_path)
+
+    current_file_contents: dict[str, str] = {}
+    if finding_files and new_sha:
+        fetch_tasks = []
+        file_paths_ordered = sorted(finding_files)
+        # ADO's fetch_file_content expects "project/repo" format
+        repo_arg = pr.repo
+        if getattr(pr, "project", "") and "/" not in pr.repo:
+            repo_arg = f"{pr.project}/{pr.repo}"
+        for fpath in file_paths_ordered:
+            fetch_tasks.append(
+                adapter.fetch_file_content(repo_arg, fpath, ref=new_sha)
+            )
+        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        for fpath, result in zip(file_paths_ordered, results):
+            if isinstance(result, Exception):
+                _plog("debug", "discovery",
+                      f"Could not fetch {fpath} at {new_sha[:8]}: {result}")
+            elif result:
+                current_file_contents[fpath] = result
+
+        _plog("info", "discovery",
+              f"Fetched current content for {len(current_file_contents)}/{len(finding_files)} finding file(s).")
+
     # --- Step 3: Run agents in re-evaluation mode ---
     await _update_stage("agents", f"Re-evaluating {active_findings} finding(s) across {len(agent_findings)} agent(s)")
 
@@ -720,7 +756,8 @@ async def _run_re_review_pipeline(
             continue
         agent = agent_cls(config)
         re_eval_tasks.append(
-            agent.re_evaluate(findings, incremental_diff_text, pr_metadata)
+            agent.re_evaluate(findings, incremental_diff_text, pr_metadata,
+                              current_file_contents=current_file_contents)
         )
         agent_names_ordered.append(agent_name)
 
