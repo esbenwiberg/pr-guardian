@@ -211,7 +211,7 @@ async def _run_recent_pipeline(
         _emit("scan_complete", "No changes to analyze")
         return result
 
-    # Collect changed files from merged PRs
+    # Collect changed files from merged PRs (patches included for GitHub)
     all_changed_files: list[dict] = []
     for pr in merged_prs:
         pr_number = pr.get("number")
@@ -228,11 +228,57 @@ async def _run_recent_pipeline(
             except Exception as e:
                 _plog("warn", "discovery", f"Failed to fetch files for PR #{pr_number}: {e}")
 
+    # Fallback: no merged PRs but commits exist (direct pushes to branch).
+    # Use compare API between earliest commit's parent and branch head so
+    # agents actually see code, not just metadata.
+    if not all_changed_files and commits:
+        try:
+            # Commits come back newest-first; earliest is last in the list.
+            earliest = commits[-1]
+            head_sha = commits[0].get("sha") or commits[0].get("commitId", "")
+            parents = earliest.get("parents") or []
+            base_sha = ""
+            if parents and isinstance(parents, list):
+                first_parent = parents[0]
+                base_sha = (
+                    first_parent.get("sha")
+                    if isinstance(first_parent, dict)
+                    else str(first_parent)
+                ) or ""
+            if not base_sha:
+                # ADO payload may use commitId / parents[str]; try both
+                base_sha = earliest.get("parents", [""])[0] if earliest.get("parents") else ""
+
+            if base_sha and head_sha:
+                _plog("info", "discovery",
+                       f"No merged PRs; fetching compare diff {base_sha[:8]}..{head_sha[:8]}.")
+                compare_diff = await adapter.fetch_compare_diff(repo, base_sha, head_sha)
+                for df in compare_diff.files:
+                    all_changed_files.append({
+                        "filename": df.path,
+                        "status": df.status,
+                        "additions": df.additions,
+                        "deletions": df.deletions,
+                        "patch": df.patch,
+                        "_pr_number": None,
+                        "_pr_title": "(direct commits — no PR)",
+                    })
+            else:
+                _plog("warn", "discovery",
+                       "Cannot resolve base/head SHAs from commits; diff unavailable.")
+        except Exception as e:
+            _plog("warn", "discovery", f"Compare-diff fallback failed: {e}")
+
     changes_by_module = _group_changes_by_module(all_changed_files)
     change_summary = _build_change_summary(merged_prs, commits, changes_by_module)
 
+    files_with_patch = sum(1 for f in all_changed_files if f.get("patch"))
     _plog("info", "discovery",
-           f"Aggregated {len(all_changed_files)} file changes across {len(changes_by_module)} modules.")
+           f"Aggregated {len(all_changed_files)} file changes across "
+           f"{len(changes_by_module)} modules ({files_with_patch} with patch content).")
+    if all_changed_files and files_with_patch == 0:
+        _plog("warn", "discovery",
+               "No patch content retrieved — agents will have no code to analyze.")
 
     # Stage 2: Analysis
     await _update_stage("scan_analysis", f"Running {len(RECENT_CHANGES_AGENTS)} scan agents")
