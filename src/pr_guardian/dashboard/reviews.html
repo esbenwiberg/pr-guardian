@@ -17,6 +17,7 @@
     <div class="flex items-center gap-3">
       <h1 class="text-sm font-semibold text-slate-50">Reviews</h1>
       <button class="btn btn-primary btn-sm" onclick="openReviewModal()">+ Review PR</button>
+      <button class="btn btn-secondary btn-sm" onclick="openRepoReviewModal()" title="Review an entire repository (small repos only)">+ Review Repo</button>
     </div>
   </header>
 
@@ -93,6 +94,58 @@
           </tbody>
         </table>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Repo Review Modal -->
+<div id="repo-review-modal-overlay" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeRepoReviewModal()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-md">
+      <div class="dialog-header">
+        <h2 class="text-lg font-bold">Review Entire Repository</h2>
+        <button class="btn btn-ghost btn-icon btn-sm" onclick="closeRepoReviewModal()">&#10005;</button>
+      </div>
+      <form id="repo-review-form" onsubmit="submitRepoReview(event)">
+        <div class="dialog-body space-y-4">
+          <div class="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2.5">
+            <p class="text-xs font-semibold text-amber-300 mb-1">&#9888; Small repos only</p>
+            <p class="text-2xs text-amber-200/80 leading-relaxed">
+              Runs the full PR review pipeline across every file in the repo.
+              Cost and duration scale with total code size. Files are capped at
+              300 by default; large repos will be rejected. Binaries, lockfiles,
+              <code>node_modules/</code>, <code>dist/</code> etc. are skipped.
+            </p>
+          </div>
+          <div>
+            <label class="form-label" for="repo-review-repo">Repository</label>
+            <input type="text" id="repo-review-repo" required placeholder="owner/repo" class="form-input w-full" spellcheck="false">
+            <p class="text-2xs text-slate-500 mt-1" id="repo-review-hint">GitHub: owner/repo &mdash; ADO: project/repo</p>
+          </div>
+          <div>
+            <label class="form-label" for="repo-review-platform">Platform</label>
+            <select id="repo-review-platform" class="form-select" onchange="updateRepoReviewHint()">
+              <option value="github">GitHub</option>
+              <option value="ado">Azure DevOps</option>
+            </select>
+          </div>
+          <div>
+            <label class="form-label" for="repo-review-ref">Ref (branch / tag / SHA)</label>
+            <input type="text" id="repo-review-ref" value="HEAD" class="form-input w-full" spellcheck="false">
+          </div>
+          <div>
+            <label class="form-label" for="repo-review-max-files">Max Files</label>
+            <input type="number" id="repo-review-max-files" value="300" min="10" max="1000" class="form-input w-full">
+            <p class="text-2xs text-slate-500 mt-1">Hard cap; review rejected if the repo exceeds this.</p>
+          </div>
+        </div>
+        <div class="dialog-footer">
+          <div id="repo-review-status" class="text-sm hidden mr-auto"></div>
+          <button type="button" onclick="closeRepoReviewModal()" class="btn btn-secondary btn-sm">Cancel</button>
+          <button type="submit" id="repo-review-submit-btn" class="btn btn-primary btn-sm">Start Repo Review</button>
+        </div>
+      </form>
     </div>
   </div>
 </div>
@@ -278,6 +331,74 @@ document.getElementById('review-modal-overlay').addEventListener('click', (e) =>
   if (e.target === document.getElementById('review-modal-overlay')) closeReviewModal();
 });
 
+// ---- Repo Review Modal ----
+function openRepoReviewModal() {
+  document.getElementById('repo-review-modal-overlay').classList.remove('hidden');
+  document.getElementById('repo-review-repo').focus();
+}
+function closeRepoReviewModal() {
+  document.getElementById('repo-review-modal-overlay').classList.add('hidden');
+  const status = document.getElementById('repo-review-status');
+  status.style.display = 'none';
+  const btn = document.getElementById('repo-review-submit-btn');
+  btn.disabled = false;
+  btn.textContent = 'Start Repo Review';
+}
+function updateRepoReviewHint() {
+  const platform = document.getElementById('repo-review-platform').value;
+  const hint = document.getElementById('repo-review-hint');
+  hint.textContent = platform === 'ado'
+    ? 'Format: project/repo (org comes from server config)'
+    : 'Format: owner/repo';
+  document.getElementById('repo-review-repo').placeholder = platform === 'ado' ? 'project/repo' : 'owner/repo';
+}
+document.getElementById('repo-review-modal-overlay').addEventListener('click', (e) => {
+  if (e.target === document.getElementById('repo-review-modal-overlay')) closeRepoReviewModal();
+});
+
+async function submitRepoReview(e) {
+  e.preventDefault();
+  const repo = document.getElementById('repo-review-repo').value.trim();
+  const platform = document.getElementById('repo-review-platform').value;
+  const ref = document.getElementById('repo-review-ref').value.trim() || 'HEAD';
+  const maxFiles = parseInt(document.getElementById('repo-review-max-files').value) || 300;
+  const btn = document.getElementById('repo-review-submit-btn');
+  const status = document.getElementById('repo-review-status');
+
+  btn.disabled = true;
+  btn.textContent = 'Starting...';
+  status.style.display = 'block';
+  status.className = 'text-sm mr-auto text-slate-400';
+  status.textContent = 'Queueing repo review...';
+
+  try {
+    const resp = await fetch('/api/review/repo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repo, platform, ref, max_files: maxFiles }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      status.className = 'text-sm mr-auto text-red-400';
+      status.textContent = data.detail || 'Request failed';
+      btn.disabled = false;
+      btn.textContent = 'Start Repo Review';
+      return;
+    }
+    closeRepoReviewModal();
+    document.getElementById('repo-review-form').reset();
+    document.getElementById('repo-review-ref').value = 'HEAD';
+    document.getElementById('repo-review-max-files').value = '300';
+    showToast('Repo review queued — watch Active Reviews');
+    loadActiveReviews();
+  } catch (err) {
+    status.className = 'text-sm mr-auto text-red-400';
+    status.textContent = `Error: ${err.message}`;
+    btn.disabled = false;
+    btn.textContent = 'Start Repo Review';
+  }
+}
+
 async function submitReview(e) {
   e.preventDefault();
   const url = document.getElementById('review-pr-url').value.trim();
@@ -415,7 +536,7 @@ function connectSSE() {
 let focusedRow = -1;
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') { closeReviewModal(); return; }
+  if (e.key === 'Escape') { closeReviewModal(); closeRepoReviewModal(); return; }
   // Skip if typing in an input/textarea/select
   const tag = document.activeElement?.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;

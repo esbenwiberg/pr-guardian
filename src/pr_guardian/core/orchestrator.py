@@ -91,6 +91,8 @@ async def run_review(
     post_comment: bool = True,
     base_url: str = "",
     dismissals: list[dict] | None = None,
+    diff_override=None,
+    skip_platform_side_effects: bool = False,
 ) -> ReviewResult:
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
@@ -134,11 +136,22 @@ async def run_review(
             except Exception as e:
                 log.warning("db_stage_update_failed", stage=stage, error=str(e))
 
-    # Set pending status
-    await adapter.set_status(pr, "pending", "PR Guardian review in progress")
+    # Set pending status (skip for synthetic PRs like repo reviews)
+    if not skip_platform_side_effects:
+        try:
+            await adapter.set_status(pr, "pending", "PR Guardian review in progress")
+        except Exception as e:
+            log.warning("set_status_failed", error=str(e))
 
     try:
-        return await _run_pipeline(pr, adapter, service_config, storage, review_db_id, pipeline_log, _plog, _emit, _update_stage, post_comment=post_comment, base_url=base_url, dismissals=dismissals)
+        return await _run_pipeline(
+            pr, adapter, service_config, storage, review_db_id, pipeline_log,
+            _plog, _emit, _update_stage,
+            post_comment=post_comment and not skip_platform_side_effects,
+            base_url=base_url, dismissals=dismissals,
+            diff_override=diff_override,
+            skip_platform_side_effects=skip_platform_side_effects,
+        )
     except Exception as exc:
         if storage and review_db_id:
             try:
@@ -163,11 +176,18 @@ async def _run_pipeline(
     post_comment: bool = True,
     base_url: str = "",
     dismissals: list[dict] | None = None,
+    diff_override=None,
+    skip_platform_side_effects: bool = False,
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
-    # Fetch diff
-    diff = await adapter.fetch_diff(pr)
+    # Fetch diff (or use pre-built synthetic diff, e.g. for repo reviews)
+    if diff_override is not None:
+        diff = diff_override
+        _plog("info", "discovery",
+              f"Using pre-built diff ({len(diff.files)} files) — skipping fetch_diff.")
+    else:
+        diff = await adapter.fetch_diff(pr)
     changed_files = diff.file_paths
     files_with_patch = sum(1 for f in diff.files if f.patch)
     _plog("info", "discovery",

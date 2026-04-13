@@ -128,6 +128,12 @@ curl -X POST -H "Authorization: Bearer $KEY" \
         </div>
 
         <div>
+          <div class="endpoint"><span class="method method-post">POST</span><span class="path">/api/review/repo</span></div>
+          <p class="text-xs text-slate-400 mb-2">Review an entire repository at a given ref as a synthetic PR. Runs the full PR review pipeline over every file in the repo. <strong class="text-amber-300">Small repos only</strong> &mdash; rejected if <code>max_files</code> is exceeded. Platform side-effects (comments, status checks) are suppressed.</p>
+          <div class="cmd-block"><code class="cmd-code">{"repo": "owner/repo", "platform": "github", "ref": "HEAD", "max_files": 300}</code></div>
+        </div>
+
+        <div>
           <div class="endpoint"><span class="method method-get">GET</span><span class="path">/api/dashboard/reviews</span></div>
           <p class="text-xs text-slate-400 mb-1">Paginated list of reviews with optional filters.</p>
           <table class="param-table">

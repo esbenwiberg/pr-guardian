@@ -8,6 +8,10 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from pr_guardian.core.orchestrator import run_review
+from pr_guardian.core.repo_review import (
+    DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
+    run_repo_review,
+)
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.factory import create_adapter
 
@@ -138,6 +142,85 @@ def _parse_pr_url(url: str) -> tuple[PlatformPR, str]:
     raise HTTPException(
         status_code=400,
         detail="Unsupported PR URL format. Use GitHub or Azure DevOps PR URLs.",
+    )
+
+
+class RepoReviewRequest(BaseModel):
+    repo: str
+    platform: str = "github"
+    ref: str = "HEAD"
+    max_files: int = REPO_REVIEW_MAX_FILES
+
+
+class RepoReviewResponse(BaseModel):
+    status: str
+    repo: str
+    platform: str
+    ref: str
+    note: str = (
+        "Repo review runs the full PR-review pipeline across every file in the "
+        "repo at the given ref. Intended for small repos only — cost and duration "
+        "scale with total code size."
+    )
+
+
+async def _run_repo_review_background(
+    repo: str, platform: str, adapter, ref: str, max_files: int,
+) -> None:
+    import traceback
+    try:
+        await run_repo_review(
+            repo=repo, platform=platform, adapter=adapter,
+            ref=ref, max_files=max_files,
+        )
+    except Exception as e:
+        log.error(
+            "repo_review_background_failed",
+            repo=repo, error=str(e), traceback=traceback.format_exc(),
+        )
+    finally:
+        if hasattr(adapter, "close"):
+            try:
+                await adapter.close()
+            except Exception:
+                pass
+
+
+@router.post("/review/repo", response_model=RepoReviewResponse)
+async def manual_repo_review(req: RepoReviewRequest):
+    """Trigger a full-repo review.
+
+    Treats the repository at ``ref`` as a synthetic PR where every file is new,
+    then runs the standard PR review pipeline. Suitable for small repos only.
+    """
+    if req.platform not in ("github", "ado"):
+        raise HTTPException(status_code=400, detail="Unsupported platform")
+
+    repo = req.repo.strip()
+    if not repo or "/" not in repo:
+        raise HTTPException(
+            status_code=400,
+            detail="Repo must be in owner/repo (GitHub) or project/repo (ADO) format.",
+        )
+
+    try:
+        adapter = create_adapter(req.platform)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
+
+    asyncio.create_task(
+        _run_repo_review_background(
+            repo, req.platform, adapter, req.ref, req.max_files,
+        )
+    )
+
+    return RepoReviewResponse(
+        status="queued",
+        repo=repo,
+        platform=req.platform,
+        ref=req.ref,
     )
 
 
