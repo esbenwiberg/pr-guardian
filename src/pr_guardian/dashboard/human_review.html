@@ -62,6 +62,19 @@
 .role-DEPENDENCY  { background: rgba(148,163,184,0.10);color: #94a3b8; }
 .role-GENERATED   { background: rgba(100,116,139,0.10);color: #64748b; }
 
+/* ── Chapter map (right rail) ─────────────────────────── */
+#chapter-map { position:fixed; right:0; top:3.5rem; width:10.5rem; height:calc(100vh - 3.5rem); overflow-y:auto; border-left:1px solid rgba(51,65,85,0.5); background:rgba(10,15,30,0.97); backdrop-filter:blur(8px); padding:10px 6px; display:none; z-index:15; }
+.cm-label { font-size:9px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:#475569; padding:4px 8px 8px; }
+.cm-item { display:flex; align-items:center; gap:5px; padding:5px 8px; border-radius:5px; cursor:pointer; font-size:11px; color:#94a3b8; transition:background 0.12s; user-select:none; }
+.cm-item:hover { background:rgba(255,255,255,0.05); }
+.cm-item.cm-active { background:rgba(99,102,241,0.15); color:#a5b4fc; }
+.cm-item.cm-done { color:#475569; }
+.cm-num { width:17px; height:17px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; flex-shrink:0; background:rgba(51,65,85,0.5); color:#94a3b8; }
+.cm-num.cm-done   { background:rgba(16,185,129,0.15); color:#34d399; }
+.cm-num.cm-active { background:rgba(99,102,241,0.2);  color:#a5b4fc; }
+.cm-dot { width:5px; height:5px; border-radius:50%; flex-shrink:0; }
+.cm-title { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
 /* ── Misc ─────────────────────────────────────────────── */
 .file-row { display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-bottom: 1px solid rgba(51,65,85,0.3); font-size: 12px; }
 .file-row:last-child { border-bottom: none; }
@@ -188,6 +201,9 @@
 </div><!-- /#phase-chapters -->
 
 </div><!-- /.ml-16 -->
+
+<!-- Chapter map right rail (shown during chapters phase) -->
+<div id="chapter-map"></div>
 
 <!-- Dismiss modal (reused from review_detail) -->
 <div id="dismiss-modal" class="hidden fixed inset-0 z-50">
@@ -499,19 +515,59 @@ function buildOrientScreen() {
   document.getElementById('phase-orient').style.display = '';
 }
 
+// ── Chapter map (right rail) ───────────────────────────────────────────
+function buildChapterMap() {
+  const el = document.getElementById('chapter-map');
+  el.innerHTML = '<div class="cm-label">Chapters</div>' +
+    chapters.map((c, i) => {
+      const fCount = c.findings.filter(f => !f.dismissal).length;
+      const dot = `<span class="cm-dot ${fCount > 0 ? sevDot(c.maxSev) : 'bg-slate-700'}"></span>`;
+      const title = chapterTitle(c).split(',')[0].trim();
+      return `<div class="cm-item" id="cm-item-${i}" onclick="goToChapter(${i})">
+        <div class="cm-num" id="cm-num-${i}">${i+1}</div>
+        ${dot}
+        <span class="cm-title" title="${esc(chapterTitle(c))}">${esc(title)}</span>
+      </div>`;
+    }).join('');
+  el.style.display = '';
+}
+
+function updateChapterMapActive(i) {
+  chapters.forEach((_, j) => {
+    document.getElementById(`cm-item-${j}`)?.classList.remove('cm-active');
+    document.getElementById(`cm-num-${j}`)?.classList.remove('cm-active');
+  });
+  if (i >= 0 && i < chapters.length && !chapterDone[i]) {
+    document.getElementById(`cm-item-${i}`)?.classList.add('cm-active');
+    document.getElementById(`cm-num-${i}`)?.classList.add('cm-active');
+  }
+}
+
+function markChapterDoneInMap(i) {
+  const item = document.getElementById(`cm-item-${i}`);
+  const num  = document.getElementById(`cm-num-${i}`);
+  item?.classList.remove('cm-active');
+  item?.classList.add('cm-done');
+  if (num) { num.classList.remove('cm-active'); num.classList.add('cm-done'); num.textContent = '✓'; }
+}
+
 // ── Phase 2: Start chapters ────────────────────────────────────────────
 function startChapters() {
   document.getElementById('phase-orient').style.display = 'none';
-  document.getElementById('phase-chapters').style.display = '';
+  const chaptersEl = document.getElementById('phase-chapters');
+  chaptersEl.style.display = '';
+  chaptersEl.style.paddingRight = '11.5rem'; // room for map rail
   document.getElementById('hdr-progress').style.display = '';
 
+  buildChapterMap();
   renderAllChapters();
   updateProgress();
 
-  // Scroll to top and expand first chapter
+  // Scroll to top, expand first chapter, mark active in map
   window.scrollTo(0, 0);
   const first = document.getElementById(`ch-body-0`);
   if (first) first.style.display = '';
+  updateChapterMapActive(0);
 }
 
 function updateProgress() {
@@ -668,7 +724,7 @@ function renderFindingCallout(f, isDismissed) {
     : '';
   const cweHtml = f.cwe ? `<span class="text-slate-600 text-xs ml-1">${esc(f.cwe)}</span>` : '';
 
-  return `<div class="finding-callout sev-${sev}${dismissedFaded}">
+  return `<div class="finding-callout sev-${sev}${dismissedFaded}"${!isDismissed && f.id ? ` data-finding-id="${f.id}"` : ''}>
     <div class="flex items-start gap-1.5 flex-wrap">
       ${label}
       <span class="fc-${sev} font-semibold">${esc(sev.toUpperCase())}</span>
@@ -695,16 +751,16 @@ function toggleChapter(i) {
 
 function markChapterDone(i) {
   chapterDone[i] = true;
-  const card  = document.getElementById(`ch-card-${i}`);
-  const num   = document.getElementById(`ch-num-${i}`);
-  const body  = document.getElementById(`ch-body-${i}`);
+  const card   = document.getElementById(`ch-card-${i}`);
+  const num    = document.getElementById(`ch-num-${i}`);
+  const body   = document.getElementById(`ch-body-${i}`);
   const toggle = document.getElementById(`ch-toggle-${i}`);
-  if (card)  { card.classList.remove('active'); card.classList.add('done'); }
-  if (num)   { num.classList.add('done'); num.textContent = '✓'; }
-  if (body)  body.style.display = 'none';
+  if (card)   { card.classList.remove('active'); card.classList.add('done'); }
+  if (num)    { num.classList.add('done'); num.textContent = '✓'; }
+  if (body)   body.style.display = 'none';
   if (toggle) toggle.textContent = '▶';
+  markChapterDoneInMap(i);
   updateProgress();
-  // Auto-scroll to + open next
   goToChapter(i + 1);
 }
 
@@ -725,13 +781,14 @@ function acknowledgeChapter(i) {
 
 function goToChapter(i) {
   if (i < 0 || i >= chapters.length) return;
-  const card = document.getElementById(`ch-card-${i}`);
-  const body = document.getElementById(`ch-body-${i}`);
+  const card   = document.getElementById(`ch-card-${i}`);
+  const body   = document.getElementById(`ch-body-${i}`);
   const toggle = document.getElementById(`ch-toggle-${i}`);
   if (!chapterDone[i]) {
-    if (card)  card.classList.add('active');
-    if (body)  body.style.display = '';
+    if (card)   card.classList.add('active');
+    if (body)   body.style.display = '';
     if (toggle) toggle.textContent = '▼';
+    updateChapterMapActive(i);
   }
   card?.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -773,9 +830,22 @@ async function submitDismiss() {
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     showToast('Finding dismissed', 'success');
+    const dismissedId = pendingDismissId;
+    const dismissedStatus = status;
+    const dismissedComment = comment;
     closeDismiss();
-    // Refresh the page data to reflect dismissal
-    location.reload();
+    // Update callout in-place — no page reload needed
+    const callout = document.querySelector(`[data-finding-id="${dismissedId}"]`);
+    if (callout) {
+      callout.classList.add('opacity-50');
+      callout.removeAttribute('data-finding-id');
+      const btn = callout.querySelector('button[title="Dismiss finding"]');
+      if (btn) btn.remove();
+      const note = document.createElement('div');
+      note.className = 'mt-1.5 text-xs text-amber-600';
+      note.textContent = `Dismissed: ${dismissedStatus}${dismissedComment ? ' — ' + dismissedComment : ''}`;
+      callout.appendChild(note);
+    }
   } catch(e) {
     showToast('Dismiss failed: ' + e.message, 'error');
   } finally {
