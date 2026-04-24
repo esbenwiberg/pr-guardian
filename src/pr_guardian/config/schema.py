@@ -116,10 +116,10 @@ class FileRolesConfig(BaseModel):
         default_factory=lambda: ["**/tests/**", "**/*.test.*", "**/*.spec.*"]
     )
     docs_patterns: list[str] = Field(
-        default_factory=lambda: ["*.md", "docs/**", "*/docs/**", "CHANGELOG*"]
+        default_factory=lambda: ["**/*.md", "*.md", "**/docs/**", "CHANGELOG*"]
     )
     generated_patterns: list[str] = Field(
-        default_factory=lambda: ["migrations/**", "*/migrations/**", "*package-lock.json", "*.lock"]
+        default_factory=lambda: ["**/migrations/**", "migrations/**", "**/package-lock.json", "**/*.lock"]
     )
     build_patterns: list[str] = Field(
         default_factory=lambda: ["**/Dockerfile*", "**/Makefile", "**/*.csproj"]
