@@ -1,0 +1,47 @@
+# =============================================================================
+# PR Guardian — agent/validator sandbox image
+# =============================================================================
+# For code-factory web validation only. Not for production.
+# - Installs Postgres alongside the app so the sandbox is self-contained.
+# - Seeds demo data on every start (see scripts/agent-serve.sh).
+# - Relaxes pg_hba to 'trust' for local connections (DEV ONLY).
+# =============================================================================
+
+FROM python:3.12-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        postgresql \
+        postgresql-contrib \
+        curl \
+        git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install Python dependencies first so edits to app code don't re-pull them.
+COPY pyproject.toml ./
+COPY src/ src/
+RUN pip install --no-cache-dir -e ".[dev]"
+
+# Copy the rest of the project.
+COPY scripts/ scripts/
+COPY prompts/ prompts/
+COPY alembic/ alembic/
+COPY alembic.ini ./
+
+RUN chmod +x scripts/agent-serve.sh scripts/dev_seed.py
+
+# Relax local auth — sandbox only; never use in production.
+RUN PG_VER="$(ls /etc/postgresql/)" && \
+    HBA="/etc/postgresql/${PG_VER}/main/pg_hba.conf" && \
+    sed -i "s/^local\s\+all\s\+all\s\+peer/local all all trust/" "${HBA}" && \
+    sed -i "s/^host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+scram-sha-256/host all all 127.0.0.1\/32 trust/" "${HBA}" && \
+    sed -i "s/^host\s\+all\s\+all\s\+::1\/128\s\+scram-sha-256/host all all ::1\/128 trust/" "${HBA}"
+
+EXPOSE 8000
+
+ENTRYPOINT ["bash", "scripts/agent-serve.sh"]
