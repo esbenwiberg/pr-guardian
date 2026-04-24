@@ -88,4 +88,4 @@ fi
 # 4. Hand off to uvicorn (foreground; harness Health Path gates readiness)
 # ---------------------------------------------------------------------------
 log "starting uvicorn on ${APP_HOST}:${APP_PORT}"
-exec uvicorn pr_guardian.main:app --host "${APP_HOST}" --port "${APP_PORT}"
+exec python -m uvicorn pr_guardian.main:app --host "${APP_HOST}" --port "${APP_PORT}"
