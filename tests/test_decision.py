@@ -151,6 +151,12 @@ class TestDecisionMatrix:
         result = decide(ctx, [agent], RiskTier.LOW, GuardianConfig())
         assert result.decision == Decision.HUMAN_REVIEW
 
+    def test_high_no_agents_human_review(self):
+        # Vacuous all() on empty list must NOT auto-approve — guard prevents silent pass-through
+        ctx = _make_context()
+        result = decide(ctx, [], RiskTier.HIGH, GuardianConfig())
+        assert result.decision == Decision.HUMAN_REVIEW
+
     def test_high_all_pass_low_score_auto_approve(self):
         agent = AgentResult(agent_name="security_privacy", verdict=Verdict.PASS)
         ctx = _make_context()
