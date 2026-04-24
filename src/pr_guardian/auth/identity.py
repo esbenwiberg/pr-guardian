@@ -48,6 +48,11 @@ def _db_available() -> bool:
     )
 
 
+def _dev_admin_mode() -> bool:
+    """Force anonymous identity to be admin (dev/sandbox validation only)."""
+    return os.environ.get("GUARDIAN_DEV_ADMIN", "").lower() in ("1", "true", "yes")
+
+
 class IdentityMiddleware(BaseHTTPMiddleware):
     """Resolve caller identity on every request."""
 
@@ -79,8 +84,8 @@ class IdentityMiddleware(BaseHTTPMiddleware):
             return await self._resolve_user(email)
 
         # 3. Anonymous fallback
-        if not _db_available():
-            # Local dev without DB — treat as admin for convenience
+        if not _db_available() or _dev_admin_mode():
+            # No DB, or GUARDIAN_DEV_ADMIN=1 — treat anonymous as admin
             return Identity(kind="anonymous", is_admin=True)
 
         return Identity(kind="anonymous", is_admin=False)
