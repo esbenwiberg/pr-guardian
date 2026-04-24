@@ -5,11 +5,14 @@
 # (/api/health) gates the validator on readiness — this script execs uvicorn
 # in the foreground and does not run its own health loop.
 #
-# Assumes:
-#  - Debian/Ubuntu-based image with the 'postgresql' package installed
-#    (see Dockerfile.agent)
-#  - Running as root (autopod containers do)
-#  - Package already installed (pip install -e .[dev])
+# Works in two modes:
+#  - Dockerfile.agent image (fast): Postgres pre-installed, just starts.
+#  - Generic Debian/Ubuntu base (slower first run): apt-installs Postgres.
+#
+# Assumes running as root (autopod containers do) and that the Python package
+# is already installed (pip install -e .[dev]).
+#
+# Respects harness conventions: $PORT / $HOST are honored if set.
 set -euo pipefail
 
 : "${PG_USER:=guardian}"
@@ -88,7 +91,7 @@ if [[ "${_pg_available}" -eq 1 ]]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Hand off to uvicorn (foreground; harness Health Path gates readiness)
+# 5. Hand off to uvicorn (foreground; harness Health Path gates readiness)
 # ---------------------------------------------------------------------------
 log "starting uvicorn on ${APP_HOST}:${APP_PORT}"
 exec python -m uvicorn pr_guardian.main:app --host "${APP_HOST}" --port "${APP_PORT}"
