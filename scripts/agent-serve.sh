@@ -22,6 +22,9 @@ set -euo pipefail
 
 log() { printf '[agent-serve] %s\n' "$*"; }
 
+# Intentionally unconditional: agent-serve.sh is the sandbox validation script only.
+# CLAUDE.md documents that GUARDIAN_DEV_ADMIN=1 is expected for agent/validator runs.
+# Do NOT promote this script to auth-enforced (staging/prod) environments.
 export GUARDIAN_DEV_ADMIN=1
 
 # ---------------------------------------------------------------------------
