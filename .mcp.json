@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "escalation": {
+      "type": "http",
+      "url": "http://host.docker.internal:3100/mcp/assistant-guanaco",
+      "headers": {
+        "Authorization": "Bearer YXNzaXN0YW50LWd1YW5hY28uMTc3NzE0NjU4OC44YjMyMDNhNDc3YzFjMTEyYjJlZjdmMzQ5ZTVhMmYxZmFlNzliYjZiZmE0MWU3NzlkZGIxZDhjNzU4MzE4NzFk"
+      }
+    }
+  }
+}

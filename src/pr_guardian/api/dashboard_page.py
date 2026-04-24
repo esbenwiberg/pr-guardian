@@ -20,12 +20,25 @@ _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
+_BROWSE_PR_HTML = _DASHBOARD_DIR / "browse_pr.html"
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
 async def dashboard():
     """Serve the dashboard overview page."""
     return _DASHBOARD_HTML.read_text()
+
+
+@router.get("/review-mode", response_class=HTMLResponse)
+async def browse_pr_page(pr: str | None = None):
+    """Serve the 'Browse PR' landing page, or the chapter viewer if ?pr=... is set.
+
+    When ?pr is present we hand off to human_review.html, whose bootstrap
+    detects the /review-mode path and fetches the diff from /api/dashboard/pr-diff.
+    """
+    if pr:
+        return _HUMAN_REVIEW_HTML.read_text()
+    return _BROWSE_PR_HTML.read_text()
 
 
 @router.get("/reviews", response_class=HTMLResponse)

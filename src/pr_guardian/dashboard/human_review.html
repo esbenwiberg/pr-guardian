@@ -241,7 +241,10 @@
 
 <script>
 // ── Constants ──────────────────────────────────────────────────────────
-const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
+const URL_PATH = location.pathname;
+const QS = new URLSearchParams(location.search);
+const REVIEW_ID = URL_PATH.startsWith('/reviews/') ? (URL_PATH.split('/reviews/')[1]?.split('/')[0] || '') : '';
+const AD_HOC_PR_URL = URL_PATH === '/review-mode' ? QS.get('pr') : null;
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const ROLE_ORDER = { PRODUCTION: 0, CONFIG: 1, BUILD: 2, INFRA: 3, TEST: 4, DOCS: 5, DEPENDENCY: 6, GENERATED: 7 };
 
@@ -254,22 +257,45 @@ let pendingDismissId = null;
 
 // ── Bootstrap ──────────────────────────────────────────────────────────
 async function init() {
-  if (!REVIEW_ID) { showError('No review ID in URL.'); return; }
-
-  let [reviewResp, diffResp] = await Promise.allSettled([
-    fetch(`/api/dashboard/reviews/${REVIEW_ID}`),
-    fetch(`/api/dashboard/reviews/${REVIEW_ID}/diff`),
-  ]);
-
-  if (reviewResp.status === 'rejected') { showError('Failed to load review: ' + reviewResp.reason); return; }
-  const reviewJson = await reviewResp.value.json();
-  if (reviewJson.error) { showError(reviewJson.error); return; }
-  reviewData = reviewJson;
-
-  if (diffResp.status === 'fulfilled' && diffResp.value.ok) {
-    diffData = await diffResp.value.json();
+  if (REVIEW_ID) {
+    const [reviewResp, diffResp] = await Promise.allSettled([
+      fetch(`/api/dashboard/reviews/${REVIEW_ID}`),
+      fetch(`/api/dashboard/reviews/${REVIEW_ID}/diff`),
+    ]);
+    if (reviewResp.status === 'rejected') { showError('Failed to load review: ' + reviewResp.reason); return; }
+    const reviewJson = await reviewResp.value.json();
+    if (reviewJson.error) { showError(reviewJson.error); return; }
+    reviewData = reviewJson;
+    if (diffResp.status === 'fulfilled' && diffResp.value.ok) {
+      diffData = await diffResp.value.json();
+    }
+  } else if (AD_HOC_PR_URL) {
+    let resp;
+    try {
+      resp = await fetch(`/api/dashboard/pr-diff?pr_url=${encodeURIComponent(AD_HOC_PR_URL)}`);
+    } catch (e) {
+      showError('Failed to fetch PR: ' + e); return;
+    }
+    if (!resp.ok) {
+      const detail = await resp.json().catch(() => ({}));
+      showError(detail.detail || `Failed to load PR (HTTP ${resp.status})`);
+      return;
+    }
+    const data = await resp.json();
+    diffData = { files: data.files };
+    reviewData = {
+      agent_results: [],
+      decision: null,
+      repo: data.repo,
+      pr_id: data.pr_id,
+      pr_url: data.pr_url,
+      title: data.title,
+      author: data.author,
+    };
+  } else {
+    showError('No review ID or PR URL provided.');
+    return;
   }
-
   buildOrientScreen();
 }
 
@@ -456,9 +482,15 @@ function buildOrientScreen() {
     document.getElementById('hdr-pr-link').href = d.pr_url;
     document.getElementById('hdr-pr-link').style.display = '';
   }
-  document.getElementById('hdr-review-link').href = `/reviews/${REVIEW_ID}`;
-  document.getElementById('orient-back-link').href = `/reviews/${REVIEW_ID}`;
-  document.getElementById('done-back-link').href   = `/reviews/${REVIEW_ID}`;
+  const backHref = REVIEW_ID ? `/reviews/${REVIEW_ID}` : '/review-mode';
+  document.getElementById('hdr-review-link').href = backHref;
+  document.getElementById('orient-back-link').href = backHref;
+  document.getElementById('done-back-link').href   = backHref;
+  if (!REVIEW_ID) {
+    document.getElementById('orient-back-link').textContent = '← Back to Browse PR';
+    document.getElementById('done-back-link').textContent   = 'Back to Browse PR';
+    document.getElementById('hdr-review-link').textContent  = 'Browse PR';
+  }
 
   // AI summary
   const summaries = (d.agent_results || []).map(a => a.summary).filter(Boolean);

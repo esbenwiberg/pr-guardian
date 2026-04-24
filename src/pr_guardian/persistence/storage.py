@@ -176,6 +176,25 @@ async def get_review(review_id: uuid.UUID) -> dict[str, Any] | None:
         return _review_to_dict(row)
 
 
+async def get_latest_review_by_pr(
+    pr_id: str, repo: str, platform: str,
+) -> dict[str, Any] | None:
+    """Return the most recent review for a given PR (by pr_id + repo + platform), or None."""
+    async with async_session() as session:
+        q = (
+            select(ReviewRow)
+            .where(
+                ReviewRow.pr_id == pr_id,
+                ReviewRow.repo == repo,
+                ReviewRow.platform == platform,
+            )
+            .order_by(ReviewRow.started_at.desc())
+            .limit(1)
+        )
+        row = (await session.scalars(q)).first()
+        return _review_to_dict(row) if row else None
+
+
 async def list_reviews(
     limit: int = 50,
     offset: int = 0,
