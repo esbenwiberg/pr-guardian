@@ -5,24 +5,50 @@
 # (/api/health) gates the validator on readiness — this script execs uvicorn
 # in the foreground and does not run its own health loop.
 #
-# Assumes:
-#  - Debian/Ubuntu-based image with the 'postgresql' package installed
-#    (see Dockerfile.agent)
-#  - Running as root (autopod containers do)
-#  - Package already installed (pip install -e .[dev])
+# Works in two modes:
+#  - Dockerfile.agent image (fast): Postgres pre-installed, just starts.
+#  - Generic Debian/Ubuntu base (slower first run): apt-installs Postgres.
+#
+# Assumes running as root (autopod containers do) and that the Python package
+# is already installed (pip install -e .[dev]).
+#
+# Respects harness conventions: $PORT / $HOST are honored if set.
 set -euo pipefail
 
 : "${PG_USER:=guardian}"
 : "${PG_PASSWORD:=guardian}"
 : "${PG_DB:=pr_guardian}"
 : "${PG_PORT:=5432}"
-: "${APP_HOST:=0.0.0.0}"
-: "${APP_PORT:=8000}"
+# Harness typically injects $PORT (and sometimes $HOST). Fall back to sane defaults.
+: "${APP_HOST:=${HOST:-0.0.0.0}}"
+: "${APP_PORT:=${PORT:-8000}}"
 
 log() { printf '[agent-serve] %s\n' "$*"; }
 
 # ---------------------------------------------------------------------------
-# 1. Start Postgres (idempotent)
+# 1. Ensure Postgres is installed (apt-install if missing)
+# ---------------------------------------------------------------------------
+if ! command -v pg_isready >/dev/null 2>&1; then
+    log "postgres not found — installing (one-time apt fetch)"
+    if ! command -v apt-get >/dev/null 2>&1; then
+        log "apt-get not available; cannot auto-install postgres. Use Dockerfile.agent."
+        exit 1
+    fi
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq
+    apt-get install -y --no-install-recommends postgresql postgresql-contrib
+    # Relax local auth so the guardian role can connect without a matching OS user.
+    PG_VER="$(ls /etc/postgresql/ 2>/dev/null | head -n1 || true)"
+    if [[ -n "${PG_VER}" ]]; then
+        HBA="/etc/postgresql/${PG_VER}/main/pg_hba.conf"
+        sed -i "s/^local\s\+all\s\+all\s\+peer/local all all trust/" "${HBA}" || true
+        sed -i "s/^host\s\+all\s\+all\s\+127\.0\.0\.1\/32\s\+scram-sha-256/host all all 127.0.0.1\/32 trust/" "${HBA}" || true
+        sed -i "s/^host\s\+all\s\+all\s\+::1\/128\s\+scram-sha-256/host all all ::1\/128 trust/" "${HBA}" || true
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# 2. Start Postgres (idempotent)
 # ---------------------------------------------------------------------------
 if ! pg_isready -h localhost -p "$PG_PORT" >/dev/null 2>&1; then
     log "starting postgres"
@@ -51,7 +77,7 @@ fi
 log "postgres ready on :${PG_PORT}"
 
 # ---------------------------------------------------------------------------
-# 2. Ensure role + database exist (idempotent)
+# 3. Ensure role + database exist (idempotent)
 # ---------------------------------------------------------------------------
 as_pg() { su - postgres -c "$1"; }
 
@@ -69,13 +95,13 @@ export DATABASE_URL="postgresql+asyncpg://${PG_USER}:${PG_PASSWORD}@localhost:${
 export GUARDIAN_DEV_ADMIN=1
 
 # ---------------------------------------------------------------------------
-# 3. Nuke & seed demo data
+# 4. Nuke & seed demo data
 # ---------------------------------------------------------------------------
 log "seeding demo data"
 python "$(dirname "$0")/dev_seed.py"
 
 # ---------------------------------------------------------------------------
-# 4. Hand off to uvicorn (foreground; harness Health Path gates readiness)
+# 5. Hand off to uvicorn (foreground; harness Health Path gates readiness)
 # ---------------------------------------------------------------------------
 log "starting uvicorn on ${APP_HOST}:${APP_PORT}"
 exec uvicorn pr_guardian.main:app --host "${APP_HOST}" --port "${APP_PORT}"
