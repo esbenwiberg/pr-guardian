@@ -18,6 +18,7 @@ _SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"
 _ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
+_BROWSE_PR_HTML = _DASHBOARD_DIR / "browse_pr.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 
@@ -62,6 +63,18 @@ async def scan_detail_page(scan_id: str):
 async def prompts_page():
     """Serve the prompt editor page."""
     return _PROMPTS_HTML.read_text()
+
+
+@router.get("/browse-pr", response_class=HTMLResponse)
+async def browse_pr_page():
+    """Serve the Browse PR page (open any PR URL in chapter view)."""
+    return _BROWSE_PR_HTML.read_text()
+
+
+@router.get("/review-mode", response_class=HTMLResponse)
+async def review_mode_page():
+    """Serve the live PR review mode page (browse diff without a stored review)."""
+    return _HUMAN_REVIEW_HTML.read_text()
 
 
 @router.get("/how-it-works", response_class=HTMLResponse)

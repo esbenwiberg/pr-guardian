@@ -159,6 +159,79 @@ async def dashboard_review_diff(review_id: uuid.UUID):
     }
 
 
+class ResolvePRRequest(BaseModel):
+    pr_url: str
+
+
+@router.post("/resolve-pr")
+async def resolve_pr(body: ResolvePRRequest):
+    """Given a PR URL, check for an existing review or confirm the URL is valid.
+
+    Returns { mode: 'existing', review_id } if a completed review is found,
+    or { mode: 'live', pr_url } to browse the diff directly.
+    """
+    from pr_guardian.api.review import _parse_pr_url
+
+    try:
+        _parse_pr_url(body.pr_url)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+    try:
+        review = await storage.find_review_by_pr_url(body.pr_url)
+    except Exception:
+        review = None
+
+    if review:
+        return {"mode": "existing", "review_id": str(review["id"])}
+    return {"mode": "live", "pr_url": body.pr_url}
+
+
+@router.get("/live-diff")
+async def live_diff(pr_url: str = Query(..., description="PR URL to fetch diff for")):
+    """Fetch the diff for an arbitrary PR URL without requiring a stored review."""
+    from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
+    from pr_guardian.platform.factory import create_adapter
+
+    try:
+        stub, platform_name = _parse_pr_url(pr_url)
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+    adapter = create_adapter(platform_name)
+
+    try:
+        pr = await _hydrate_pr(adapter, stub, platform_name)
+    except Exception as e:
+        raise HTTPException(422, f"Failed to fetch PR info: {e}")
+
+    try:
+        diff = await adapter.fetch_diff(pr)
+    except Exception as e:
+        raise HTTPException(502, f"Failed to fetch diff from platform: {e}")
+
+    return {
+        "pr_url": pr_url,
+        "pr_id": pr.pr_id,
+        "repo": pr.repo,
+        "title": pr.title,
+        "author": pr.author,
+        "source_branch": pr.source_branch,
+        "target_branch": pr.target_branch,
+        "files": [
+            {
+                "path": f.path,
+                "status": f.status,
+                "old_path": f.old_path,
+                "additions": f.additions,
+                "deletions": f.deletions,
+                "patch": f.patch,
+            }
+            for f in diff.files
+        ],
+    }
+
+
 @router.get("/active")
 async def dashboard_active():
     """Currently in-progress reviews."""

@@ -197,6 +197,19 @@ async def list_reviews(
         return [_review_to_dict(r) for r in rows]
 
 
+async def find_review_by_pr_url(pr_url: str) -> dict[str, Any] | None:
+    """Find the most recent completed review for a given PR URL."""
+    async with async_session() as session:
+        q = (
+            select(ReviewRow)
+            .where(ReviewRow.pr_url == pr_url)
+            .where(ReviewRow.finished_at.isnot(None))
+            .order_by(ReviewRow.finished_at.desc())
+        )
+        row = (await session.scalars(q)).first()
+        return _review_to_dict(row) if row else None
+
+
 async def get_active_reviews() -> list[dict[str, Any]]:
     """Get reviews that haven't finished yet (live progress)."""
     async with async_session() as session:
