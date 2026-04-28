@@ -242,6 +242,8 @@
 <script>
 // ── Constants ──────────────────────────────────────────────────────────
 const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
+const LIVE_PR_URL = new URLSearchParams(location.search).get('pr') || '';
+const LIVE_MODE = !REVIEW_ID && !!LIVE_PR_URL;
 const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const ROLE_ORDER = { PRODUCTION: 0, CONFIG: 1, BUILD: 2, INFRA: 3, TEST: 4, DOCS: 5, DEPENDENCY: 6, GENERATED: 7 };
 
@@ -254,6 +256,38 @@ let pendingDismissId = null;
 
 // ── Bootstrap ──────────────────────────────────────────────────────────
 async function init() {
+  if (LIVE_MODE) {
+    // Live mode: fetch diff directly by PR URL, no stored review
+    document.getElementById('loading').textContent = 'Fetching PR diff…';
+    try {
+      const resp = await fetch(`/api/dashboard/live-diff?pr_url=${encodeURIComponent(LIVE_PR_URL)}`);
+      if (!resp.ok) {
+        const detail = await resp.json().catch(() => ({}));
+        showError(detail.detail || `HTTP ${resp.status}`);
+        return;
+      }
+      diffData = await resp.json();
+    } catch (e) {
+      showError('Failed to fetch PR diff: ' + e.message);
+      return;
+    }
+    // Build minimal reviewData stub so buildOrientScreen works
+    reviewData = {
+      pr_url: LIVE_PR_URL,
+      pr_id: diffData.pr_id || '',
+      repo: diffData.repo || '',
+      title: diffData.title || '',
+      author: diffData.author || '',
+      source_branch: diffData.source_branch || '',
+      target_branch: diffData.target_branch || '',
+      agent_results: [],
+      commits: 0,
+      decision: null,
+    };
+    buildOrientScreen();
+    return;
+  }
+
   if (!REVIEW_ID) { showError('No review ID in URL.'); return; }
 
   let [reviewResp, diffResp] = await Promise.allSettled([
@@ -456,9 +490,19 @@ function buildOrientScreen() {
     document.getElementById('hdr-pr-link').href = d.pr_url;
     document.getElementById('hdr-pr-link').style.display = '';
   }
-  document.getElementById('hdr-review-link').href = `/reviews/${REVIEW_ID}`;
-  document.getElementById('orient-back-link').href = `/reviews/${REVIEW_ID}`;
-  document.getElementById('done-back-link').href   = `/reviews/${REVIEW_ID}`;
+
+  if (LIVE_MODE) {
+    document.getElementById('hdr-review-link').style.display = 'none';
+    document.getElementById('orient-back-link').href = '/browse-pr';
+    document.getElementById('orient-back-link').textContent = '← Browse PR';
+    document.getElementById('done-back-link').href   = '/browse-pr';
+    // Hide severity grid — no findings in live mode
+    document.getElementById('orient-sev-grid').style.display = 'none';
+  } else {
+    document.getElementById('hdr-review-link').href = `/reviews/${REVIEW_ID}`;
+    document.getElementById('orient-back-link').href = `/reviews/${REVIEW_ID}`;
+    document.getElementById('done-back-link').href   = `/reviews/${REVIEW_ID}`;
+  }
 
   // AI summary
   const summaries = (d.agent_results || []).map(a => a.summary).filter(Boolean);
