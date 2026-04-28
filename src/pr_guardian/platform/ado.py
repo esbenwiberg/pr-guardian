@@ -453,7 +453,10 @@ class ADOAdapter:
                 },
                 params={"api-version": "7.1"},
             )
-            resp2.raise_for_status()
+            try:
+                resp2.raise_for_status()
+            except httpx.HTTPStatusError:
+                log.warning("ado_delete_reply_failed", thread_id=thread_id)
 
     # --- Scan-mode methods ---
 

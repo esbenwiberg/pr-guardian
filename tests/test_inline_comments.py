@@ -356,3 +356,26 @@ async def test_ado_delete_raises_on_non_404_error():
     with patch.object(adapter, "_get_client", return_value=mock_client):
         with pytest.raises(httpx.HTTPStatusError):
             await adapter.delete_inline_comments(pr, ["99"])
+
+
+@pytest.mark.asyncio
+async def test_ado_delete_reply_failure_does_not_abort_batch():
+    """If posting the superseded reply fails, the batch continues for remaining thread IDs."""
+    adapter = ADOAdapter(pat="pat", org_url="https://dev.azure.com/myorg")
+    pr = _make_ado_pr()
+
+    mock_client = MagicMock()
+    # Both PATCHes succeed
+    mock_client.patch = AsyncMock(return_value=_mock_response(200, {}))
+    # First reply POST fails with 403, second succeeds
+    mock_client.post = AsyncMock(side_effect=[
+        _mock_response(403, {}),
+        _mock_response(200, {}),
+    ])
+
+    with patch.object(adapter, "_get_client", return_value=mock_client):
+        # Should not raise even though first reply POST returns 403
+        await adapter.delete_inline_comments(pr, ["thread1", "thread2"])
+
+    assert mock_client.patch.call_count == 2
+    assert mock_client.post.call_count == 2
