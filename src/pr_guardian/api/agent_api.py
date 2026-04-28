@@ -13,7 +13,8 @@ import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
 
 from pr_guardian.auth.dependencies import require_write_scope
 from pr_guardian.auth.identity import Identity
@@ -141,7 +142,7 @@ async def trigger_re_review(
         import traceback
         try:
             from pr_guardian.core.orchestrator import run_re_review
-            await run_re_review(pr, adapter, original_review=review, post_comment=True)
+            await run_re_review(pr, adapter, original_review=review)
         except Exception as e:
             log.error("agent_re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
@@ -152,8 +153,10 @@ async def trigger_re_review(
 
 
 class FullReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     pr_url: str
-    post_comment: bool = True
+    comment_mode: Literal["none", "summary", "inline"] = "summary"
 
 
 @router.post("/review")
@@ -185,7 +188,7 @@ async def trigger_full_review(
         import traceback
         try:
             from pr_guardian.core.orchestrator import run_review
-            await run_review(pr, adapter, post_comment=body.post_comment, dismissals=dismissals)
+            await run_review(pr, adapter, comment_mode=body.comment_mode, dismissals=dismissals)
         except Exception as e:
             log.error("agent_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 

@@ -166,9 +166,12 @@
             <input type="url" id="review-pr-url" required placeholder="https://github.com/org/repo/pull/123" class="form-input w-full">
           </div>
           <div>
-            <label class="flex items-center gap-2 text-sm cursor-pointer">
-              <input type="checkbox" id="review-post-comment" class="form-checkbox"> Post comment on PR
-            </label>
+            <label class="form-label" for="review-comment-mode">Comment mode</label>
+            <select id="review-comment-mode" class="form-input w-full">
+              <option value="none" selected>No comment</option>
+              <option value="summary">Summary comment</option>
+              <option value="inline">Inline comments</option>
+            </select>
           </div>
         </div>
         <div class="dialog-footer">
@@ -402,7 +405,7 @@ async function submitRepoReview(e) {
 async function submitReview(e) {
   e.preventDefault();
   const url = document.getElementById('review-pr-url').value.trim();
-  const postComment = document.getElementById('review-post-comment').checked;
+  const commentMode = document.getElementById('review-comment-mode').value;
   const btn = document.getElementById('review-submit-btn');
   const status = document.getElementById('review-status');
 
@@ -416,7 +419,7 @@ async function submitReview(e) {
     const resp = await fetch('/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pr_url: url, post_comment: postComment }),
+      body: JSON.stringify({ pr_url: url, comment_mode: commentMode }),
     });
     const data = await resp.json();
     if (!resp.ok) {

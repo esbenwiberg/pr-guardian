@@ -840,7 +840,7 @@ async function triggerFullReview() {
     const resp = await fetch('/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pr_url: reviewData.pr_url, post_comment: true }),
+      body: JSON.stringify({ pr_url: reviewData.pr_url, comment_mode: reviewData.comment_mode ?? "summary" }),
     });
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import re
+from typing import Literal
 
 import structlog
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
@@ -27,9 +28,11 @@ _ADO_PR_RE = re.compile(
 
 
 class ReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     pr_url: str
     dry_run: bool = False
-    post_comment: bool = False
+    comment_mode: Literal["none", "summary", "inline"] = "none"
 
 
 class ReviewResponse(BaseModel):
@@ -44,13 +47,13 @@ class ReviewResponse(BaseModel):
 
 
 async def _run_review_background(
-    pr: PlatformPR, adapter, post_comment: bool, base_url: str,
+    pr: PlatformPR, adapter, comment_mode: str, base_url: str,
     dismissals: list[dict] | None = None,
 ) -> None:
     """Run the review pipeline in the background, logging any errors."""
     import traceback
     try:
-        await run_review(pr, adapter, post_comment=post_comment, base_url=base_url, dismissals=dismissals)
+        await run_review(pr, adapter, comment_mode=comment_mode, base_url=base_url, dismissals=dismissals)
     except Exception as e:
         log.error("background_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
@@ -91,7 +94,7 @@ async def manual_review(req: ReviewRequest, request: Request):
         pass
 
     base_url = str(request.base_url).rstrip("/")
-    asyncio.create_task(_run_review_background(pr, adapter, req.post_comment, base_url, dismissals=dismissals))
+    asyncio.create_task(_run_review_background(pr, adapter, req.comment_mode, base_url, dismissals=dismissals))
 
     return ReviewResponse(
         status="queued",

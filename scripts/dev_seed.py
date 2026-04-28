@@ -27,6 +27,7 @@ from pr_guardian.persistence.models import (
     FindingRow,
     GlobalConfigRow,
     MechanicalResultRow,
+    PostedInlineCommentRow,
     PromptOverrideRow,
     ReviewRow,
     ScanAgentResultRow,
@@ -49,6 +50,7 @@ async def _wipe() -> None:
         for model in (
             FindingDismissalRow,
             ScanRow,
+            PostedInlineCommentRow,
             ReviewRow,
             PromptOverrideRow,
             GlobalConfigRow,
@@ -75,6 +77,7 @@ def _review(
     summary: str = "",
     cost: float = 0.0,
     mechanical_passed: bool = True,
+    comment_mode: str = "none",
 ) -> ReviewRow:
     duration_ms = (
         int((finished - started).total_seconds() * 1000) if finished else None
@@ -107,6 +110,7 @@ def _review(
         started_at=started,
         finished_at=finished,
         duration_ms=duration_ms,
+        comment_mode=comment_mode,
     )
 
 
@@ -267,6 +271,40 @@ async def _seed_reviews() -> None:
                 "Assertions now cover previously-unchecked paths.")
     rows.append(a6)
 
+    # 7. Inline-comment review — demonstrates PostedInlineCommentRow wiring
+    r7 = _review(
+        repo="esbenwiberg/pr-guardian", pr_id="130", author="bob",
+        title="Add rate limiting to API endpoints", decision="human_review",
+        risk_tier="medium", score=6.1, started=_ago(hours=1),
+        finished=_ago(hours=1, minutes=-9),
+        summary="Rate limiting implementation has two gaps that need review.",
+        cost=0.0287, comment_mode="inline",
+    )
+    rows.append(r7)
+    a7 = _agent(r7.id, "security_privacy", "findings", ["python"],
+                "Missing rate limit on unauthenticated endpoints; key leakage risk.")
+    rows.append(a7)
+    rows.append(_finding(a7.id, severity="high", certainty="high",
+                         category="rate_limiting",
+                         file="src/pr_guardian/api/review.py", line=58,
+                         description="POST /api/review has no rate limit; trivially abusable by unauthenticated callers.",
+                         suggestion="Apply a per-IP rate limiter (e.g. slowapi) to this endpoint."))
+    rows.append(_finding(a7.id, severity="medium", certainty="medium",
+                         category="info_disclosure",
+                         file="src/pr_guardian/api/review.py", line=71,
+                         description="Error message from _hydrate_pr leaks internal exception detail to the caller.",
+                         suggestion="Return a generic 422 message; log the full error server-side only."))
+    rows.append(PostedInlineCommentRow(
+        id=uuid.uuid4(), review_id=r7.id,
+        platform_comment_id="gh-comment-001", platform="github",
+        pr_id="130", repo="esbenwiberg/pr-guardian",
+    ))
+    rows.append(PostedInlineCommentRow(
+        id=uuid.uuid4(), review_id=r7.id,
+        platform_comment_id="gh-comment-002", platform="github",
+        pr_id="130", repo="esbenwiberg/pr-guardian",
+    ))
+
     async with async_session() as s:
         s.add_all(rows)
         await s.commit()
@@ -327,7 +365,7 @@ async def main() -> None:
     _db._engine = None
     _db._session_factory = None
 
-    print("[dev_seed] seeded 6 reviews, 1 dismissal, 1 admin")
+    print("[dev_seed] seeded 7 reviews, 1 dismissal, 1 admin")
 
 
 if __name__ == "__main__":

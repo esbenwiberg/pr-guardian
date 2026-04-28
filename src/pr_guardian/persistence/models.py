@@ -59,6 +59,10 @@ class ReviewRow(Base):
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
+    comment_mode: Mapped[str] = mapped_column(
+        String(32), server_default="none", nullable=False
+    )
+
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -274,6 +278,31 @@ class FindingDismissalRow(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Inline comment tracking
+# ---------------------------------------------------------------------------
+
+
+class PostedInlineCommentRow(Base):
+    """Tracks platform-native comment IDs posted per review."""
+
+    __tablename__ = "posted_inline_comments"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    review_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("reviews.id"), index=True
+    )
+    platform_comment_id: Mapped[str] = mapped_column(String(256))
+    platform: Mapped[str] = mapped_column(String(16))
+    pr_id: Mapped[str] = mapped_column(String(64))
+    repo: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 

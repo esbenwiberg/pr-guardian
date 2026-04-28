@@ -3,8 +3,10 @@ from __future__ import annotations
 import os
 
 from pr_guardian.models.context import TrustTier
-from pr_guardian.models.findings import Verdict
+from pr_guardian.models.findings import Finding, Verdict
 from pr_guardian.models.output import Decision, ReviewResult
+
+SEVERITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
 # Agent display names for the PR comment
 _AGENT_LABELS: dict[str, str] = {
@@ -146,3 +148,18 @@ def get_review_labels(result: ReviewResult) -> list[str]:
             labels.append("guardian-approved")
 
     return labels
+
+
+def build_inline_comment_body(findings: list[Finding]) -> str:
+    """Format co-located findings into a single inline comment body, separated by '---'."""
+    parts = []
+    for f in findings:
+        lines = [
+            f"**[{f.severity.value.upper()}] {f.category}**",
+            f.description,
+        ]
+        if f.suggestion:
+            lines.append("")
+            lines.append(f"> {f.suggestion}")
+        parts.append("\n".join(lines))
+    return "\n\n---\n\n".join(parts)
