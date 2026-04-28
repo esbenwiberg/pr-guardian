@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, PlatformPR
 
 
@@ -36,6 +37,24 @@ class PlatformAdapter(Protocol):
 
     async def request_reviewers(self, pr: PlatformPR, group: str) -> None:
         """Request review from a team/group."""
+        ...
+
+    async def post_inline_comments(
+        self,
+        pr: PlatformPR,
+        findings: list[Finding],
+        *,
+        threshold: str = "MEDIUM",
+    ) -> list[str]:
+        """Post one inline comment per unique file+line group; return posted comment IDs."""
+        ...
+
+    async def delete_inline_comments(
+        self,
+        pr: PlatformPR,
+        comment_ids: list[str],
+    ) -> None:
+        """Delete previously posted inline comments by their platform-native IDs."""
         ...
 
     # --- Scan-mode methods ---

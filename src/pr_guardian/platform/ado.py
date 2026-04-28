@@ -8,7 +8,9 @@ import json
 import httpx
 import structlog
 
+from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
+from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
 
 log = structlog.get_logger()
@@ -367,6 +369,85 @@ class ADOAdapter:
         log.info("ado_request_reviewers", pr_id=pr.pr_id, group=group)
         # ADO uses reviewer IDs — would need group resolution via API
         # For now, log the intent
+
+    async def post_inline_comments(
+        self,
+        pr: PlatformPR,
+        findings: list[Finding],
+        *,
+        threshold: str = "MEDIUM",
+    ) -> list[str]:
+        client = self._get_client()
+        grouped: dict[tuple[str, int], list[Finding]] = {}
+        for f in findings:
+            if f.line is None:
+                continue
+            grouped.setdefault((f.file, f.line), []).append(f)
+
+        ids: list[str] = []
+        for (file, line), group in grouped.items():
+            body = inline_comment_body(group)
+            file_path = f"/{file}" if not file.startswith("/") else file
+            url = (
+                f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+                f"/pullRequests/{pr.pr_id}/threads"
+            )
+            try:
+                resp = await client.post(
+                    url,
+                    json={
+                        "comments": [{"parentCommentId": 0, "content": body, "commentType": 1}],
+                        "status": 1,
+                        "threadContext": {
+                            "filePath": file_path,
+                            "rightFileStart": {"line": line, "offset": 1},
+                            "rightFileEnd": {"line": line, "offset": 200},
+                        },
+                    },
+                    params={"api-version": "7.1"},
+                )
+                resp.raise_for_status()
+                thread_id = resp.json().get("id")
+                if thread_id is not None:
+                    ids.append(str(thread_id))
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 422:
+                    log.debug(
+                        "ado_inline_comment_skipped",
+                        file=file, line=line, reason="line_not_in_diff",
+                    )
+                else:
+                    raise
+        return ids
+
+    async def delete_inline_comments(
+        self,
+        pr: PlatformPR,
+        comment_ids: list[str],
+    ) -> None:
+        client = self._get_client()
+        for thread_id in comment_ids:
+            thread_url = (
+                f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+                f"/pullRequests/{pr.pr_id}/threads/{thread_id}"
+            )
+            resp = await client.patch(
+                thread_url,
+                json={"status": 4},
+                params={"api-version": "7.1"},
+            )
+            resp.raise_for_status()
+            comments_url = thread_url + "/comments"
+            resp2 = await client.post(
+                comments_url,
+                json={
+                    "parentCommentId": 1,
+                    "content": "This comment was superseded by a re-review.",
+                    "commentType": 1,
+                },
+                params={"api-version": "7.1"},
+            )
+            resp2.raise_for_status()
 
     # --- Scan-mode methods ---
 

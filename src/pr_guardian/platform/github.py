@@ -5,7 +5,9 @@ import base64
 import httpx
 import structlog
 
+from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
+from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
 
 log = structlog.get_logger()
@@ -265,6 +267,57 @@ class GitHubAdapter:
         )
         resp.raise_for_status()
         return resp.json()
+
+    async def post_inline_comments(
+        self,
+        pr: PlatformPR,
+        findings: list[Finding],
+        *,
+        threshold: str = "MEDIUM",
+    ) -> list[str]:
+        client = self._get_client()
+        grouped: dict[tuple[str, int], list[Finding]] = {}
+        for f in findings:
+            if f.line is None:
+                continue
+            grouped.setdefault((f.file, f.line), []).append(f)
+
+        ids: list[str] = []
+        for (file, line), group in grouped.items():
+            body = inline_comment_body(group)
+            try:
+                resp = await client.post(
+                    f"/repos/{pr.repo}/pulls/{pr.pr_id}/reviews",
+                    json={
+                        "event": "COMMENT",
+                        "comments": [{"path": file, "line": line, "body": body}],
+                    },
+                )
+                resp.raise_for_status()
+                for c in resp.json().get("comments", []):
+                    if "id" in c:
+                        ids.append(str(c["id"]))
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 422:
+                    log.debug(
+                        "github_inline_comment_skipped",
+                        file=file, line=line, reason="line_not_in_diff",
+                    )
+                else:
+                    raise
+        return ids
+
+    async def delete_inline_comments(
+        self,
+        pr: PlatformPR,
+        comment_ids: list[str],
+    ) -> None:
+        client = self._get_client()
+        for comment_id in comment_ids:
+            resp = await client.delete(
+                f"/repos/{pr.repo}/pulls/comments/{comment_id}",
+            )
+            resp.raise_for_status()
 
     async def close(self) -> None:
         if self._client:
