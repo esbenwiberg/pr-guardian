@@ -38,7 +38,7 @@ log = structlog.get_logger()
 # Write operations
 # ---------------------------------------------------------------------------
 
-async def create_review_record(pr: PlatformPR) -> uuid.UUID:
+async def create_review_record(pr: PlatformPR, *, comment_mode: str = "none") -> uuid.UUID:
     """Insert a pending review row when a review starts. Returns the row id."""
     row = ReviewRow(
         pr_id=pr.pr_id,
@@ -51,6 +51,7 @@ async def create_review_record(pr: PlatformPR) -> uuid.UUID:
         head_commit_sha=pr.head_commit_sha,
         pr_url=pr.pr_url,
         stage="discovery",
+        comment_mode=comment_mode,
     )
     async with async_session() as session:
         session.add(row)

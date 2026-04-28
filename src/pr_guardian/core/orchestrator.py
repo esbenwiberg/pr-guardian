@@ -17,7 +17,11 @@ from pr_guardian.agents.test_quality import TestQualityAgent
 from pr_guardian.config.loader import apply_global_settings, load_repo_config
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
-from pr_guardian.decision.actions import build_summary_comment, get_review_labels
+from pr_guardian.decision.actions import (
+    SEVERITY_ORDER,
+    build_summary_comment,
+    get_review_labels,
+)
 from pr_guardian.decision.engine import decide
 from pr_guardian.decision.severity_filter import filter_findings
 from pr_guardian.decision.validator import validate_findings
@@ -93,6 +97,7 @@ async def run_review(
     dismissals: list[dict] | None = None,
     diff_override=None,
     skip_platform_side_effects: bool = False,
+    comment_mode: str = "summary",
 ) -> ReviewResult:
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
@@ -103,7 +108,7 @@ async def run_review(
     # Create DB record and emit event
     if storage:
         try:
-            review_db_id = await storage.create_review_record(pr)
+            review_db_id = await storage.create_review_record(pr, comment_mode=comment_mode)
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
 
@@ -151,6 +156,7 @@ async def run_review(
             base_url=base_url, dismissals=dismissals,
             diff_override=diff_override,
             skip_platform_side_effects=skip_platform_side_effects,
+            comment_mode=comment_mode,
         )
     except Exception as exc:
         if storage and review_db_id:
@@ -178,6 +184,7 @@ async def _run_pipeline(
     dismissals: list[dict] | None = None,
     diff_override=None,
     skip_platform_side_effects: bool = False,
+    comment_mode: str = "summary",
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
@@ -295,7 +302,11 @@ async def _run_pipeline(
             pipeline_log=pipeline_log,
         )
         if post_comment:
-            await _post_results(adapter, pr, result, config, base_url=base_url)
+            await _post_results(
+                adapter, pr, result, config,
+                base_url=base_url, comment_mode=comment_mode,
+                review_id=review_db_id, storage=storage,
+            )
         await _save_result(storage, review_db_id, result, _emit)
         return result
 
@@ -531,7 +542,11 @@ async def _run_pipeline(
 
     # Post results
     if post_comment:
-        await _post_results(adapter, pr, result, config, base_url=base_url)
+        await _post_results(
+            adapter, pr, result, config,
+            base_url=base_url, comment_mode=comment_mode,
+            review_id=review_db_id, storage=storage,
+        )
 
     # Persist to DB
     await _save_result(storage, review_db_id, result, _emit)
@@ -569,7 +584,9 @@ async def run_re_review(
 
     if storage:
         try:
-            review_db_id = await storage.create_review_record(pr)
+            review_db_id = await storage.create_review_record(
+                pr, comment_mode=original_review.get("comment_mode", "summary"),
+            )
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
 
@@ -704,6 +721,9 @@ async def _run_re_review_pipeline(
           f"Original review: {total_original} finding(s), "
           f"{total_dismissed} dismissed, {active_findings} to re-evaluate.")
 
+    comment_mode = original_review.get("comment_mode", "summary")
+    original_review_id = original_review.get("review_id", "")
+
     if active_findings == 0:
         _plog("info", "decision", "No active findings to re-evaluate. Auto-approving.")
         result = ReviewResult(
@@ -717,7 +737,12 @@ async def _run_re_review_pipeline(
             pipeline_log=pipeline_log,
         )
         if post_comment:
-            await _post_results(adapter, pr, result, config, base_url=base_url)
+            await _post_results(
+                adapter, pr, result, config,
+                base_url=base_url, comment_mode=comment_mode,
+                review_id=review_db_id, storage=storage,
+                original_review_id=original_review_id,
+            )
         await _save_result(storage, review_db_id, result, _emit)
         return result
 
@@ -895,7 +920,12 @@ async def _run_re_review_pipeline(
     )
 
     if post_comment:
-        await _post_results(adapter, pr, result, config, base_url=base_url)
+        await _post_results(
+            adapter, pr, result, config,
+            base_url=base_url, comment_mode=comment_mode,
+            review_id=review_db_id, storage=storage,
+            original_review_id=original_review_id,
+        )
     await _save_result(storage, review_db_id, result, _emit)
 
     log.info("re_review_complete", pr_id=pr.pr_id, decision=decision.value,
@@ -942,6 +972,17 @@ def _convert_mechanical(r) -> object:
     )
 
 
+_MECH_SEVERITY_MAP: dict[str, Severity] = {
+    "critical": Severity.CRITICAL,
+    "high": Severity.HIGH,
+    "error": Severity.HIGH,
+    "warning": Severity.MEDIUM,
+    "medium": Severity.MEDIUM,
+    "info": Severity.LOW,
+    "low": Severity.LOW,
+}
+
+
 async def _post_results(
     adapter: PlatformAdapter,
     pr: PlatformPR,
@@ -949,33 +990,135 @@ async def _post_results(
     config: GuardianConfig,
     *,
     base_url: str = "",
+    comment_mode: str = "summary",
+    review_id: uuid.UUID | None = None,
+    storage=None,
+    original_review_id: str | None = None,
 ) -> None:
     """Post review results back to the platform."""
     comment = build_summary_comment(result, base_url=base_url)
     labels = get_review_labels(result)
 
+    if comment_mode == "inline":
+        await _post_inline_and_summary(
+            adapter, pr, result, config, comment, labels,
+            review_id=review_id, storage=storage,
+            original_review_id=original_review_id,
+        )
+        return
+
+    if comment_mode == "none":
+        # No comment — still apply labels and platform status/approval.
+        try:
+            for label in labels:
+                await adapter.add_label(pr, label)
+            await _apply_platform_actions(adapter, pr, result, config, comment)
+        except Exception as e:
+            log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
+        return
+
     try:
         await adapter.post_comment(pr, comment)
         for label in labels:
             await adapter.add_label(pr, label)
+        await _apply_platform_actions(adapter, pr, result, config, comment)
+    except Exception as e:
+        log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
 
-        if result.decision == Decision.AUTO_APPROVE:
-            await adapter.approve_pr(pr)
-            await adapter.set_status(pr, "success", "PR Guardian: Auto-approved")
-            # SPOT_CHECK: approved but request optional human glance
-            if result.trust_tier and result.trust_tier.value == "spot_check":
-                await adapter.request_reviewers(pr, config.human_review.reviewer_group)
-        elif result.decision == Decision.REJECT:
-            await adapter.request_changes(pr, comment)
-            await adapter.set_status(pr, "failure", "PR Guardian: Changes requested")
-        elif result.decision == Decision.HUMAN_REVIEW:
-            await adapter.set_status(pr, "success", "PR Guardian: Human review required")
-            reviewer_group = (
-                result.reviewer_group_override
-                or config.human_review.reviewer_group
-            )
-            await adapter.request_reviewers(pr, reviewer_group)
-        elif result.decision == Decision.HARD_BLOCK:
-            await adapter.set_status(pr, "failure", "PR Guardian: Blocked")
+
+async def _apply_platform_actions(
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    result: ReviewResult,
+    config: GuardianConfig,
+    comment: str,
+) -> None:
+    """Apply approval / status / reviewer-request actions based on decision."""
+    if result.decision == Decision.AUTO_APPROVE:
+        await adapter.approve_pr(pr)
+        await adapter.set_status(pr, "success", "PR Guardian: Auto-approved")
+        if result.trust_tier and result.trust_tier.value == "spot_check":
+            await adapter.request_reviewers(pr, config.human_review.reviewer_group)
+    elif result.decision == Decision.REJECT:
+        await adapter.request_changes(pr, comment)
+        await adapter.set_status(pr, "failure", "PR Guardian: Changes requested")
+    elif result.decision == Decision.HUMAN_REVIEW:
+        await adapter.set_status(pr, "success", "PR Guardian: Human review required")
+        reviewer_group = result.reviewer_group_override or config.human_review.reviewer_group
+        await adapter.request_reviewers(pr, reviewer_group)
+    elif result.decision == Decision.HARD_BLOCK:
+        await adapter.set_status(pr, "failure", "PR Guardian: Blocked")
+
+
+async def _post_inline_and_summary(
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    result: ReviewResult,
+    config: GuardianConfig,
+    comment: str,
+    labels: list[str],
+    *,
+    review_id: uuid.UUID | None,
+    storage,
+    original_review_id: str | None,
+) -> None:
+    """Handle inline comment mode: delete old, post inline, then post summary."""
+    threshold = config.inline_comments.severity_threshold.lower()
+    threshold_ord = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER["medium"])
+
+    # Collect qualifying findings from agent results
+    qualifying: list[Finding] = [
+        f
+        for ar in result.agent_results
+        for f in ar.findings
+        if f.line is not None
+        and SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord
+    ]
+
+    # Collect qualifying findings from mechanical results
+    for mech in result.mechanical_results:
+        tool_sev = _MECH_SEVERITY_MAP.get(mech.severity.lower(), Severity.LOW)
+        if SEVERITY_ORDER.get(tool_sev.value, 0) < threshold_ord:
+            continue
+        for f_dict in mech.findings:
+            line = f_dict.get("line")
+            if line is None:
+                continue
+            qualifying.append(Finding(
+                severity=tool_sev,
+                certainty=Certainty.DETECTED,
+                category=f_dict.get("rule", mech.tool),
+                language="",
+                file=f_dict.get("file", ""),
+                line=line,
+                description=f_dict.get("message", ""),
+            ))
+
+    # Delete stale inline comments from the previous review (re-review path)
+    if original_review_id and storage:
+        try:
+            old_ids = await storage.load_inline_comment_ids(uuid.UUID(original_review_id))
+            if old_ids:
+                await adapter.delete_inline_comments(pr, old_ids)
+        except Exception as e:
+            log.warning("delete_inline_comments_failed", pr_id=pr.pr_id, error=str(e))
+
+    # Post new inline comments
+    if qualifying:
+        try:
+            posted_ids = await adapter.post_inline_comments(pr, qualifying)
+            if posted_ids and storage and review_id:
+                await storage.save_inline_comment_ids(
+                    review_id, posted_ids, pr.platform.value, pr.pr_id, pr.repo,
+                )
+        except Exception as e:
+            log.error("post_inline_comments_failed", pr_id=pr.pr_id, error=str(e))
+
+    # Summary comment always posted last in inline mode
+    try:
+        await adapter.post_comment(pr, comment)
+        for label in labels:
+            await adapter.add_label(pr, label)
+        await _apply_platform_actions(adapter, pr, result, config, comment)
     except Exception as e:
         log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))

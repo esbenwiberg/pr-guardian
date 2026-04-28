@@ -379,3 +379,169 @@ async def test_ado_delete_reply_failure_does_not_abort_batch():
 
     assert mock_client.patch.call_count == 2
     assert mock_client.post.call_count == 2
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator _post_results — inline comment mode
+# ---------------------------------------------------------------------------
+
+import uuid as _uuid
+
+from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.core.orchestrator import _post_results
+from pr_guardian.models.context import RepoRiskClass, RiskTier
+from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
+from pr_guardian.models.output import Decision, ReviewResult
+
+
+def _make_result(agent_findings: list[Finding] | None = None) -> ReviewResult:
+    """Build a minimal ReviewResult with optional agent findings."""
+    findings = agent_findings or []
+    verdict = Verdict.WARN if findings else Verdict.PASS
+    ar = AgentResult(agent_name="security_privacy", verdict=verdict, findings=findings)
+    return ReviewResult(
+        pr_id="42",
+        repo="org/repo",
+        risk_tier=RiskTier.MEDIUM,
+        repo_risk_class=RepoRiskClass.STANDARD,
+        decision=Decision.HUMAN_REVIEW,
+        agent_results=[ar] if findings else [],
+    )
+
+
+def _inline_finding(severity: Severity, line: int | None = 10) -> Finding:
+    return Finding(
+        severity=severity,
+        certainty=Certainty.DETECTED,
+        category="Test",
+        language="python",
+        file="src/app.py",
+        line=line,
+        description="A finding.",
+        suggestion="Fix it.",
+    )
+
+
+def _mock_adapter() -> MagicMock:
+    adapter = MagicMock()
+    adapter.post_comment = AsyncMock()
+    adapter.post_inline_comments = AsyncMock(return_value=["id-1", "id-2"])
+    adapter.delete_inline_comments = AsyncMock()
+    adapter.add_label = AsyncMock()
+    adapter.set_status = AsyncMock()
+    adapter.request_reviewers = AsyncMock()
+    adapter.approve_pr = AsyncMock()
+    adapter.request_changes = AsyncMock()
+    return adapter
+
+
+def _mock_storage(existing_ids: list[str] | None = None) -> MagicMock:
+    storage = MagicMock()
+    storage.save_inline_comment_ids = AsyncMock()
+    storage.load_inline_comment_ids = AsyncMock(return_value=existing_ids or [])
+    return storage
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_filters_below_threshold():
+    """Only MEDIUM+ findings (by default threshold) reach post_inline_comments."""
+    pr = _make_github_pr()
+    low_finding = _inline_finding(Severity.LOW, line=5)
+    medium_finding = _inline_finding(Severity.MEDIUM, line=10)
+    high_finding = _inline_finding(Severity.HIGH, line=20)
+    result = _make_result([low_finding, medium_finding, high_finding])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+    config = GuardianConfig()  # default threshold = MEDIUM
+
+    await _post_results(
+        adapter, pr, result, config,
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    adapter.post_inline_comments.assert_called_once()
+    passed_findings = adapter.post_inline_comments.call_args[0][1]
+    severities = {f.severity for f in passed_findings}
+    assert Severity.LOW not in severities
+    assert Severity.MEDIUM in severities
+    assert Severity.HIGH in severities
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_posts_summary_after_inline():
+    """In inline mode, post_comment (summary) is called after post_inline_comments."""
+    pr = _make_github_pr()
+    result = _make_result([_inline_finding(Severity.HIGH)])
+
+    adapter = _mock_adapter()
+    call_order: list[str] = []
+    adapter.post_inline_comments = AsyncMock(
+        side_effect=lambda *a, **kw: call_order.append("inline") or ["id-1"]
+    )
+    adapter.post_comment = AsyncMock(
+        side_effect=lambda *a, **kw: call_order.append("summary")
+    )
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    assert "inline" in call_order
+    assert "summary" in call_order
+    assert call_order.index("inline") < call_order.index("summary")
+
+
+@pytest.mark.asyncio
+async def test_summary_mode_never_calls_post_inline_comments():
+    """comment_mode='summary' must not touch post_inline_comments."""
+    pr = _make_github_pr()
+    result = _make_result([_inline_finding(Severity.HIGH)])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="summary", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    adapter.post_inline_comments.assert_not_called()
+    adapter.post_comment.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_inline_rereview_deletes_before_posting():
+    """Re-review inline mode calls delete_inline_comments before post_inline_comments."""
+    pr = _make_github_pr()
+    result = _make_result([_inline_finding(Severity.HIGH)])
+    old_ids = ["stale-1", "stale-2"]
+    storage = _mock_storage(existing_ids=old_ids)
+
+    adapter = _mock_adapter()
+    call_order: list[str] = []
+    adapter.delete_inline_comments = AsyncMock(
+        side_effect=lambda *a, **kw: call_order.append("delete")
+    )
+    adapter.post_inline_comments = AsyncMock(
+        side_effect=lambda *a, **kw: call_order.append("post") or ["new-1"]
+    )
+
+    original_review_id = str(_uuid.uuid4())
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        original_review_id=original_review_id,
+    )
+
+    storage.load_inline_comment_ids.assert_called_once()
+    adapter.delete_inline_comments.assert_called_once()
+    deleted_ids = adapter.delete_inline_comments.call_args[0][1]
+    assert deleted_ids == old_ids
+
+    assert "delete" in call_order
+    assert "post" in call_order
+    assert call_order.index("delete") < call_order.index("post")
