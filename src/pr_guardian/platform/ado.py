@@ -431,12 +431,18 @@ class ADOAdapter:
                 f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
                 f"/pullRequests/{pr.pr_id}/threads/{thread_id}"
             )
-            resp = await client.patch(
-                thread_url,
-                json={"status": 4},
-                params={"api-version": "7.1"},
-            )
-            resp.raise_for_status()
+            try:
+                resp = await client.patch(
+                    thread_url,
+                    json={"status": 4},
+                    params={"api-version": "7.1"},
+                )
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    log.debug("ado_delete_thread_not_found", thread_id=thread_id)
+                    continue
+                raise
             comments_url = thread_url + "/comments"
             resp2 = await client.post(
                 comments_url,

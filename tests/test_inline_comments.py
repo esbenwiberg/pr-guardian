@@ -281,3 +281,78 @@ async def test_ado_delete_calls_correct_thread_url():
     urls = [c[0][0] for c in mock_client.patch.call_args_list]
     assert "threads/99" in urls[0]
     assert "threads/100" in urls[1]
+
+
+# ---------------------------------------------------------------------------
+# GitHub — delete negative paths
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_github_delete_ignores_404():
+    """404 on a stale comment ID should be silently skipped; remaining IDs still processed."""
+    adapter = GitHubAdapter(token="tok")
+    pr = _make_github_pr()
+
+    mock_client = MagicMock()
+    mock_client.delete = AsyncMock(side_effect=[
+        _mock_response(404, {}),
+        _mock_response(204, {}),
+    ])
+
+    with patch.object(adapter, "_get_client", return_value=mock_client):
+        await adapter.delete_inline_comments(pr, ["stale", "valid"])
+
+    assert mock_client.delete.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_github_delete_raises_on_non_404_error():
+    """Non-404 HTTP errors (e.g. 500) should propagate."""
+    adapter = GitHubAdapter(token="tok")
+    pr = _make_github_pr()
+
+    mock_client = MagicMock()
+    mock_client.delete = AsyncMock(return_value=_mock_response(500, {}))
+
+    with patch.object(adapter, "_get_client", return_value=mock_client):
+        with pytest.raises(httpx.HTTPStatusError):
+            await adapter.delete_inline_comments(pr, ["111"])
+
+
+# ---------------------------------------------------------------------------
+# ADO — delete negative paths
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_ado_delete_ignores_404():
+    """404 on a stale thread ID should be silently skipped; remaining IDs still processed."""
+    adapter = ADOAdapter(pat="pat", org_url="https://dev.azure.com/myorg")
+    pr = _make_ado_pr()
+
+    mock_client = MagicMock()
+    mock_client.patch = AsyncMock(side_effect=[
+        _mock_response(404, {}),
+        _mock_response(200, {}),
+    ])
+    mock_client.post = AsyncMock(return_value=_mock_response(200, {}))
+
+    with patch.object(adapter, "_get_client", return_value=mock_client):
+        await adapter.delete_inline_comments(pr, ["stale", "valid"])
+
+    assert mock_client.patch.call_count == 2
+    # reply comment only posted for the successful patch, not the 404
+    assert mock_client.post.call_count == 1
+
+
+@pytest.mark.asyncio
+async def test_ado_delete_raises_on_non_404_error():
+    """Non-404 HTTP errors (e.g. 500) should propagate."""
+    adapter = ADOAdapter(pat="pat", org_url="https://dev.azure.com/myorg")
+    pr = _make_ado_pr()
+
+    mock_client = MagicMock()
+    mock_client.patch = AsyncMock(return_value=_mock_response(500, {}))
+
+    with patch.object(adapter, "_get_client", return_value=mock_client):
+        with pytest.raises(httpx.HTTPStatusError):
+            await adapter.delete_inline_comments(pr, ["99"])

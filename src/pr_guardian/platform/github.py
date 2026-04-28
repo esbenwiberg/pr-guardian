@@ -317,7 +317,13 @@ class GitHubAdapter:
             resp = await client.delete(
                 f"/repos/{pr.repo}/pulls/comments/{comment_id}",
             )
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == 404:
+                    log.debug("github_delete_comment_not_found", comment_id=comment_id)
+                else:
+                    raise
 
     async def close(self) -> None:
         if self._client:
