@@ -228,6 +228,10 @@ class MaintenanceConfig(BaseModel):
     include_patterns: list[str] = Field(default_factory=list)
 
 
+class InlineCommentsConfig(BaseModel):
+    severity_threshold: str = "MEDIUM"
+
+
 class GuardianConfig(BaseModel):
     """Top-level config: merged from service defaults + per-repo review.yml."""
     llm: LLMConfig = Field(default_factory=LLMConfig)
@@ -255,3 +259,4 @@ class GuardianConfig(BaseModel):
     validator: ValidatorConfig = Field(default_factory=ValidatorConfig)
     recent_changes: RecentChangesConfig = Field(default_factory=RecentChangesConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
+    inline_comments: InlineCommentsConfig = Field(default_factory=InlineCommentsConfig)

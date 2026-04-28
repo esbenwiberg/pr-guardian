@@ -23,6 +23,7 @@ from pr_guardian.persistence.models import (
     FindingRow,
     GlobalConfigRow,
     MechanicalResultRow,
+    PostedInlineCommentRow,
     PromptOverrideRow,
     ReviewRow,
     ScanAgentResultRow,
@@ -1044,3 +1045,39 @@ def _api_key_to_dict(row: ApiKeyRow) -> dict[str, Any]:
         "last_used_at": row.last_used_at.isoformat() if row.last_used_at else None,
         "created_at": row.created_at.isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Inline comment helpers
+# ---------------------------------------------------------------------------
+
+
+async def save_inline_comment_ids(
+    review_id: uuid.UUID,
+    ids: list[str],
+    platform: str,
+    pr_id: str,
+    repo: str,
+) -> None:
+    """Persist platform-native comment IDs for a review."""
+    async with async_session() as session:
+        for comment_id in ids:
+            session.add(PostedInlineCommentRow(
+                review_id=review_id,
+                platform_comment_id=comment_id,
+                platform=platform,
+                pr_id=pr_id,
+                repo=repo,
+            ))
+        await session.commit()
+
+
+async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
+    """Return all platform comment IDs previously saved for a review."""
+    async with async_session() as session:
+        rows = (await session.scalars(
+            select(PostedInlineCommentRow).where(
+                PostedInlineCommentRow.review_id == review_id
+            )
+        )).all()
+        return [r.platform_comment_id for r in rows]
