@@ -545,3 +545,227 @@ async def test_inline_rereview_deletes_before_posting():
     assert "delete" in call_order
     assert "post" in call_order
     assert call_order.index("delete") < call_order.index("post")
+
+
+# ---------------------------------------------------------------------------
+# build_inline_comment_body — format contract
+# ---------------------------------------------------------------------------
+
+from pr_guardian.decision.actions import build_inline_comment_body
+
+
+def test_build_inline_comment_body_single_with_suggestion():
+    f = Finding(
+        severity=Severity.HIGH,
+        certainty=Certainty.DETECTED,
+        category="SQL Injection",
+        language="python",
+        file="src/foo.py",
+        line=10,
+        description="Unsanitised input.",
+        suggestion="Use parameterised queries.",
+    )
+    body = build_inline_comment_body([f])
+    assert body == "**[HIGH] SQL Injection**\nUnsanitised input.\n\n> Use parameterised queries."
+
+
+def test_build_inline_comment_body_single_without_suggestion():
+    f = Finding(
+        severity=Severity.MEDIUM,
+        certainty=Certainty.DETECTED,
+        category="Code Quality",
+        language="python",
+        file="src/foo.py",
+        line=5,
+        description="Long function.",
+    )
+    body = build_inline_comment_body([f])
+    assert body == "**[MEDIUM] Code Quality**\nLong function."
+    assert ">" not in body
+
+
+def test_build_inline_comment_body_multiple_findings_separator():
+    f1 = Finding(
+        severity=Severity.HIGH,
+        certainty=Certainty.DETECTED,
+        category="Bug",
+        language="python",
+        file="src/x.py",
+        line=1,
+        description="Bug here.",
+        suggestion="Fix it.",
+    )
+    f2 = Finding(
+        severity=Severity.MEDIUM,
+        certainty=Certainty.DETECTED,
+        category="Style",
+        language="python",
+        file="src/x.py",
+        line=1,
+        description="Style issue.",
+    )
+    body = build_inline_comment_body([f1, f2])
+    assert "---" in body
+    assert "**[HIGH] Bug**" in body
+    assert "**[MEDIUM] Style**" in body
+
+
+def test_build_inline_comment_body_severity_uppercased():
+    f = Finding(
+        severity=Severity.CRITICAL,
+        certainty=Certainty.DETECTED,
+        category="XSS",
+        language="javascript",
+        file="src/ui.js",
+        line=42,
+        description="XSS vulnerability.",
+    )
+    body = build_inline_comment_body([f])
+    assert "[CRITICAL]" in body
+    assert "[critical]" not in body
+
+
+def test_build_inline_comment_body_low_severity_uppercased():
+    f = Finding(
+        severity=Severity.LOW,
+        certainty=Certainty.DETECTED,
+        category="Lint",
+        language="python",
+        file="src/foo.py",
+        line=3,
+        description="Minor style nit.",
+    )
+    body = build_inline_comment_body([f])
+    assert body.startswith("**[LOW] Lint**")
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator _post_inline_and_summary — mechanical findings path
+# ---------------------------------------------------------------------------
+
+from pr_guardian.models.output import MechanicalResult
+
+
+def _make_result_with_mech(
+    mech_results: list[MechanicalResult],
+    agent_findings: list[Finding] | None = None,
+) -> ReviewResult:
+    findings = agent_findings or []
+    verdict = Verdict.WARN if findings else Verdict.PASS
+    ar = AgentResult(agent_name="security_privacy", verdict=verdict, findings=findings)
+    return ReviewResult(
+        pr_id="42",
+        repo="org/repo",
+        risk_tier=RiskTier.MEDIUM,
+        repo_risk_class=RepoRiskClass.STANDARD,
+        decision=Decision.HUMAN_REVIEW,
+        agent_results=[ar] if findings else [],
+        mechanical_results=mech_results,
+    )
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_mech_findings_skips_none_line():
+    """Mechanical findings with line=None are silently skipped."""
+    pr = _make_github_pr()
+    mech = MechanicalResult(
+        tool="ruff",
+        passed=False,
+        severity="error",
+        findings=[
+            {"file": "src/foo.py", "line": None, "rule": "E501", "message": "Line too long"},
+            {"file": "src/bar.py", "line": None, "rule": "E302", "message": "2 blank lines"},
+        ],
+    )
+    result = _make_result_with_mech([mech])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    adapter.post_inline_comments.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_mech_findings_error_severity_passes_threshold():
+    """Mechanical findings with severity='error' (mapped to HIGH) pass MEDIUM threshold."""
+    pr = _make_github_pr()
+    mech = MechanicalResult(
+        tool="bandit",
+        passed=False,
+        severity="error",
+        findings=[
+            {"file": "src/app.py", "line": 42, "rule": "B101", "message": "Assert used"},
+        ],
+    )
+    result = _make_result_with_mech([mech])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    adapter.post_inline_comments.assert_called_once()
+    passed_findings = adapter.post_inline_comments.call_args[0][1]
+    assert len(passed_findings) == 1
+    assert passed_findings[0].file == "src/app.py"
+    assert passed_findings[0].line == 42
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_mech_findings_info_severity_filtered_out():
+    """Mechanical findings with severity='info' (mapped to LOW) are filtered by MEDIUM threshold."""
+    pr = _make_github_pr()
+    mech = MechanicalResult(
+        tool="pylint",
+        passed=False,
+        severity="info",
+        findings=[
+            {"file": "src/app.py", "line": 10, "rule": "C0103", "message": "Invalid name"},
+        ],
+    )
+    result = _make_result_with_mech([mech])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    adapter.post_inline_comments.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inline_mode_mech_findings_warning_passes_medium_threshold():
+    """Mechanical findings with severity='warning' (mapped to MEDIUM) pass MEDIUM threshold."""
+    pr = _make_github_pr()
+    mech = MechanicalResult(
+        tool="mypy",
+        passed=False,
+        severity="warning",
+        findings=[
+            {"file": "src/types.py", "line": 7, "rule": "arg-type", "message": "Incompatible type"},
+        ],
+    )
+    result = _make_result_with_mech([mech])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter, pr, result, GuardianConfig(),
+        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+    )
+
+    adapter.post_inline_comments.assert_called_once()
+    passed_findings = adapter.post_inline_comments.call_args[0][1]
+    assert any(f.line == 7 for f in passed_findings)

@@ -15,7 +15,10 @@
 - **`storage.create_review_record()`** — now accepts `comment_mode: str = "none"` kwarg and persists it on `ReviewRow`.
 - **`run_review()`** — new `comment_mode: str = "summary"` parameter threaded through `_run_pipeline()`.
 - **Re-review path** reads `comment_mode` and `review_id` from `original_review` dict; also saves the new review record with the inherited `comment_mode`.
-- **4 new unit tests** in `tests/test_inline_comments.py` covering severity filtering, summary ordering, mode isolation, and delete-before-repost.
+- **13 new unit tests** in `tests/test_inline_comments.py`:
+  - 4 orchestrator tests: severity filtering, summary ordering, mode isolation, delete-before-repost.
+  - 5 `build_inline_comment_body` format tests: single with/without suggestion, multi-finding separator, severity uppercasing (CRITICAL and LOW).
+  - 4 mechanical findings path tests: `line=None` skip, `"error"` severity passes MEDIUM threshold, `"info"` severity filtered out, `"warning"` severity passes MEDIUM threshold.
 
 ## Deviations from brief
 
