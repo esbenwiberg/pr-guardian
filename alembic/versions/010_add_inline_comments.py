@@ -66,7 +66,19 @@ def upgrade() -> None:
         )
 
 
+def _index_exists(index_name: str) -> bool:
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :name"),
+        {"name": index_name},
+    )
+    return result.scalar() is not None
+
+
 def downgrade() -> None:
-    op.drop_index("ix_posted_inline_comments_review_id", "posted_inline_comments")
-    op.drop_table("posted_inline_comments")
-    op.drop_column("reviews", "comment_mode")
+    if _table_exists("posted_inline_comments"):
+        if _index_exists("ix_posted_inline_comments_review_id"):
+            op.drop_index("ix_posted_inline_comments_review_id", "posted_inline_comments")
+        op.drop_table("posted_inline_comments")
+    if _column_exists("reviews", "comment_mode"):
+        op.drop_column("reviews", "comment_mode")
