@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Guardian — Review Wizard (Prototype G)</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: rgba(15,23,42,0.55);
+    --panel-2: rgba(15,23,42,0.35);
+    --border: rgba(51,65,85,0.55);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --indigo: #a5b4fc;
+    --indigo-bg: rgba(99,102,241,0.15);
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --yellow: #facc15;
+    --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.65; }
+  .mono, code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border); background: rgba(11,18,32,0.92); backdrop-filter: blur(8px); font-size: 13px; }
+  .crumbs { color: var(--muted); }
+  .crumbs strong { color: var(--text); font-weight: 600; }
+  .crumbs span.sep { color: var(--dim); margin: 0 6px; }
+  .verdict-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(234,179,8,0.10); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+
+  /* Step pips */
+  #pips-nav { position: sticky; top: 56px; z-index: 9; padding: 14px 24px; border-bottom: 1px solid var(--border); background: rgba(11,18,32,0.90); backdrop-filter: blur(8px); }
+  .pips { max-width: 920px; margin: 0 auto; display: flex; align-items: center; gap: 6px; }
+  .pip { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 12.5px; color: var(--muted); border: 1px solid transparent; user-select: none; transition: background 0.12s, color 0.12s, border-color 0.12s; }
+  .pip:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .pip.active { background: var(--indigo-bg); color: var(--indigo); border-color: rgba(99,102,241,0.4); font-weight: 600; }
+  .pip.done { color: var(--dim); }
+  .pip.done .pip-num { background: rgba(16,185,129,0.15); color: var(--green); }
+  .pip-num { width: 20px; height: 20px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; background: rgba(51,65,85,0.5); color: var(--muted); }
+  .pip.active .pip-num { background: rgba(99,102,241,0.25); color: var(--indigo); }
+  .pip-sep { width: 18px; height: 1px; background: var(--border); flex-shrink: 0; }
+
+  /* Step body */
+  main { max-width: 760px; margin: 0 auto; padding: 36px 24px 30px; min-height: 60vh; }
+
+  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 12px; }
+  h1.step-title { font-size: 28px; font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; line-height: 1.22; }
+  .subtitle { color: var(--muted); margin: 0 0 26px; font-size: 15px; font-style: italic; }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 32px; font-size: 13px; color: var(--muted); }
+  .stats span strong { color: var(--text); font-weight: 600; }
+
+  /* Briefing W/W/H */
+  .wwh { margin-bottom: 32px; }
+  .wwh-block { margin-bottom: 22px; }
+  .wwh-block:last-child { margin-bottom: 0; }
+  .wwh-label { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+  .wwh p { margin: 0 0 10px; font-size: 15px; line-height: 1.7; color: #d6dde8; }
+  .wwh p:last-child { margin-bottom: 0; }
+  .wwh code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 0.86em; color: var(--text); }
+  .wwh em { color: var(--text); font-style: italic; }
+  .wwh strong { color: var(--text); }
+
+  /* Capability map preview (in briefing) */
+  .cap-preview { padding: 18px 22px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel-2); margin-top: 22px; }
+  .cap-preview-label { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-bottom: 12px; }
+  .cap-preview-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 13.5px; }
+  .cap-preview-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .cap-preview-dot.has { background: var(--orange); }
+  .cap-preview-dot.clean { background: var(--green); }
+  .cap-preview-name { flex: 1; color: var(--text); }
+  .cap-preview-meta { color: var(--dim); font-size: 12px; }
+  .cap-preview-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; }
+  .cap-preview-tag.has { background: rgba(251,146,60,0.12); color: var(--orange); }
+  .cap-preview-tag.clean { background: rgba(16,185,129,0.10); color: var(--green); }
+
+  /* Capability step header */
+  .cap-intent { font-size: 16px; line-height: 1.7; color: #d6dde8; margin: 0 0 28px; }
+  .cap-intent code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 0.86em; color: var(--text); }
+  .cap-intent em { color: var(--text); font-style: italic; }
+  .cap-intent strong { color: var(--text); }
+
+  /* Concern card */
+  .concern { padding: 18px 20px; border-radius: 10px; background: rgba(2,6,23,0.4); border: 1px solid var(--border); border-left: 3px solid var(--border); margin-bottom: 16px; transition: border-color 0.15s, background 0.15s; }
+  .concern.sev-low { border-left-color: var(--blue); }
+  .concern.sev-medium { border-left-color: var(--yellow); }
+  .concern.sev-high { border-left-color: var(--orange); }
+  .concern.sev-critical { border-left-color: var(--red); }
+  .concern.decided-accepted { background: rgba(99,102,241,0.04); }
+  .concern.decided-fix { background: rgba(249,115,22,0.04); }
+  .concern.decided-dismissed { opacity: 0.55; }
+  .concern-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+  .concern-head h3 { margin: 0; font-size: 16px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+  .pill { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.06em; }
+  .pill.sev-low      { background: rgba(59,130,246,0.12); color: var(--blue); }
+  .pill.sev-medium   { background: rgba(234,179,8,0.10); color: var(--yellow); }
+  .pill.sev-high     { background: rgba(249,115,22,0.12); color: var(--orange); }
+  .pill.sev-critical { background: rgba(239,68,68,0.12); color: var(--red); }
+  .pill.cwe { background: rgba(148,163,184,0.10); color: var(--muted); font-family: ui-monospace, monospace; font-weight: 500; }
+  .pill.muted { background: rgba(100,116,139,0.15); color: var(--muted); font-weight: 500; }
+  .decided-tag { font-size: 11px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+  .decided-tag.accepted { background: rgba(99,102,241,0.18); color: var(--indigo); }
+  .decided-tag.fix { background: rgba(249,115,22,0.15); color: var(--orange); }
+  .decided-tag.dismissed { background: rgba(100,116,139,0.18); color: var(--muted); }
+
+  .concern-prose { font-size: 14.5px; line-height: 1.65; color: #d6dde8; }
+  .concern-prose p { margin: 0 0 8px; }
+  .concern-prose p:last-child { margin-bottom: 0; }
+  .concern-prose code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; color: var(--text); }
+
+  details.expander { margin-top: 8px; }
+  details.expander summary { cursor: pointer; font-size: 12.5px; color: var(--indigo); padding: 4px 0; display: inline-block; list-style: none; user-select: none; }
+  details.expander summary::-webkit-details-marker { display: none; }
+  details.expander summary::before { content: "▸ "; color: var(--dim); }
+  details.expander[open] summary::before { content: "▾ "; }
+  details.expander summary:hover { color: #c7d2fe; }
+
+  .hunk { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: rgba(2,6,23,0.6); margin-top: 8px; font-family: ui-monospace, monospace; }
+  .hunk-header { font-size: 11px; padding: 5px 12px; color: var(--muted); background: rgba(30,41,59,0.6); border-bottom: 1px solid var(--border); }
+  .hunk pre { margin: 0; padding: 8px 0; font-size: 12.5px; line-height: 1.55; overflow-x: auto; }
+  .hunk .row { display: flex; padding: 0 4px; white-space: pre; }
+  .hunk .ln { width: 38px; text-align: right; padding-right: 10px; color: rgba(148,163,184,0.4); user-select: none; flex-shrink: 0; }
+  .hunk .marker { width: 14px; user-select: none; flex-shrink: 0; color: var(--dim); }
+  .hunk .add { background: rgba(16,185,129,0.07); }
+  .hunk .add .content, .hunk .add .marker { color: #6ee7b7; }
+  .hunk .del { background: rgba(239,68,68,0.07); }
+  .hunk .del .content, .hunk .del .marker { color: #fca5a5; }
+  .hunk .ctx .content { color: #cbd5e1; }
+
+  .fix-hint { margin-top: 8px; padding: 11px 13px; border-radius: 6px; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.2); font-size: 13px; line-height: 1.6; color: #d6dde8; }
+  .fix-hint strong { color: var(--green); display: block; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
+
+  /* Per-concern action buttons */
+  .concern-actions { display: flex; gap: 6px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .concern-actions button { font-family: inherit; font-size: 12.5px; font-weight: 600; padding: 6px 11px; border-radius: 6px; border: 1px solid var(--border); background: rgba(30,41,59,0.6); color: var(--text); cursor: pointer; }
+  .concern-actions button.primary    { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.5); color: var(--indigo); }
+  .concern-actions button.primary:hover { background: rgba(99,102,241,0.28); }
+  .concern-actions button:hover { background: rgba(51,65,85,0.7); }
+  .concern-actions button.active     { background: rgba(99,102,241,0.28); border-color: rgba(99,102,241,0.6); }
+  .concern-actions button.danger.active { background: rgba(249,115,22,0.18); border-color: rgba(249,115,22,0.5); color: var(--orange); }
+  .concern-actions button.ghost.active  { background: rgba(100,116,139,0.18); border-color: rgba(100,116,139,0.4); color: var(--muted); }
+  .concern-actions button.ghost { background: transparent; }
+  .concern-actions .clear { margin-left: auto; font-size: 11.5px; color: var(--dim); background: transparent; border: 0; cursor: pointer; padding: 4px 6px; }
+  .concern-actions .clear:hover { color: var(--muted); }
+
+  /* Wrap-up */
+  .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 24px; }
+  @media (max-width: 600px) { .summary-grid { grid-template-columns: 1fr 1fr; } }
+  .summary-card { padding: 14px 16px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2); }
+  .summary-card .num { font-size: 22px; font-weight: 600; color: var(--text); }
+  .summary-card .lbl { font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--dim); margin-top: 2px; }
+  .summary-card.accept .num  { color: var(--indigo); }
+  .summary-card.fix .num     { color: var(--orange); }
+  .summary-card.dismiss .num { color: var(--muted); }
+  .summary-card.pending .num { color: var(--yellow); }
+
+  .also-reviewed { padding: 14px 18px; border: 1px dashed var(--border); border-radius: 8px; background: rgba(15,23,42,0.4); font-size: 13px; line-height: 1.6; color: var(--muted); margin-bottom: 18px; }
+  .also-reviewed strong { color: var(--text); }
+  .noise-line { font-size: 13px; color: var(--muted); margin-bottom: 22px; }
+  .noise-line strong { color: var(--text); }
+
+  .comment-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+  .comment-box { width: 100%; min-height: 110px; padding: 12px 14px; background: rgba(2,6,23,0.5); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-family: inherit; font-size: 14px; line-height: 1.55; resize: vertical; }
+  .comment-box:focus { outline: none; border-color: rgba(99,102,241,0.5); }
+
+  .final-actions { display: flex; gap: 8px; margin-top: 22px; flex-wrap: wrap; }
+  .final-actions button { font-family: inherit; font-size: 14px; font-weight: 600; padding: 10px 18px; border-radius: 8px; border: 1px solid var(--border); background: rgba(30,41,59,0.6); color: var(--text); cursor: pointer; }
+  .final-actions button.primary { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.5); color: var(--indigo); }
+  .final-actions button.danger  { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.4); color: var(--red); }
+  .final-actions button:hover { filter: brightness(1.15); }
+
+  /* Footer nav (back / next) */
+  footer#nav { position: sticky; bottom: 0; z-index: 9; padding: 12px 24px; border-top: 1px solid var(--border); background: rgba(11,18,32,0.92); backdrop-filter: blur(8px); }
+  .nav-inner { max-width: 760px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .nav-inner button { font-family: inherit; font-size: 13.5px; font-weight: 600; padding: 9px 16px; border-radius: 8px; border: 1px solid var(--border); background: rgba(30,41,59,0.6); color: var(--text); cursor: pointer; }
+  .nav-inner button.primary { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.5); color: var(--indigo); }
+  .nav-inner button:disabled { opacity: 0.4; cursor: not-allowed; }
+  .nav-inner button:hover:not(:disabled) { filter: brightness(1.15); }
+  .nav-status { font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="crumbs">
+    <a href="./index.html">Reviews</a>
+    <span class="sep">/</span>
+    <a href="#">Findings</a>
+    <span class="sep">/</span>
+    <strong>Review Wizard</strong>
+  </div>
+  <span class="verdict-chip">⚠ needs human review</span>
+</header>
+
+<nav id="pips-nav"></nav>
+<main id="step"></main>
+<footer id="nav"></footer>
+
+<script>
+window.PR_TITLE = "Microsoft Graph integration with retry & OAuth handling";
+window.PR_STATS = { author: "esbenwiberg", commits: 4, files: 37, additions: 1303, total: 23, surfaced: 4, suppressed: 19, risk: "MEDIUM" };
+
+window.WWH = {
+  what: `It adds a first-class Microsoft Graph client to the platform — a typed <code>IGraphService</code> registered through DI, wrapped in a Polly retry pipeline, and authenticated by a token-caching <code>GraphOAuthMessageHandler</code>. Alongside that, it retires the legacy plugin-based Graph integration (six files deleted), updates the four endpoints that used it, and adds unit tests for the new client. A handful of unrelated agent-mode plumbing edits ride along.`,
+  why: `The accompanying spec (<code>specs/msgraph-di-consolidation.md</code>) frames this as a <em>consolidation</em>: the legacy plugin pattern duplicated auth and retry logic across each Graph caller, so token expiry and rate limiting were handled inconsistently. The goal is to centralise both — one HTTP client, one retry policy, one auth handler — and treat Graph as an ordinary typed service. Most of the line count is mechanical: deletions in <code>Legacy/Plugins/*</code> and migrations in <code>Legacy/Endpoints/*</code>.`,
+  how: `Standard layered shape. <strong>Infra</strong> registers the client and owns the cross-cutting handlers; <strong>Services</strong> hold the business-facing wrappers (<code>MsGraphService</code>, <code>GraphTenantClient</code>); <strong>Models</strong> hold the DTOs; <strong>Endpoints</strong> are updated to consume the new service. <strong>Tests</strong> cover the happy path. The risk surface is narrow but real, and concentrates inside the auth/retry interaction in the Infra layer.`
+};
+
+window.CAPABILITIES = [
+  { id: "cap-1", name: "Microsoft Graph client",
+    intent: `A typed <code>IGraphService</code> registered through DI, wrapped in a Polly retry pipeline, and authenticated by a token-caching <code>GraphOAuthMessageHandler</code>. The shape is sound — but two pieces of the implementation are pulling in opposite directions, and a third pulls against Microsoft's own throttling contract.`,
+    files: 11, locs: 487, layers: ["Models","Services","Infra"], clean: false },
+  { id: "cap-2", name: "msgraph-di-consolidation",
+    intent: "Replaces the legacy plugin-based Graph service with the new typed client. Deletes six plugin files; rewrites four endpoint callers; ships a spec and migration note.",
+    files: 14, locs: 593, layers: ["Endpoints","Services","Docs"], clean: true },
+  { id: "cap-3", name: "Test coverage",
+    intent: `Unit tests for the new Graph client. Two test files, ~600 LOC of happy-path coverage. The coverage of the typed service methods is fine — what's missing is tests for the failure surface the auth-retry concern in <strong>Microsoft Graph client</strong> introduces.`,
+    files: 2, locs: 797, layers: ["Tests"], clean: false },
+  { id: "cap-4", name: "Agent-mode plumbing",
+    intent: "Small wiring edits across <code>Api/</code>, <code>Infrastructure/AgentMode/</code>, and changeset entries. Two-line diffs, mostly. Unrelated to the Graph work — rides along in this PR but doesn't interact with anything else here.",
+    files: 10, locs: 13, layers: ["Endpoints","Infra","Docs"], clean: true }
+];
+
+window.DECISIONS = [
+  {
+    id: "d1", capId: "cap-1", severity: "medium",
+    question: "The 401 retry branch is fighting your OAuth handler.",
+    cwe: ["CWE-287","CWE-755"],
+    reasoning: [
+      "The Polly policy retries on <code>HttpStatusCode.Unauthorized</code> only when <code>ReasonPhrase == \"TenantThrottle\"</code>. <code>ReasonPhrase</code> is optional in HTTP/2 and frequently stripped by load balancers — but the deeper issue is that <code>GraphOAuthMessageHandler</code> only attaches a token when <code>Authorization</code> is null.",
+      "So a real 401 (expired token) loops three times with the same dead bearer and fails. Token refresh belongs in the handler, not in the retry policy."
+    ],
+    hunk: { file: "Infrastructure/Graph/GraphServiceCollectionEx.cs", header: "@@ -0,0 +25,3 @@",
+      lines: [
+        { type: "add", n: 25, text: ".OrResult(msg => (int)msg.StatusCode == 429)" },
+        { type: "add", n: 26, text: '.OrResult(msg => msg.StatusCode == HttpStatusCode.Unauthorized && msg.ReasonPhrase == "TenantThrottle")' },
+        { type: "add", n: 27, text: ".WaitAndRetryAsync(3, retryAttempt =>" }
+      ] },
+    fix: "Drop the 401 branch from the Polly policy. In <code>GraphOAuthMessageHandler.SendAsync</code>, detect 401, invalidate the cached token, rebuild the auth header, and resend once."
+  },
+  {
+    id: "d2", capId: "cap-1", severity: "high",
+    question: "Tenant ID interpolated into a Graph URL without validation.",
+    cwe: ["CWE-918","CWE-20"],
+    reasoning: [
+      "<code>GraphTenantClient.ListUsersAsync</code> takes a tenant identifier from a request header and drops it directly into a URL template: <code>$\"https://graph.microsoft.com/v1.0/{tenantId}/users\"</code>.",
+      "The host is fixed, so this isn't classic SSRF, but a tenant value containing path segments — encoded or otherwise — can shift which Graph resource is hit. Defence-in-depth wants this guarded at our boundary."
+    ],
+    hunk: { file: "Infrastructure/Services/GraphTenantClient.cs", header: "@@ -0,0 +82,4 @@",
+      lines: [
+        { type: "ctx", n: 82, text: "public async Task<UsersResponse> ListUsersAsync(string tenantId)" },
+        { type: "ctx", n: 83, text: "{" },
+        { type: "add", n: 84, text: '    var url = $"https://graph.microsoft.com/v1.0/{tenantId}/users";' },
+        { type: "add", n: 85, text: "    return await _client.GetFromJsonAsync<UsersResponse>(url);" }
+      ] },
+    fix: "Validate tenantId against a strict regex (GUID or domain pattern) before constructing the URL, and use <code>Uri.EscapeDataString</code> for the path segment."
+  },
+  {
+    id: "d3", capId: "cap-1", severity: "low",
+    question: "The 429 retry ignores Microsoft's <code>Retry-After</code> hint.",
+    cwe: [],
+    reasoning: [
+      "Standard exponential backoff (<code>2^n</code> seconds) is fine in isolation, but Graph returns <code>Retry-After</code> on 429s and ignoring it tends to make throttling worse — the same tenant ceiling gets hit on every retry."
+    ],
+    hunk: { file: "Infrastructure/Graph/GraphServiceCollectionEx.cs", header: "@@ -0,0 +25,3 @@",
+      lines: [
+        { type: "add", n: 25, text: ".OrResult(msg => (int)msg.StatusCode == 429)" },
+        { type: "ctx", n: 26, text: "// ..." },
+        { type: "add", n: 27, text: ".WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)))" }
+      ] },
+    fix: "Add a <code>WaitAndRetryAsync</code> overload that reads <code>Retry-After</code> from the response and falls back to exponential backoff when absent."
+  },
+  {
+    id: "d4", capId: "cap-3", severity: "medium",
+    question: "OAuth handler has no tests for failure paths.",
+    cwe: [],
+    reasoning: [
+      "The new <code>GraphOAuthMessageHandler</code> has happy-path tests but no coverage for: (1) token acquisition failure, (2) cached-token expiry mid-request, (3) downstream 401 handling.",
+      "Given the auth flow is the main risk surface flagged in <strong>Microsoft Graph client</strong>, missing failure-path tests means a regression there could ship undetected."
+    ],
+    hunk: { file: "Tests/Test.UnitTests/GraphServiceTests.cs", header: "@@ -0,0 +1,7 @@",
+      lines: [
+        { type: "add", n: 1, text: "public class GraphOAuthMessageHandlerTests" },
+        { type: "add", n: 2, text: "{" },
+        { type: "ctx", n: 3, text: "    // No tests for: token-acquisition-failure, expired-token, downstream-401" },
+        { type: "add", n: 4, text: "}" }
+      ] },
+    fix: "Add three test cases against <code>GraphOAuthMessageHandler</code>: (a) token provider throws → handler surfaces a typed exception; (b) cached token expired → handler refreshes before sending; (c) downstream returns 401 → handler invalidates cache and retries once."
+  }
+];
+</script>
+<script>
+const decisions = window.DECISIONS;
+const capabilities = window.CAPABILITIES;
+const stats = window.PR_STATS;
+
+// State
+const decisionState = decisions.map(() => "pending"); // pending | accepted | fix | dismissed
+let reviewerComment = "";
+let stepIdx = 0;
+
+// Build the step list: [Briefing, ...non-clean-capabilities, Wrap]
+const nonCleanCaps = capabilities.filter(c => !c.clean);
+const cleanCaps = capabilities.filter(c => c.clean);
+const steps = [
+  { kind: "briefing", label: "Briefing" },
+  ...nonCleanCaps.map(c => ({ kind: "capability", capId: c.id, label: c.name })),
+  { kind: "wrap", label: "Wrap-up" }
+];
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function decsForCap(capId) {
+  return decisions.map((d, i) => ({ d, i })).filter(x => x.d.capId === capId);
+}
+
+function isStepDone(idx) {
+  const s = steps[idx];
+  if (s.kind === "briefing") return idx < stepIdx; // visited
+  if (s.kind === "capability") {
+    const decs = decsForCap(s.capId);
+    return decs.length === 0 || decs.every(({ i }) => decisionState[i] !== "pending");
+  }
+  return false;
+}
+
+// ── Pips ──
+function renderPips() {
+  const html = steps.map((s, i) => {
+    const done = isStepDone(i) && i !== stepIdx;
+    const cls = ["pip"];
+    if (i === stepIdx) cls.push("active");
+    if (done) cls.push("done");
+    const num = done ? "✓" : (i + 1);
+    return `<div class="${cls.join(' ')}" data-step="${i}">
+      <span class="pip-num">${num}</span>
+      <span>${escapeHtml(s.label)}</span>
+    </div>${i < steps.length - 1 ? '<div class="pip-sep"></div>' : ''}`;
+  }).join("");
+  document.getElementById("pips-nav").innerHTML = `<div class="pips">${html}</div>`;
+  document.querySelectorAll(".pip").forEach(el => {
+    el.addEventListener("click", () => { stepIdx = parseInt(el.dataset.step, 10); render(); });
+  });
+}
+
+// ── Renderers per step kind ──
+function renderHunk(h) {
+  const rows = h.lines.map(l => {
+    const marker = l.type === "add" ? "+" : l.type === "del" ? "-" : " ";
+    return `<div class="row ${l.type}"><span class="ln">${l.n}</span><span class="marker">${marker}</span><span class="content">${escapeHtml(l.text)}</span></div>`;
+  }).join("");
+  return `<div class="hunk"><div class="hunk-header">${escapeHtml(h.file)} &nbsp; ${escapeHtml(h.header)}</div><pre>${rows}</pre></div>`;
+}
+
+function renderBriefing() {
+  document.getElementById("step").innerHTML = `
+    <div class="eyebrow">Step 1 of ${steps.length} · Briefing</div>
+    <h1 class="step-title">${escapeHtml(window.PR_TITLE)}</h1>
+    <p class="subtitle">A briefing prepared by the review agent. Read this once; we'll walk the capabilities next.</p>
+    <div class="stats">
+      <span><strong>${escapeHtml(stats.author)}</strong> · ${stats.commits} commits</span>
+      <span><strong>${stats.files} files</strong> · +${stats.additions.toLocaleString()}</span>
+      <span><strong>${stats.total} findings</strong> · ${stats.surfaced} surfaced · ${stats.suppressed} suppressed</span>
+      <span>risk tier <strong>${stats.risk}</strong></span>
+    </div>
+
+    <div class="wwh">
+      <div class="wwh-block">
+        <div class="wwh-label">What this PR does</div>
+        <p>${window.WWH.what}</p>
+      </div>
+      <div class="wwh-block">
+        <div class="wwh-label">Why it's here</div>
+        <p>${window.WWH.why}</p>
+      </div>
+      <div class="wwh-block">
+        <div class="wwh-label">How it's structured</div>
+        <p>${window.WWH.how}</p>
+      </div>
+    </div>
+
+    <div class="cap-preview">
+      <div class="cap-preview-label">The path through this review</div>
+      ${capabilities.map(c => {
+        const decs = decsForCap(c.id);
+        return `<div class="cap-preview-row">
+          <span class="cap-preview-dot ${c.clean ? 'clean' : 'has'}"></span>
+          <span class="cap-preview-name">${escapeHtml(c.name)}</span>
+          <span class="cap-preview-meta">${c.files} files · ${c.locs} LOC</span>
+          <span class="cap-preview-tag ${c.clean ? 'clean' : 'has'}">${c.clean ? '✓ clean' : decs.length + ' concern' + (decs.length === 1 ? '' : 's')}</span>
+        </div>`;
+      }).join("")}
+      <p style="font-size: 12.5px; color: var(--muted); margin: 14px 0 0; line-height: 1.55;">
+        Clean capabilities are skipped from the wizard — the agent reviewed them and found nothing for you. They're listed at the wrap-up.
+      </p>
+    </div>
+  `;
+}
+
+function renderCapability(capId) {
+  const cap = capabilities.find(c => c.id === capId);
+  const decs = decsForCap(capId);
+  const capNum = nonCleanCaps.findIndex(c => c.id === capId) + 1;
+
+  const concernsHtml = decs.map(({ d, i }) => {
+    const s = decisionState[i];
+    const decidedTag = s === "accepted" ? `<span class="decided-tag accepted">✓ accepted</span>`
+                    : s === "fix"       ? `<span class="decided-tag fix">✎ fix requested</span>`
+                    : s === "dismissed" ? `<span class="decided-tag dismissed">— dismissed</span>`
+                    : "";
+    const cwePills = (d.cwe || []).map(c => `<span class="pill cwe">${c}</span>`).join("");
+    const reasoning = d.reasoning.map(p => `<p>${p}</p>`).join("");
+    const cls = ["concern", `sev-${d.severity}`];
+    if (s !== "pending") cls.push(`decided-${s === 'fix' ? 'fix' : s}`);
+    return `<div class="${cls.join(' ')}" data-idx="${i}">
+      <div class="concern-head">
+        <h3>${d.question}</h3>
+        <span class="pill sev-${d.severity}">${d.severity.toUpperCase()}</span>
+        ${cwePills}
+        ${decidedTag}
+      </div>
+      <div class="concern-prose">${reasoning}</div>
+      <details class="expander">
+        <summary>Show the diff</summary>
+        ${renderHunk(d.hunk)}
+      </details>
+      ${d.fix ? `<details class="expander">
+        <summary>Recommended fix</summary>
+        <div class="fix-hint"><strong>Fix sketch</strong>${d.fix}</div>
+      </details>` : ""}
+      <div class="concern-actions">
+        <button class="primary ${s === 'accepted' ? 'active' : ''}" data-act="accept" data-idx="${i}">✓ Accept</button>
+        <button class="danger ${s === 'fix' ? 'active' : ''}" data-act="fix" data-idx="${i}">✎ Request fix</button>
+        <button class="ghost ${s === 'dismissed' ? 'active' : ''}" data-act="dismiss" data-idx="${i}">— Dismiss</button>
+        ${s !== "pending" ? `<button class="clear" data-act="clear" data-idx="${i}">clear</button>` : ""}
+      </div>
+    </div>`;
+  }).join("");
+
+  document.getElementById("step").innerHTML = `
+    <div class="eyebrow">Step ${stepIdx + 1} of ${steps.length} · Capability ${capNum} of ${nonCleanCaps.length}</div>
+    <h1 class="step-title">${escapeHtml(cap.name)}</h1>
+    <p class="cap-intent">${cap.intent}</p>
+    ${concernsHtml}
+  `;
+
+  document.querySelectorAll("[data-act]").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      const act = btn.dataset.act;
+      const idx = parseInt(btn.dataset.idx, 10);
+      if (act === "clear") decisionState[idx] = "pending";
+      else decisionState[idx] = act;
+      render();
+    });
+  });
+}
+
+function renderWrap() {
+  const accepted = decisionState.filter(s => s === "accepted").length;
+  const fixes    = decisionState.filter(s => s === "fix").length;
+  const dismissed= decisionState.filter(s => s === "dismissed").length;
+  const pending  = decisionState.filter(s => s === "pending").length;
+  document.getElementById("step").innerHTML = `
+    <div class="eyebrow">Step ${stepIdx + 1} of ${steps.length} · Wrap-up</div>
+    <h1 class="step-title">Review summary</h1>
+    <p class="subtitle">What you decided. Edit the comment for the author, then send your verdict.</p>
+
+    <div class="summary-grid">
+      <div class="summary-card accept"><div class="num">${accepted}</div><div class="lbl">Accepted</div></div>
+      <div class="summary-card fix"><div class="num">${fixes}</div><div class="lbl">Fixes requested</div></div>
+      <div class="summary-card dismiss"><div class="num">${dismissed}</div><div class="lbl">Dismissed</div></div>
+      <div class="summary-card pending"><div class="num">${pending}</div><div class="lbl">Pending</div></div>
+    </div>
+
+    <div class="also-reviewed">
+      <strong>Also reviewed (clean):</strong> ${cleanCaps.map(c => escapeHtml(c.name)).join(" · ")}.
+      The agent looked at these capabilities and surfaced no concerns for you.
+    </div>
+
+    <div class="noise-line">
+      <strong>${stats.suppressed} findings filtered as noise</strong> — formatting nits, doc-comment style, generated-code naming, and duplicates from a second agent on the same line. <a href="#" onclick="alert('(prototype) opens an audit list of suppressed findings.');return false;">Audit the filter</a>.
+    </div>
+
+    <label class="comment-label" for="reviewer-comment">Comment to the author (optional)</label>
+    <textarea id="reviewer-comment" class="comment-box" placeholder="e.g. Please fix the auth-retry interaction and add the failure-path tests in one revision; the Retry-After change can ship as a follow-up.">${escapeHtml(reviewerComment)}</textarea>
+
+    <div class="final-actions">
+      <button class="primary">Approve with fixes requested</button>
+      <button>Approve as-is</button>
+      <button class="danger">Decline — needs rework</button>
+    </div>
+  `;
+  const ta = document.getElementById("reviewer-comment");
+  if (ta) ta.addEventListener("input", () => { reviewerComment = ta.value; });
+}
+
+// ── Footer nav ──
+function renderNav() {
+  const isFirst = stepIdx === 0;
+  const isLast  = stepIdx === steps.length - 1;
+  const s = steps[stepIdx];
+  let status = "";
+  if (s.kind === "capability") {
+    const decs = decsForCap(s.capId);
+    const decided = decs.filter(({ i }) => decisionState[i] !== "pending").length;
+    status = `${decided} of ${decs.length} decided · pending decisions are fine, you can revisit`;
+  } else if (s.kind === "briefing") {
+    status = `${nonCleanCaps.length} capabilities to walk · ${cleanCaps.length} clean (skipped)`;
+  } else {
+    status = "Final step — pick your verdict";
+  }
+  document.getElementById("nav").innerHTML = `<div class="nav-inner">
+    <button id="back" ${isFirst ? "disabled" : ""}>← Back</button>
+    <span class="nav-status">${status}</span>
+    <button id="next" class="primary" ${isLast ? "disabled" : ""}>${isFirst ? "Start review" : (stepIdx === steps.length - 2 ? "To wrap-up" : "Next →")}</button>
+  </div>`;
+  const back = document.getElementById("back");
+  const next = document.getElementById("next");
+  if (back && !isFirst) back.addEventListener("click", () => { stepIdx -= 1; render(); });
+  if (next && !isLast)  next.addEventListener("click", () => { stepIdx += 1; render(); window.scrollTo({ top: 0, behavior: "smooth" }); });
+}
+
+function render() {
+  renderPips();
+  const s = steps[stepIdx];
+  if (s.kind === "briefing") renderBriefing();
+  else if (s.kind === "capability") renderCapability(s.capId);
+  else renderWrap();
+  renderNav();
+}
+
+render();
+</script>
+
+</body>
+</html>
