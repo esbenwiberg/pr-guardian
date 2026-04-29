@@ -17,6 +17,7 @@ from pr_guardian.auth.identity import Identity
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
 from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
 from pr_guardian.core.events import event_bus
+from pr_guardian.decision.finding_triage import tag_findings_with_triage
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import finding_signature
@@ -95,6 +96,13 @@ async def dashboard_review_detail(review_id: uuid.UUID):
 
         row["dismissal_count"] = dismissal_count
 
+        # Tag every finding with a triage class (noise / fyi / decision) so
+        # the wizard can decide what to surface vs. roll into an audit count.
+        # Runs after dismissal enrichment because dismissed findings classify
+        # as noise.
+        triage_counts = tag_findings_with_triage(row.get("agent_results", []))
+        row["triage_counts"] = triage_counts
+
         # Collect active dismissals that didn't match any current finding
         matched_sigs = {
             finding_signature(f.get("file", ""), f.get("category", ""), a["agent_name"])
@@ -112,6 +120,7 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     except Exception:
         row["dismissal_count"] = 0
         row["prior_dismissals"] = []
+        row.setdefault("triage_counts", {"noise": 0, "fyi": 0, "decision": 0})
 
     return row
 
