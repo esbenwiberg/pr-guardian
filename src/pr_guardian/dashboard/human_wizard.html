@@ -321,10 +321,19 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
       const reasoning = rest.length ? rest : (f.description ? [f.description] : []);
       const hunk = extractHunkAroundLine(parsedPatchByPath[f.file], f.line);
       if (hunk) hunk.file = f.file;
+      // Read existing dismissal state (chapter view's dismissals show through here too).
+      const dism = f.dismissal;
+      const initialState = dism
+        ? (dism.status === 'acknowledged' ? 'accepted'
+           : dism.status === 'will_fix'   ? 'fix'
+           : 'dismissed')
+        : 'pending';
       decisions.push({
         id: `d-${cap.id}-${j}`,
         capId: cap.id,
         finding_id: f.id,
+        dismissal_id: dism ? dism.id : null,
+        initial_state: initialState,
         severity: f.severity || 'low',
         question: q,
         cwe: f.cwe ? [f.cwe] : [],
@@ -415,7 +424,9 @@ function initState() {
   decisions = window.DECISIONS;
   capabilities = window.CAPABILITIES;
   stats = window.PR_STATS;
-  decisionState = decisions.map(() => "pending"); // pending | accepted | fix | dismissed
+  // Seed from any existing dismissals on the review (chapter-view dismissals
+  // show through here too) so the reviewer sees their prior state on reload.
+  decisionState = decisions.map(d => d.initial_state || "pending");
   nonCleanCaps = capabilities.filter(c => !c.clean);
   cleanCaps = capabilities.filter(c => c.clean);
   steps = [
@@ -578,15 +589,53 @@ function renderCapability(capId) {
   `;
 
   document.querySelectorAll("[data-act]").forEach(btn => {
-    btn.addEventListener("click", (e) => {
+    btn.addEventListener("click", async (e) => {
       e.stopPropagation();
       const act = btn.dataset.act;
       const idx = parseInt(btn.dataset.idx, 10);
-      if (act === "clear") decisionState[idx] = "pending";
-      else decisionState[idx] = act;
+      try {
+        await applyDecision(idx, act);
+      } catch (err) {
+        const msg = (err && err.message) ? err.message : String(err);
+        alert(`Couldn't save decision: ${msg}`);
+      }
       render();
     });
   });
+}
+
+// Maps the wizard's per-concern action to the dismissal API:
+//   accept   → POST dismiss  status=acknowledged
+//   fix      → POST dismiss  status=will_fix
+//   dismiss  → POST dismiss  status=false_positive
+//   clear    → DELETE the existing dismissal
+const ACTION_TO_STATUS = { accept: "acknowledged", fix: "will_fix", dismiss: "false_positive" };
+
+async function applyDecision(idx, act) {
+  const decision = decisions[idx];
+  if (!decision || !decision.finding_id) {
+    throw new Error("This finding has no id; cannot persist a decision.");
+  }
+  if (act === "clear") {
+    if (decision.dismissal_id) {
+      const resp = await fetch(`/api/dashboard/dismissals/${decision.dismissal_id}`, { method: "DELETE" });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} ${await resp.text()}`);
+    }
+    decision.dismissal_id = null;
+    decisionState[idx] = "pending";
+    return;
+  }
+  const status = ACTION_TO_STATUS[act];
+  if (!status) throw new Error(`Unknown action: ${act}`);
+  const resp = await fetch(`/api/dashboard/findings/${decision.finding_id}/dismiss`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ status, comment: "" }),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status} ${await resp.text()}`);
+  const body = await resp.json();
+  decision.dismissal_id = body.id;
+  decisionState[idx] = act;
 }
 
 function renderWrap() {
