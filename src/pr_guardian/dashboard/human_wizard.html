@@ -391,6 +391,29 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
 }
 
 function buildWWH(reviewData, capabilities, files, capsData) {
+  // Prefer the LLM-generated briefing when available; otherwise build a
+  // heuristic stub from PR metadata + file roles. Either way, append a single
+  // sentence at the end of "how" naming the grouping mode so the reviewer
+  // knows whether they're looking at LLM clusters or path-prefix grouping.
+  const dirty = capabilities.filter(c => !c.clean);
+  const clean = capabilities.filter(c => c.clean);
+  const groupedBy = capsData?.source === "llm"
+    ? `clustered by capability (LLM)`
+    : `grouped by top-level path prefix`;
+  const groupingFootnote = ` Split into ${capabilities.length} ` +
+    `capabilit${capabilities.length === 1 ? 'y' : 'ies'} ` +
+    `(${dirty.length} with concerns, ${clean.length} clean), ${groupedBy}.`;
+
+  const llmBriefing = capsData?.briefing;
+  if (llmBriefing && llmBriefing.what && llmBriefing.why && llmBriefing.how) {
+    return {
+      what: llmBriefing.what,
+      why: llmBriefing.why,
+      how: llmBriefing.how + groupingFootnote,
+    };
+  }
+
+  // Heuristic stub fallback — same shape as before 4.
   const fileCount = files.length;
   const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
   const roleCounts = {};
@@ -408,14 +431,7 @@ function buildWWH(reviewData, capabilities, files, capsData) {
   const why = reviewData.body
     ? escapeHtml(reviewData.body).split(/\n\s*\n/).slice(0, 2).join(' ')
     : `<em>No description provided.</em>`;
-  const dirty = capabilities.filter(c => !c.clean);
-  const clean = capabilities.filter(c => c.clean);
-  const groupedBy = capsData?.source === "llm"
-    ? `clustered by capability (LLM)`
-    : `grouped by top-level path prefix`;
-  const how = `Split into ${capabilities.length} capabilit${capabilities.length === 1 ? 'y' : 'ies'} ` +
-              `(${dirty.length} with concerns, ${clean.length} clean), ${groupedBy}.`;
-  return { what, why, how };
+  return { what, why, how: groupingFootnote.trim() };
 }
 
 function buildStats(reviewData, files, decisions) {

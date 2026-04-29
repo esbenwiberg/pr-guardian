@@ -249,3 +249,32 @@ def test_dismissed_findings_are_not_passed_to_clusterer(client, fake_review, mon
     findings = cluster_mock.await_args.kwargs["findings"]
     assert len(findings) == 1
     assert findings[0].severity == "medium"  # dismissed high-severity finding excluded
+
+
+# ---------------------------------------------------------------------------
+# Briefing pass-through (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+def test_briefing_propagates_from_clusterer_to_response(client, fake_review, monkeypatch):
+    cluster = ClusterResult(
+        capabilities=[Capability("X", "y", ("svc.py", "model.py", "tests/x.py"), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=1, output_tokens=1,
+        briefing={"what": "w", "why": "y", "how": "h"},
+    )
+    _patch_endpoint(monkeypatch, fake_review, cluster_result=cluster)
+    body = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities").json()
+    assert body["briefing"] == {"what": "w", "why": "y", "how": "h"}
+
+
+def test_briefing_is_none_when_clusterer_skips_it(client, fake_review, monkeypatch):
+    """LLM returned valid capabilities but no usable briefing — pass through as
+    null so the wizard knows to use its heuristic stub."""
+    cluster = ClusterResult(
+        capabilities=[Capability("X", "y", ("svc.py", "model.py", "tests/x.py"), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=1, output_tokens=1,
+        briefing=None,
+    )
+    _patch_endpoint(monkeypatch, fake_review, cluster_result=cluster)
+    body = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities").json()
+    assert body["briefing"] is None
