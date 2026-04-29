@@ -51,12 +51,27 @@
     <p>Single scrollable page written as a briefing from the agent: what the PR is doing, three things worth your attention as prose, with diffs and fixes hidden behind inline expanders. 20 noise findings collapsed into an auditable footer.</p>
   </a>
 
+  <a class="card" href="./capability-briefing.html">
+    <span class="tag">Prototype D</span>
+    <h2>Capability Briefing (hybrid)</h2>
+    <p>The PR breaks into <strong>capabilities</strong> (what the change does) rather than path-prefix chapters. Each capability collapses by default, expands to show concerns first, then files grouped by <strong>layer</strong> (Models / Services / Endpoints / Infra / Tests / Docs). Cross-capability concerns are pinned to their root cause with an "also affects" note. Clean capabilities show <code>✓ clean</code> and stay collapsed.</p>
+  </a>
+
   <div class="note">
-    <strong>Prototypes only.</strong> No backend wiring. Hand-written content
-    using realistic findings from the example PR — to test how each mode <em>feels</em>
-    before deciding which to build. Click around, then we'll iterate.
-    Variant <strong>D</strong> (capability-clustered, layer-grouped story)
-    is next once we lock the scaffold.
+    <strong>Scaffold decisions (locked):</strong>
+    no <em>pros</em> section — clean capabilities just say <code>✓ clean</code>;
+    cross-capability concerns are <em>pinned to root cause</em> with an
+    "also affects" mention; closed layer vocabulary
+    (Models / Services / Endpoints / Validation / Infra / Tests / Config / Docs);
+    fall back to mode B when surfaced findings ≤ 2 or capabilities = 1;
+    triage (noise / fyi / decision) is a separate pipeline stage that all
+    three modes consume.
+  </div>
+
+  <div class="note" style="border-left-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.04);">
+    <strong>Hosting:</strong> static files in <code>/prototypes/</code>.
+    Open via <code>file://</code> or any static server. A <code>StaticFiles</code>
+    mount on the dev server is the next step once we pick a direction to take forward.
   </div>
 </main>
 
