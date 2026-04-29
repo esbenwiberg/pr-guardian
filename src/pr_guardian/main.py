@@ -74,6 +74,14 @@ _STATIC_DIR = Path(__file__).resolve().parent / "dashboard" / "static"
 if _STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
+_PROTOTYPES_DIR = Path(__file__).resolve().parent.parent.parent / "prototypes"
+if _PROTOTYPES_DIR.is_dir():
+    app.mount(
+        "/prototypes",
+        StaticFiles(directory=str(_PROTOTYPES_DIR), html=True),
+        name="prototypes",
+    )
+
 
 @app.get("/")
 async def root():
