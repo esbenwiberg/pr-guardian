@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Guardian — Capability Narrative (Prototype E)</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: rgba(15,23,42,0.55);
+    --panel-2: rgba(15,23,42,0.35);
+    --border: rgba(51,65,85,0.55);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --indigo: #a5b4fc;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --yellow: #facc15;
+    --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-serif, Georgia, "Iowan Old Style", "Palatino Linotype", serif; font-size: 16.5px; line-height: 1.7; }
+  .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .mono, code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border); background: rgba(11,18,32,0.92); backdrop-filter: blur(8px); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; }
+  .crumbs { color: var(--muted); }
+  .crumbs strong { color: var(--text); font-weight: 600; }
+  .crumbs span.sep { color: var(--dim); margin: 0 6px; }
+  .verdict-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(234,179,8,0.10); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+
+  article { max-width: 760px; margin: 0 auto; padding: 44px 24px 96px; }
+
+  /* Title block */
+  .eyebrow { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 14px; }
+  h1 { font-size: 32px; font-weight: 600; line-height: 1.22; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--muted); font-size: 15.5px; margin: 0 0 26px; font-style: italic; }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; padding: 12px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 36px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; color: var(--muted); }
+  .stats span strong { color: var(--text); font-weight: 600; }
+
+  /* Intro: What / Why / How */
+  .intro { margin-bottom: 44px; }
+  .intro-block { margin-bottom: 22px; }
+  .intro-block:last-child { margin-bottom: 0; }
+  .intro-label { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+  .intro p { margin: 0 0 12px; color: #d6dde8; font-size: 16.5px; line-height: 1.7; }
+  .intro p:last-child { margin-bottom: 0; }
+  .intro p.lede { font-size: 18px; line-height: 1.65; color: var(--text); }
+  .intro code { background: rgba(148,163,184,0.10); padding: 1px 6px; border-radius: 3px; font-size: 0.86em; color: var(--text); }
+  .intro em { color: var(--text); font-style: italic; }
+  .intro strong { color: var(--text); }
+
+  /* Section title */
+  h2.section-title { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin: 0 0 18px; padding-top: 8px; border-top: 1px solid var(--border); padding-top: 28px; }
+
+  /* Quick-jump rail (compact, sans, top of capabilities section) */
+  .quickjump { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 22px; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .qj { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px; border-radius: 999px; background: rgba(15,23,42,0.55); border: 1px solid var(--border); font-size: 12px; color: var(--muted); cursor: pointer; }
+  .qj:hover { background: rgba(99,102,241,0.08); color: var(--text); border-color: rgba(99,102,241,0.4); }
+  .qj-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: rgba(100,116,139,0.4); }
+  .qj-dot.has { background: var(--orange); }
+  .qj-dot.clean { background: var(--green); }
+  .qj-count { font-size: 11px; color: var(--dim); }
+
+  /* Capability blocks (narrative-styled) */
+  .cap { margin-bottom: 38px; padding-left: 18px; border-left: 2px solid var(--border); }
+  .cap.has-concerns { border-left-color: var(--orange); }
+  .cap.clean { border-left-color: rgba(16,185,129,0.4); }
+  .cap-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 4px; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .cap-head h3 { margin: 0; font-size: 18px; font-weight: 600; color: var(--text); font-family: ui-sans-serif, system-ui, sans-serif; }
+  .concern-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 9px; border-radius: 999px; }
+  .concern-badge.has { background: rgba(251,146,60,0.12); color: var(--orange); }
+  .concern-badge.clean { background: rgba(16,185,129,0.10); color: var(--green); }
+  .cap-files-summary { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; color: var(--dim); margin-bottom: 14px; }
+
+  .cap-prose p { margin: 0 0 14px; color: #d6dde8; font-size: 16px; line-height: 1.7; }
+  .cap-prose p:last-child { margin-bottom: 0; }
+  .cap-prose code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 0.84em; color: var(--text); }
+  .cap-prose em { color: var(--text); font-style: italic; }
+  .cap-prose strong { color: var(--text); }
+
+  /* Inline pills attached to a sentence */
+  .pill { display: inline-flex; align-items: center; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 3px; letter-spacing: 0.06em; vertical-align: 2px; margin: 0 2px; }
+  .pill.sev-low      { background: rgba(59,130,246,0.12); color: var(--blue); }
+  .pill.sev-medium   { background: rgba(234,179,8,0.10); color: var(--yellow); }
+  .pill.sev-high     { background: rgba(249,115,22,0.12); color: var(--orange); }
+  .pill.sev-critical { background: rgba(239,68,68,0.12); color: var(--red); }
+  .pill.cwe { background: rgba(148,163,184,0.10); color: var(--muted); font-family: ui-monospace, monospace; font-weight: 500; }
+
+  /* Inline expanders */
+  details.expander { margin: 6px 0 10px; }
+  details.expander summary { cursor: pointer; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; color: var(--indigo); padding: 4px 0; display: inline-block; list-style: none; user-select: none; }
+  details.expander summary::-webkit-details-marker { display: none; }
+  details.expander summary::before { content: "▸ "; color: var(--dim); }
+  details.expander[open] summary::before { content: "▾ "; }
+  details.expander summary:hover { color: #c7d2fe; }
+  details.expander summary + * { margin-top: 6px; }
+
+  /* Hunk */
+  .hunk { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: rgba(2,6,23,0.6); margin: 8px 0; font-family: ui-monospace, monospace; }
+  .hunk-header { font-size: 11px; padding: 5px 12px; color: var(--muted); background: rgba(30,41,59,0.6); border-bottom: 1px solid var(--border); }
+  .hunk pre { margin: 0; padding: 8px 0; font-size: 12.5px; line-height: 1.55; overflow-x: auto; }
+  .hunk .row { display: flex; padding: 0 4px; white-space: pre; }
+  .hunk .ln { width: 38px; text-align: right; padding-right: 10px; color: rgba(148,163,184,0.4); user-select: none; flex-shrink: 0; }
+  .hunk .marker { width: 14px; user-select: none; flex-shrink: 0; color: var(--dim); }
+  .hunk .add { background: rgba(16,185,129,0.07); }
+  .hunk .add .content, .hunk .add .marker { color: #6ee7b7; }
+  .hunk .del { background: rgba(239,68,68,0.07); }
+  .hunk .del .content, .hunk .del .marker { color: #fca5a5; }
+  .hunk .ctx .content { color: #cbd5e1; }
+
+  .fix-hint { padding: 11px 13px; border-radius: 6px; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.2); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.6; color: #d6dde8; }
+  .fix-hint strong { color: var(--green); display: block; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
+
+  /* Layered file drill-in (collapsed by default per capability) */
+  details.files { margin-top: 14px; }
+  details.files summary { cursor: pointer; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px; color: var(--muted); padding: 4px 0; display: inline-block; list-style: none; user-select: none; }
+  details.files summary::-webkit-details-marker { display: none; }
+  details.files summary::before { content: "▸ "; color: var(--dim); }
+  details.files[open] summary::before { content: "▾ "; }
+  details.files summary:hover { color: var(--text); }
+  .layers { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  .layer-row { border: 1px solid var(--border); border-radius: 6px; background: rgba(2,6,23,0.3); padding: 8px 12px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; }
+  .layer-name { font-weight: 600; color: var(--text); margin-right: 10px; display: inline-block; min-width: 90px; }
+  .layer-files { color: var(--muted); font-family: ui-monospace, monospace; font-size: 11.5px; }
+  .layer-count { color: var(--dim); font-size: 11px; margin-left: 8px; }
+
+  /* Suppressed footer */
+  .suppressed { margin-top: 48px; padding: 18px 22px; border: 1px dashed var(--border); border-radius: 10px; background: rgba(15,23,42,0.4); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; line-height: 1.65; color: var(--muted); }
+  .suppressed summary { color: var(--muted); cursor: pointer; list-style: none; user-select: none; }
+  .suppressed summary::before { content: "▸ "; color: var(--dim); }
+  .suppressed[open] summary::before { content: "▾ "; }
+  .suppressed strong { color: var(--text); }
+  .suppressed ul { margin: 12px 0 0; padding: 0 0 0 20px; }
+  .suppressed li { margin: 4px 0; }
+
+  /* Verdict */
+  .verdict { margin-top: 36px; padding: 26px 28px; border-radius: 14px; background: linear-gradient(180deg, rgba(99,102,241,0.08), rgba(99,102,241,0.02)); border: 1px solid rgba(99,102,241,0.25); font-family: ui-sans-serif, system-ui, sans-serif; }
+  .verdict-label { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--indigo); margin-bottom: 10px; }
+  .verdict p { font-size: 15px; line-height: 1.6; color: var(--text); margin: 0; }
+  .verdict .actions { display: flex; gap: 8px; margin-top: 18px; flex-wrap: wrap; }
+  .verdict button { font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: rgba(30,41,59,0.6); color: var(--text); cursor: pointer; }
+  .verdict button.primary { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.5); color: var(--indigo); }
+  .verdict button:hover { filter: brightness(1.15); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="crumbs">
+    <a href="./index.html">Reviews</a>
+    <span class="sep">/</span>
+    <a href="#">Findings</a>
+    <span class="sep">/</span>
+    <strong>Capability Narrative</strong>
+  </div>
+  <span class="verdict-chip">⚠ needs human review</span>
+</header>
+
+<article>
+
+  <div class="eyebrow">Briefing · Review #41466cf2 · 4 capabilities · 22 minutes ago</div>
+  <h1>Microsoft Graph integration with retry &amp; OAuth handling</h1>
+  <p class="subtitle">A briefing prepared by the review agent. The PR breaks down into four capabilities; two are clean, two carry concerns worth your attention.</p>
+
+  <div class="stats">
+    <span><strong>esbenwiberg</strong> · 4 commits</span>
+    <span><strong>37 files</strong> · +1,303 / −0</span>
+    <span><strong>23 findings</strong> · 4 surfaced · 19 suppressed</span>
+    <span>risk tier <strong>MEDIUM</strong></span>
+  </div>
+
+  <!-- ── Intro: What / Why / How ── -->
+  <div class="intro">
+
+    <div class="intro-block">
+      <div class="intro-label">What this PR does</div>
+      <p class="lede">It adds a first-class Microsoft Graph client to the platform — a typed <code>IGraphService</code> registered through DI, wrapped in a Polly retry pipeline, and authenticated by a token-caching <code>GraphOAuthMessageHandler</code>. Alongside that, it retires the legacy plugin-based Graph integration (six files deleted), updates the four endpoints that used it, and adds unit tests for the new client. A handful of unrelated agent-mode plumbing edits ride along.</p>
+    </div>
+
+    <div class="intro-block">
+      <div class="intro-label">Why it's here</div>
+      <p>The accompanying spec (<code>specs/msgraph-di-consolidation.md</code>) frames this as a <em>consolidation</em>: the legacy plugin pattern duplicated auth and retry logic across each Graph caller, so token expiry and rate limiting were handled inconsistently. The goal is to centralise both — one HTTP client, one retry policy, one auth handler — and treat Graph as an ordinary typed service. Most of the line count is mechanical: deletions in <code>Legacy/Plugins/*</code> and migrations in <code>Legacy/Endpoints/*</code>.</p>
+    </div>
+
+    <div class="intro-block">
+      <div class="intro-label">How it's structured</div>
+      <p>Standard layered shape. <strong>Infra</strong> registers the client and owns the cross-cutting handlers; <strong>Services</strong> hold the business-facing wrappers (<code>MsGraphService</code>, <code>GraphTenantClient</code>); <strong>Models</strong> hold the DTOs; <strong>Endpoints</strong> are updated to consume the new service. <strong>Tests</strong> cover the happy path. The risk surface is narrow but real, and concentrates inside the auth/retry interaction in the Infra layer — which is what most of this briefing is about.</p>
+    </div>
+
+  </div>
+
+  <!-- ── Capabilities ── -->
+  <h2 class="section-title">Capabilities</h2>
+
+  <div class="quickjump">
+    <span class="qj" onclick="document.getElementById('cap-1').scrollIntoView({behavior:'smooth',block:'start'})">
+      <span class="qj-dot has"></span>Microsoft Graph client<span class="qj-count">3 concerns</span>
+    </span>
+    <span class="qj" onclick="document.getElementById('cap-2').scrollIntoView({behavior:'smooth',block:'start'})">
+      <span class="qj-dot clean"></span>msgraph-di-consolidation<span class="qj-count">clean</span>
+    </span>
+    <span class="qj" onclick="document.getElementById('cap-3').scrollIntoView({behavior:'smooth',block:'start'})">
+      <span class="qj-dot has"></span>Test coverage<span class="qj-count">1 concern</span>
+    </span>
+    <span class="qj" onclick="document.getElementById('cap-4').scrollIntoView({behavior:'smooth',block:'start'})">
+      <span class="qj-dot clean"></span>Agent-mode plumbing<span class="qj-count">clean</span>
+    </span>
+  </div>
+
+  <div id="capabilities">
+
+    <!-- ── Capability 1: Microsoft Graph client (3 concerns, narrative form) ── -->
+    <div class="cap has-concerns" id="cap-1">
+      <div class="cap-head">
+        <h3>Microsoft Graph client</h3>
+        <span class="concern-badge has">3 concerns</span>
+      </div>
+      <div class="cap-files-summary">11 files · 487 LOC · Models, Services, Infra</div>
+
+      <div class="cap-prose">
+        <p>This is where the change earns its keep, and also where the risk concentrates. The shape is sound — a typed client behind DI, retry handled by Polly, auth handled by a dedicated <code>DelegatingHandler</code> — but two pieces of the implementation are pulling in opposite directions, and a third pulls against Microsoft's own throttling contract.</p>
+
+        <p>The first one is the <strong>auth/retry interaction</strong>. The Polly policy retries on <code>HttpStatusCode.Unauthorized</code> only when <code>ReasonPhrase == "TenantThrottle"</code> <span class="pill sev-medium">MEDIUM</span> <span class="pill cwe">CWE-287</span> <span class="pill cwe">CWE-755</span>. <code>ReasonPhrase</code> is optional in HTTP/2 and frequently stripped by load balancers — but the deeper issue is that <code>GraphOAuthMessageHandler</code> only attaches a token when <code>Authorization</code> is null. So a real 401 (expired token) loops three times with the same dead bearer and then fails. Token refresh belongs in the handler, not in the retry policy.</p>
+        <details class="expander">
+          <summary>Show the diff</summary>
+          <div class="hunk">
+            <div class="hunk-header">Infrastructure/Graph/GraphServiceCollectionEx.cs · @@ -0,0 +25,3 @@</div>
+            <pre><div class="row add"><span class="ln">25</span><span class="marker">+</span><span class="content">.OrResult(msg =&gt; (int)msg.StatusCode == 429)</span></div><div class="row add"><span class="ln">26</span><span class="marker">+</span><span class="content">.OrResult(msg =&gt; msg.StatusCode == HttpStatusCode.Unauthorized &amp;&amp; msg.ReasonPhrase == "TenantThrottle")</span></div><div class="row add"><span class="ln">27</span><span class="marker">+</span><span class="content">.WaitAndRetryAsync(3, retryAttempt =&gt;</span></div></pre>
+          </div>
+        </details>
+        <details class="expander">
+          <summary>Recommended fix</summary>
+          <div class="fix-hint">
+            <strong>Fix sketch</strong>
+            Drop the 401 branch from the Polly policy. In <code>GraphOAuthMessageHandler.SendAsync</code>, detect 401, invalidate the cached token, rebuild the auth header, and resend once. Keeps the retry policy focused on transient HTTP errors and puts auth recovery where it actually has the cache to work with.
+          </div>
+        </details>
+
+        <p>The second one sits one layer up. <code>GraphTenantClient.ListUsersAsync</code> takes a tenant identifier from a request header and drops it directly into a URL template <span class="pill sev-high">HIGH</span> <span class="pill cwe">CWE-918</span>. The host is fixed, so this is not classic SSRF, but a tenant value containing path segments — encoded or otherwise — can shift which Graph resource is hit. Microsoft validates tenant IDs server-side, but our client should not rely on that for defence-in-depth; we know what a tenant ID is supposed to look like (a GUID or a verified domain), and we should enforce it at the boundary.</p>
+        <details class="expander">
+          <summary>Show the diff</summary>
+          <div class="hunk">
+            <div class="hunk-header">Infrastructure/Services/GraphTenantClient.cs · @@ -0,0 +82,4 @@</div>
+            <pre><div class="row ctx"><span class="ln">82</span><span class="marker"> </span><span class="content">public async Task&lt;UsersResponse&gt; ListUsersAsync(string tenantId)</span></div><div class="row ctx"><span class="ln">83</span><span class="marker"> </span><span class="content">{</span></div><div class="row add"><span class="ln">84</span><span class="marker">+</span><span class="content">    var url = $"https://graph.microsoft.com/v1.0/{tenantId}/users";</span></div><div class="row add"><span class="ln">85</span><span class="marker">+</span><span class="content">    return await _client.GetFromJsonAsync&lt;UsersResponse&gt;(url);</span></div></pre>
+          </div>
+        </details>
+
+        <p>The last one is smaller and easy to forget. The 429 retry uses fixed exponential backoff and ignores Microsoft's <code>Retry-After</code> header <span class="pill sev-low">LOW</span>. That tends to make throttling worse, not better — the same tenant ceiling gets hit on every retry. A small <code>WaitAndRetryAsync</code> overload that reads the header and falls back to exponential when absent is the conventional fix here. Worth folding into the same change as the auth fix above.</p>
+        <details class="expander">
+          <summary>Show the diff</summary>
+          <div class="hunk">
+            <div class="hunk-header">Infrastructure/Graph/GraphServiceCollectionEx.cs · @@ -0,0 +25,3 @@</div>
+            <pre><div class="row add"><span class="ln">25</span><span class="marker">+</span><span class="content">.OrResult(msg =&gt; (int)msg.StatusCode == 429)</span></div><div class="row ctx"><span class="ln">26</span><span class="marker"> </span><span class="content">// ...</span></div><div class="row add"><span class="ln">27</span><span class="marker">+</span><span class="content">.WaitAndRetryAsync(3, retryAttempt =&gt; TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)))</span></div></pre>
+          </div>
+        </details>
+      </div>
+
+      <details class="files">
+        <summary>Files in this capability (by layer)</summary>
+        <div class="layers">
+          <div class="layer-row">
+            <span class="layer-name">Infra</span>
+            <span class="layer-files">GraphServiceCollectionEx.cs · GraphOAuthMessageHandler.cs · GraphRetryPolicy.cs</span>
+            <span class="layer-count">3 files · 142 LOC</span>
+          </div>
+          <div class="layer-row">
+            <span class="layer-name">Services</span>
+            <span class="layer-files">MsGraphService.cs · GraphTenantClient.cs</span>
+            <span class="layer-count">2 files · 198 LOC</span>
+          </div>
+          <div class="layer-row">
+            <span class="layer-name">Models</span>
+            <span class="layer-files">UsersResponse.cs · GraphUser.cs · GraphError.cs · 3 more</span>
+            <span class="layer-count">6 files · 147 LOC</span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ── Capability 2: msgraph-di-consolidation (clean) ── -->
+    <div class="cap clean" id="cap-2">
+      <div class="cap-head">
+        <h3>msgraph-di-consolidation</h3>
+        <span class="concern-badge clean">✓ clean</span>
+      </div>
+      <div class="cap-files-summary">14 files · 593 LOC · Endpoints, Services, Docs</div>
+
+      <div class="cap-prose">
+        <p>This is the migration half of the spec. Six legacy plugin files in <code>Legacy/Plugins/*</code> are deleted; the four endpoints that called them in <code>Legacy/Endpoints/*</code> are rewritten to consume the new <code>IGraphService</code>. There is also a four-file documentation update — the spec itself plus a migration note. I read the rewrites and they are mechanical: the old <code>plugin.InvokeGraph(...)</code> sites become typed calls on the new service, error handling collapses into the new pipeline. Nothing here surprised me.</p>
+      </div>
+
+      <details class="files">
+        <summary>Files in this capability (by layer)</summary>
+        <div class="layers">
+          <div class="layer-row">
+            <span class="layer-name">Endpoints</span>
+            <span class="layer-files">UsersEndpoint.cs · TenantsEndpoint.cs · 2 more</span>
+            <span class="layer-count">4 files · 168 LOC</span>
+          </div>
+          <div class="layer-row">
+            <span class="layer-name">Services</span>
+            <span class="layer-files" style="color: #fca5a5;">[deleted] LegacyGraphPlugin.cs · GraphPluginBase.cs · 4 more</span>
+            <span class="layer-count">6 files · -284 LOC</span>
+          </div>
+          <div class="layer-row">
+            <span class="layer-name">Docs</span>
+            <span class="layer-files">specs/msgraph-di-consolidation.md · 3 more</span>
+            <span class="layer-count">4 files · 141 LOC</span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ── Capability 3: Test coverage (1 concern, narrative form) ── -->
+    <div class="cap has-concerns" id="cap-3">
+      <div class="cap-head">
+        <h3>Test coverage</h3>
+        <span class="concern-badge has">1 concern</span>
+      </div>
+      <div class="cap-files-summary">2 files · 797 LOC · Tests</div>
+
+      <div class="cap-prose">
+        <p>Two test files, ~600 LOC of happy-path coverage for the new client. The coverage of the typed service methods is fine — call shape, deserialisation, basic error mapping all have cases. What is missing is the part that <em>actually</em> matters given the auth-retry concern in the <strong>Microsoft Graph client</strong> capability above: <code>GraphOAuthMessageHandler</code> has no tests for token-acquisition failure, cached-token expiry mid-request, or downstream 401 handling <span class="pill sev-medium">MEDIUM</span>. If you ask for the auth fix above, ask for these tests as part of the same pass — they are the cheapest way to keep that fix from regressing.</p>
+        <details class="expander">
+          <summary>Recommended fix</summary>
+          <div class="fix-hint">
+            <strong>Fix sketch</strong>
+            Add three test cases against <code>GraphOAuthMessageHandler</code>: (a) token provider throws → handler surfaces a typed exception; (b) cached token expired → handler refreshes before sending; (c) downstream returns 401 → handler invalidates cache and retries once.
+          </div>
+        </details>
+      </div>
+
+      <details class="files">
+        <summary>Files in this capability (by layer)</summary>
+        <div class="layers">
+          <div class="layer-row">
+            <span class="layer-name">Tests</span>
+            <span class="layer-files">GraphServiceTests.cs (1/2) · GraphServiceTests.cs (2/2)</span>
+            <span class="layer-count">2 files · 797 LOC</span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+    <!-- ── Capability 4: Agent-mode plumbing (clean) ── -->
+    <div class="cap clean" id="cap-4">
+      <div class="cap-head">
+        <h3>Agent-mode plumbing</h3>
+        <span class="concern-badge clean">✓ clean</span>
+      </div>
+      <div class="cap-files-summary">10 files · 13 LOC · Endpoints, Infra, Docs</div>
+
+      <div class="cap-prose">
+        <p>Unrelated to the Graph work — these are small wiring edits across <code>Api/</code>, <code>Infrastructure/AgentMode/</code>, and five changeset entries in <code>.changes/*.md</code>. Two-line diffs, mostly. They ride along in this PR but do not interact with anything else here.</p>
+      </div>
+
+      <details class="files">
+        <summary>Files in this capability (by layer)</summary>
+        <div class="layers">
+          <div class="layer-row">
+            <span class="layer-name">Endpoints</span>
+            <span class="layer-files">Api/AgentEndpoint.cs · Api/Routes.cs</span>
+            <span class="layer-count">2 files · 6 LOC</span>
+          </div>
+          <div class="layer-row">
+            <span class="layer-name">Infra</span>
+            <span class="layer-files">Infrastructure/AgentMode/Hook.cs · 2 more</span>
+            <span class="layer-count">3 files · 5 LOC</span>
+          </div>
+          <div class="layer-row">
+            <span class="layer-name">Docs</span>
+            <span class="layer-files">.changes/*.md</span>
+            <span class="layer-count">5 files · 2 LOC</span>
+          </div>
+        </div>
+      </details>
+    </div>
+
+  </div>
+
+  <!-- Suppressed footer + verdict -->
+  <div id="footer">
+
+    <details class="suppressed">
+      <summary><strong>19 findings hidden as noise</strong> — click to audit my filter</summary>
+      <ul>
+        <li><strong>11 ×</strong> formatting and brace-style nits in <code>Infrastructure/Graph/*</code> — auto-format will fix on next save.</li>
+        <li><strong>3 ×</strong> <em>"missing XML doc comment"</em> on internal <code>partial</code> classes — internal-only, not part of any public surface.</li>
+        <li><strong>2 ×</strong> generated DTO files flagged for naming style — generated code, not author-controlled.</li>
+        <li><strong>2 ×</strong> duplicate findings from a second agent on the same line as the auth-retry concern above (already merged).</li>
+        <li><strong>1 ×</strong> <em>"prefer var over explicit type"</em> on a 1-line lambda — codebase uses both freely.</li>
+      </ul>
+      <p style="margin-top: 10px;">Switch to the flat <a href="#">Findings view</a> to see all 23. Dismissing a noise category here teaches the filter for next time.</p>
+    </details>
+
+    <div class="verdict">
+      <div class="verdict-label">My read</div>
+      <p>The shape is sound and the consolidation is the right call. Two of the four capabilities are clean and need nothing from you. The risk lives in the <strong>Microsoft Graph client</strong> — the auth-retry interaction is a real runtime bug under token expiry, and the tenant-ID interpolation is a small, easy hardening. <strong>Test coverage</strong> is coupled to the first fix: the missing failure-path tests are the cheapest way to keep the fix from regressing. I would ask for the auth change, the tenant-ID guard, and those three tests in one revision, and merge the <code>Retry-After</code> change as a follow-up if that pace is preferable.</p>
+      <div class="actions">
+        <button class="primary">Approve with fixes requested</button>
+        <button>Approve as-is</button>
+        <button>Decline — needs rework</button>
+      </div>
+    </div>
+
+  </div>
+
+</article>
+
+</body>
+</html>

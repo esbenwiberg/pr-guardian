@@ -57,6 +57,24 @@
     <p>The PR breaks into <strong>capabilities</strong> (what the change does) rather than path-prefix chapters. Each capability collapses by default, expands to show concerns first, then files grouped by <strong>layer</strong> (Models / Services / Endpoints / Infra / Tests / Docs). Cross-capability concerns are pinned to their root cause with an "also affects" note. Clean capabilities show <code>✓ clean</code> and stay collapsed.</p>
   </a>
 
+  <a class="card" href="./capability-narrative.html">
+    <span class="tag">Prototype E</span>
+    <h2>Capability Narrative (B + D mix)</h2>
+    <p>D's capability scaffold with B's prose voice. Opens with a <strong>What / Why / How</strong> intro to set the story up, then each capability is a paragraph (not a structured concern card) with severity pills inline and diff/fix expanders attached to the relevant sentences. Layered file drill-in is collapsed at the bottom of each capability. Clean capabilities still get a one-paragraph summary so the reviewer knows the agent looked at them.</p>
+  </a>
+
+  <a class="card" href="./capability-queue.html">
+    <span class="tag">Prototype F</span>
+    <h2>Capability Queue (A + D mix)</h2>
+    <p>D's capability structure with A's focused one-decision-at-a-time view. The page opens with a compact <strong>What / Why / How</strong> briefing, then a left-rail capability map shows you the path through the review (with clean capabilities marked <code>✓ clean</code> and skipped). The main area shows a single decision card; keyboard nav (<code>a/f/d/s</code>, <code>j/k</code>) advances through the queue. When a capability is fully decided, a brief "✓ done — continue to <em>next capability</em>" transition fires before the next decision loads.</p>
+  </a>
+
+  <a class="card" href="./review-wizard.html">
+    <span class="tag">Prototype G</span>
+    <h2>Review Wizard (step-by-step)</h2>
+    <p>The most focused mode: one screen at a time, walking the reviewer through <strong>Briefing → Capability 1 → Capability 2 → … → Wrap-up</strong>. Clean capabilities are skipped from the wizard and listed in the wrap-up. Inside each capability step, every concern has inline <code>✓ Accept / ✎ Fix / — Dismiss</code> buttons (pending is fine — you can revisit). Step pips at the top let you jump back to any step; back/next buttons at the bottom advance you. The wrap-up shows a decisions summary, an editable comment-to-author textarea, and the final approval buttons.</p>
+  </a>
+
   <div class="note">
     <strong>Scaffold decisions (locked):</strong>
     no <em>pros</em> section — clean capabilities just say <code>✓ clean</code>;
