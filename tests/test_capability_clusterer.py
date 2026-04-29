@@ -1,0 +1,330 @@
+"""Tests for the LLM-driven capability clusterer (Phase 3a).
+
+Mocks the LLMClient so the suite stays in-process and offline.
+"""
+from __future__ import annotations
+
+import json
+from unittest.mock import AsyncMock
+
+import pytest
+
+from pr_guardian.llm.protocol import LLMResponse
+from pr_guardian.wizard.capability_clusterer import (
+    LAYER_VOCAB,
+    SMALL_PR_THRESHOLD,
+    SOFT_CAP_CAPABILITIES,
+    Capability,
+    FileSummary,
+    FindingSummary,
+    cluster_capabilities,
+)
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _f(path: str, role: str = "PRODUCTION", locs: int = 30, finding_count: int = 0) -> FileSummary:
+    return FileSummary(path=path, role=role, locs=locs, finding_count=finding_count)
+
+
+def _finding(file: str, severity: str = "high", category: str = "x") -> FindingSummary:
+    return FindingSummary(file=file, severity=severity, category=category)
+
+
+def _mock_llm(content: str, *, model: str = "claude-sonnet", in_tok: int = 100, out_tok: int = 50) -> AsyncMock:
+    llm = AsyncMock()
+    llm.complete = AsyncMock(return_value=LLMResponse(
+        content=content, model=model, input_tokens=in_tok, output_tokens=out_tok,
+    ))
+    return llm
+
+
+# ---------------------------------------------------------------------------
+# Fallback paths — these never call the LLM.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_no_files_returns_empty_no_files_fallback():
+    llm = _mock_llm("")
+    result = await cluster_capabilities(
+        files=[], findings=[], pr_title="x", pr_body="", llm_client=llm,
+    )
+    assert result.source == "fallback_no_files"
+    assert result.capabilities == []
+    llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_small_pr_returns_single_capability_without_calling_llm():
+    files = [_f("a.py"), _f("b.py")]
+    findings = [_finding("a.py", "high")]  # 1 surfaced — below threshold (2)
+    assert SMALL_PR_THRESHOLD == 2  # contract pin
+
+    llm = _mock_llm("")
+    result = await cluster_capabilities(
+        files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
+    )
+
+    assert result.source == "fallback_small_pr"
+    assert len(result.capabilities) == 1
+    assert result.capabilities[0].files == ("a.py", "b.py")
+    llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_low_only_findings_count_as_below_threshold():
+    """Only medium/high/critical count toward the 'should we cluster?' decision —
+    a PR full of low-severity nits looks small for clustering purposes."""
+    files = [_f("a.py"), _f("b.py")]
+    findings = [_finding("a.py", "low"), _finding("b.py", "low"), _finding("a.py", "low")]
+    llm = _mock_llm("")
+    result = await cluster_capabilities(
+        files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
+    )
+    assert result.source == "fallback_small_pr"
+    llm.complete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_llm_error_falls_back_to_single_capability():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    llm = AsyncMock()
+    llm.complete = AsyncMock(side_effect=RuntimeError("network down"))
+
+    result = await cluster_capabilities(
+        files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
+    )
+    assert result.source == "fallback_error"
+    assert "network down" in result.error
+    assert len(result.capabilities) == 1
+    assert set(result.capabilities[0].files) == {"a.py", "b.py", "c.py"}
+
+
+# ---------------------------------------------------------------------------
+# Happy path — LLM returns valid JSON.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_valid_llm_response_returns_capabilities_and_propagates_tokens():
+    files = [_f("svc.py"), _f("model.py"), _f("test_svc.py", role="TEST"), _f("api.py")]
+    findings = [_finding("svc.py"), _finding("api.py")]
+
+    response = json.dumps({
+        "capabilities": [
+            {"name": "Graph integration", "intent": "Adds the typed Graph client.",
+             "files": ["svc.py", "model.py"], "layers": ["Services", "Models"]},
+            {"name": "Endpoints", "intent": "Wires the new client into the API surface.",
+             "files": ["api.py"], "layers": ["Endpoints"]},
+            {"name": "Tests", "intent": "Happy-path coverage for the new client.",
+             "files": ["test_svc.py"], "layers": ["Tests"]},
+        ]
+    })
+    llm = _mock_llm(response, in_tok=234, out_tok=89)
+
+    result = await cluster_capabilities(
+        files=files, findings=findings, pr_title="Add Graph integration", pr_body="",
+        llm_client=llm,
+    )
+    assert result.source == "llm"
+    assert len(result.capabilities) == 3
+    assert result.capabilities[0].name == "Graph integration"
+    assert result.capabilities[0].layers == ("Services", "Models")
+    assert result.input_tokens == 234
+    assert result.output_tokens == 89
+    assert result.model == "claude-sonnet"
+
+
+@pytest.mark.asyncio
+async def test_response_wrapped_in_markdown_fence_is_still_parsed():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    raw = "```json\n" + json.dumps({"capabilities": [
+        {"name": "All", "intent": "everything", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]}
+    ]}) + "\n```"
+    llm = _mock_llm(raw)
+
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    assert result.source == "llm"
+    assert len(result.capabilities) == 1
+
+
+# ---------------------------------------------------------------------------
+# Validation — soft enforcement.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_invalid_layers_are_dropped_not_rejected():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "Cap", "intent": "i", "files": ["a.py", "b.py", "c.py"],
+         "layers": ["Services", "MyMadeUpLayer", "Tests"]},
+    ]})
+    llm = _mock_llm(raw)
+
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    assert result.source == "llm"
+    assert result.capabilities[0].layers == ("Services", "Tests")  # invalid layer dropped
+
+
+@pytest.mark.asyncio
+async def test_unknown_file_paths_in_response_are_dropped():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "Cap", "intent": "i", "files": ["a.py", "b.py", "c.py", "phantom.py"],
+         "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
+
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    assert result.source == "llm"
+    assert "phantom.py" not in result.capabilities[0].files
+
+
+@pytest.mark.asyncio
+async def test_capabilities_exceeding_soft_cap_are_truncated():
+    files = [_f(f"f{i}.py") for i in range(10)]
+    findings = [_finding("f0.py"), _finding("f1.py")]
+
+    # 8 capabilities returned; soft cap defaults to 6, so 2 get truncated and
+    # those files end up unassigned, triggering parse-error fallback.
+    raw = json.dumps({"capabilities": [
+        {"name": f"Cap{i}", "intent": "i", "files": [f"f{i}.py"], "layers": ["Services"]}
+        for i in range(8)
+    ]})
+    llm = _mock_llm(raw)
+
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    # Truncation produced unassigned files → parse error → fallback to single cap.
+    assert result.source == "fallback_error"
+    assert "not assigned" in result.error
+
+
+@pytest.mark.asyncio
+async def test_unassigned_files_trigger_fallback():
+    """If the LLM omits some files, fall back rather than show a partial view."""
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "Cap", "intent": "i", "files": ["a.py", "b.py"], "layers": ["Services"]},
+        # c.py omitted
+    ]})
+    llm = _mock_llm(raw)
+
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    assert result.source == "fallback_error"
+
+
+@pytest.mark.asyncio
+async def test_each_file_appears_in_exactly_one_capability():
+    """If the LLM dupes a file across capabilities, the second occurrence is dropped."""
+    files = [_f("a.py"), _f("b.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "First", "intent": "i", "files": ["a.py", "b.py"], "layers": ["Services"]},
+        {"name": "Second", "intent": "i", "files": ["a.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
+
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    # Second cap empties out (its only file already claimed) → cap dropped.
+    assert result.source == "llm"
+    assert len(result.capabilities) == 1
+    assert set(result.capabilities[0].files) == {"a.py", "b.py"}
+
+
+@pytest.mark.asyncio
+async def test_malformed_json_falls_back_with_error_recorded():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    llm = _mock_llm("this is not json at all")
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="x", pr_body="", llm_client=llm)
+    assert result.source == "fallback_error"
+    assert result.error.startswith("parse:")
+    # Token usage is still propagated even on parse failure (the call did happen).
+    assert result.input_tokens == 100
+
+
+# ---------------------------------------------------------------------------
+# Prompt construction.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_prompt_includes_layer_vocab_pr_title_and_findings():
+    files = [_f("svc.py", finding_count=2), _f("model.py")]
+    findings = [_finding("svc.py", "high", "auth"), _finding("svc.py", "medium", "retry")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "X", "intent": "y", "files": ["svc.py", "model.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
+
+    await cluster_capabilities(
+        files=files, findings=findings,
+        pr_title="Graph integration",
+        pr_body="Some body text",
+        llm_client=llm,
+    )
+
+    system_arg = llm.complete.await_args.kwargs["system"]
+    user_arg = llm.complete.await_args.kwargs["user"]
+    for layer in LAYER_VOCAB:
+        assert layer in system_arg
+    assert "Graph integration" in user_arg
+    assert "Some body text" in user_arg
+    assert "svc.py" in user_arg
+    assert "high:auth" in user_arg
+
+
+@pytest.mark.asyncio
+async def test_response_format_json_is_requested():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "X", "intent": "y", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
+
+    await cluster_capabilities(files=files, findings=findings,
+                               pr_title="x", pr_body="", llm_client=llm)
+    assert llm.complete.await_args.kwargs["response_format"] == "json"
+
+
+# ---------------------------------------------------------------------------
+# Scaffold contract pins — these tests document the locked design decisions.
+# ---------------------------------------------------------------------------
+
+
+def test_layer_vocab_is_the_locked_closed_set():
+    assert LAYER_VOCAB == (
+        "Models", "Services", "Endpoints", "Validation",
+        "Infra", "Tests", "Config", "Docs",
+    )
+
+
+def test_soft_cap_defaults_to_six():
+    assert SOFT_CAP_CAPABILITIES == 6
