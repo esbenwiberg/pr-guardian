@@ -1,0 +1,484 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Guardian — Decision Queue (Prototype A)</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: rgba(15,23,42,0.7);
+    --panel-2: rgba(15,23,42,0.45);
+    --border: rgba(51,65,85,0.55);
+    --border-strong: rgba(99,102,241,0.45);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --indigo: #a5b4fc;
+    --indigo-bg: rgba(99,102,241,0.15);
+    --green: #34d399;
+    --green-bg: rgba(16,185,129,0.15);
+    --orange: #fb923c;
+    --orange-bg: rgba(249,115,22,0.12);
+    --red: #f87171;
+    --red-bg: rgba(239,68,68,0.12);
+    --yellow: #facc15;
+    --yellow-bg: rgba(234,179,8,0.10);
+    --blue: #60a5fa;
+    --blue-bg: rgba(59,130,246,0.10);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 14px; line-height: 1.5; }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Header */
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border); background: rgba(11,18,32,0.92); backdrop-filter: blur(8px); }
+  .crumbs { font-size: 13px; color: var(--muted); }
+  .crumbs strong { color: var(--text); font-weight: 600; }
+  .crumbs span.sep { color: var(--dim); margin: 0 6px; }
+  .progress { display: flex; align-items: center; gap: 12px; font-size: 12px; color: var(--muted); }
+  .progress-rail { width: 160px; height: 4px; background: rgba(51,65,85,0.6); border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg,#6366f1,#8b5cf6); }
+  .noise-pill { padding: 2px 8px; border-radius: 999px; background: rgba(100,116,139,0.15); color: var(--muted); font-size: 11px; }
+
+  /* Layout */
+  .layout { display: grid; grid-template-columns: 1fr 280px; gap: 28px; max-width: 1200px; margin: 0 auto; padding: 28px 24px 80px; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  /* Decision card */
+  .question-eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: 8px; }
+  h1.question { font-size: 24px; font-weight: 600; margin: 0 0 12px; line-height: 1.3; }
+  .meta-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 24px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 4px; letter-spacing: 0.04em; }
+  .pill.sev-low      { background: var(--blue-bg); color: var(--blue); }
+  .pill.sev-medium   { background: var(--yellow-bg); color: var(--yellow); }
+  .pill.sev-high     { background: var(--orange-bg); color: var(--orange); }
+  .pill.sev-critical { background: var(--red-bg); color: var(--red); }
+  .pill.muted        { background: rgba(100,116,139,0.15); color: var(--muted); font-weight: 500; }
+  .pill.cwe          { background: rgba(148,163,184,0.10); color: var(--muted); font-family: ui-monospace, monospace; }
+  .filepath { font-family: ui-monospace, monospace; font-size: 12px; color: var(--muted); }
+  .filepath strong { color: var(--text); font-weight: 500; }
+
+  /* Card sections */
+  .section { margin-bottom: 24px; }
+  .section-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); margin-bottom: 10px; }
+  .reasoning { color: var(--text); font-size: 14px; line-height: 1.65; max-width: 68ch; }
+  .reasoning p { margin: 0 0 10px; }
+  .reasoning code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; }
+
+  /* Diff */
+  .hunk { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: rgba(2,6,23,0.5); margin-bottom: 4px; }
+  .hunk-header { font-family: ui-monospace, monospace; font-size: 11px; padding: 6px 12px; color: var(--muted); background: rgba(30,41,59,0.6); border-bottom: 1px solid var(--border); }
+  .hunk pre { margin: 0; padding: 10px 0; font-size: 12.5px; line-height: 1.55; overflow-x: auto; }
+  .hunk .row { display: flex; padding: 0 4px; white-space: pre; }
+  .hunk .ln { width: 40px; text-align: right; padding-right: 12px; color: rgba(148,163,184,0.4); user-select: none; flex-shrink: 0; }
+  .hunk .add { background: rgba(16,185,129,0.07); }
+  .hunk .add .content { color: #6ee7b7; }
+  .hunk .del { background: rgba(239,68,68,0.07); }
+  .hunk .del .content { color: #fca5a5; }
+  .hunk .ctx .content { color: #cbd5e1; }
+  .hunk .marker { width: 14px; user-select: none; color: var(--dim); flex-shrink: 0; }
+  .hunk .add .marker { color: #6ee7b7; }
+  .hunk .del .marker { color: #fca5a5; }
+
+  /* Suggestion box */
+  .fix-box { border: 1px solid rgba(16,185,129,0.25); background: rgba(16,185,129,0.04); border-radius: 8px; padding: 14px 16px; }
+  .fix-box-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--green); margin-bottom: 8px; }
+  .fix-box pre { margin: 8px 0 0; font-size: 12.5px; line-height: 1.55; color: #cbd5e1; background: rgba(2,6,23,0.6); border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; overflow-x: auto; }
+
+  /* Actions */
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 20px; border-top: 1px solid var(--border); }
+  button { font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: rgba(30,41,59,0.6); color: var(--text); cursor: pointer; display: inline-flex; align-items: center; gap: 8px; transition: background 0.12s, border-color 0.12s; }
+  button:hover { background: rgba(51,65,85,0.7); }
+  button.primary    { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.5); color: var(--indigo); }
+  button.primary:hover { background: rgba(99,102,241,0.28); }
+  button.danger     { background: rgba(239,68,68,0.10); border-color: rgba(239,68,68,0.4); color: var(--red); }
+  button.danger:hover { background: rgba(239,68,68,0.18); }
+  button.ghost      { background: transparent; }
+  .kbd { font-family: ui-monospace, monospace; font-size: 11px; background: rgba(2,6,23,0.6); border: 1px solid var(--border); border-radius: 3px; padding: 1px 6px; color: var(--muted); }
+
+  /* Right rail */
+  .rail { position: sticky; top: 80px; align-self: start; }
+  .rail-label { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--dim); padding: 4px 8px 12px; }
+  .rail-item { display: flex; gap: 10px; align-items: center; padding: 9px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); font-size: 12.5px; }
+  .rail-item:hover { background: rgba(255,255,255,0.03); }
+  .rail-item.active { background: var(--indigo-bg); color: var(--indigo); }
+  .rail-item.done { color: var(--dim); }
+  .rail-num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; flex-shrink: 0; background: rgba(51,65,85,0.5); color: var(--muted); }
+  .rail-item.active .rail-num { background: rgba(99,102,241,0.25); color: var(--indigo); }
+  .rail-item.done .rail-num { background: var(--green-bg); color: var(--green); }
+  .rail-item.dismissed .rail-num { background: rgba(100,116,139,0.18); color: var(--muted); }
+  .rail-item.done .rail-text { text-decoration: line-through; }
+  .rail-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .rail-sev-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+  .dot.sev-low { background: var(--blue); }
+  .dot.sev-medium { background: var(--yellow); }
+  .dot.sev-high { background: var(--orange); }
+  .dot.sev-critical { background: var(--red); }
+
+  .rail-divider { height: 1px; background: var(--border); margin: 12px 8px; }
+  .rail-noise { padding: 8px 10px; font-size: 11px; color: var(--dim); }
+  .rail-noise strong { color: var(--muted); font-weight: 600; }
+  .rail-noise a { display: block; margin-top: 4px; }
+
+  /* Done state */
+  .done-card { text-align: center; padding: 60px 24px; }
+  .done-card .check { font-size: 48px; margin-bottom: 16px; color: var(--green); }
+  .done-card h2 { margin: 0 0 8px; font-size: 22px; }
+  .done-card p { color: var(--muted); margin: 0 0 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="crumbs">
+    <a href="./index.html">Reviews</a>
+    <span class="sep">/</span>
+    <a href="#">Findings</a>
+    <span class="sep">/</span>
+    <strong>Decision Queue</strong>
+  </div>
+  <div class="progress">
+    <span class="noise-pill" title="Findings the agent dismissed as low-signal for human attention">22 noise filtered</span>
+    <span id="progress-text">Decision 1 of 4</span>
+    <div class="progress-rail"><div class="progress-fill" id="progress-fill" style="width: 25%"></div></div>
+  </div>
+</header>
+
+<div class="layout">
+
+  <main id="main"></main>
+
+  <aside class="rail" aria-label="Decision queue">
+    <div class="rail-label">Queue</div>
+    <div id="rail"></div>
+    <div class="rail-divider"></div>
+    <div class="rail-noise">
+      <strong>22 findings hidden</strong><br>
+      Low-confidence nits, formatting, and pattern matches the agent judged not worth your attention.
+      <a href="#" id="show-noise">Show anyway</a>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+// ── Sample data: 4 "decision-class" findings + 22 hidden noise findings ──
+// Pulled from the chapter-1 (Microsoft Graph integration) findings shown
+// in the user's screenshot, plus a couple more across other chapters.
+
+const decisions = [
+  {
+    id: 1,
+    severity: "low",
+    question: "Should this client honor Retry-After on 429 responses?",
+    file: "Infrastructure/Graph/GraphServiceCollectionEx.cs",
+    line: 27,
+    cwe: [],
+    category: "Pattern drift / missing abstraction",
+    reasoning: [
+      "The 429 retry policy uses fixed exponential backoff (<code>2^n</code> seconds) but does not inspect the <code>Retry-After</code> response header that Microsoft Graph returns on 429 responses.",
+      "Ignoring <code>Retry-After</code> can cause the client to retry too early, receive another 429, and exhaust retries unnecessarily — and can trip Graph's per-tenant throttling more aggressively."
+    ],
+    hunk: {
+      file: "Infrastructure/Graph/GraphServiceCollectionEx.cs",
+      header: "@@ -0,0 +21,7 @@",
+      lines: [
+        { type: "add", n: 21, text: ".OrResult(msg => msg.StatusCode == HttpStatusCode.InternalServerError)" },
+        { type: "add", n: 22, text: ".OrResult(msg => msg.StatusCode == HttpStatusCode.BadGateway)" },
+        { type: "add", n: 23, text: ".OrResult(msg => msg.StatusCode == HttpStatusCode.GatewayTimeout)" },
+        { type: "add", n: 24, text: ".OrResult(msg => msg.StatusCode == HttpStatusCode.ServiceUnavailable)" },
+        { type: "add", n: 25, text: ".OrResult(msg => (int)msg.StatusCode == 429)" },
+        { type: "add", n: 26, text: ".OrResult(msg => msg.StatusCode == HttpStatusCode.Unauthorized && ..." },
+        { type: "add", n: 27, text: ".WaitAndRetryAsync(3, retryAttempt =>" },
+      ]
+    },
+    fix: {
+      summary: "Add a custom WaitAndRetryAsync overload that reads Retry-After from the HttpResponseMessage and falls back to exponential backoff when absent.",
+      code: `.WaitAndRetryAsync(3, sleepDurationProvider: (attempt, response, _) =>
+{
+    var retryAfter = response.Result?.Headers.RetryAfter?.Delta;
+    return retryAfter ?? TimeSpan.FromSeconds(Math.Pow(2, attempt));
+}, onRetry: (_, _, _, _) => Task.CompletedTask);`
+    }
+  },
+  {
+    id: 2,
+    severity: "medium",
+    question: "Should 401 responses be retried inside the Polly policy?",
+    file: "Infrastructure/Graph/GraphServiceCollectionEx.cs",
+    line: 28,
+    cwe: ["CWE-287", "CWE-703", "CWE-755"],
+    category: "Incorrect retry logic / fragile string matching",
+    reasoning: [
+      "The Polly retry policy retries on <code>HttpStatusCode.Unauthorized</code> (401) when <code>ReasonPhrase</code> equals a specific throttle message string.",
+      "Two problems: (a) HTTP 401 normally means the bearer token is invalid or expired — retrying without refreshing the token will always fail and waste three attempts; (b) <code>ReasonPhrase</code> is a non-standardised field that proxies and load balancers may strip or alter, making this match unreliable.",
+      "<code>GraphOAuthMessageHandler</code> only attaches a token if <code>Authorization</code> is null, so a 401 response will not trigger a token refresh on retry."
+    ],
+    hunk: {
+      file: "Infrastructure/Graph/GraphServiceCollectionEx.cs",
+      header: "@@ -0,0 +26,2 @@",
+      lines: [
+        { type: "add", n: 26, text: '.OrResult(msg => msg.StatusCode == HttpStatusCode.Unauthorized && msg.ReasonPhrase == "TenantThrottle")' },
+        { type: "add", n: 27, text: ".WaitAndRetryAsync(3, retryAttempt =>" },
+      ]
+    },
+    fix: {
+      summary: "Remove the 401 branch from the retry policy. Handle token expiry inside GraphOAuthMessageHandler by detecting 401 and forcing a token refresh on the next attempt.",
+      code: `// In GraphOAuthMessageHandler.SendAsync:
+var response = await base.SendAsync(request, cancellationToken);
+if (response.StatusCode == HttpStatusCode.Unauthorized)
+{
+    _tokenCache.Invalidate();
+    request.Headers.Authorization = await BuildAuthHeaderAsync();
+    response = await base.SendAsync(request, cancellationToken);
+}
+return response;`
+    }
+  },
+  {
+    id: 3,
+    severity: "high",
+    question: "Are tenant IDs being interpolated into a Graph URL safely?",
+    file: "Infrastructure/Services/GraphTenantClient.cs",
+    line: 84,
+    cwe: ["CWE-918", "CWE-20"],
+    category: "Server-side request forgery risk",
+    reasoning: [
+      "The tenant identifier comes from a request header and is interpolated directly into a Graph URL: <code>$\"https://graph.microsoft.com/v1.0/{tenantId}/users\"</code>.",
+      "Although the host is fixed, an attacker-controlled tenant ID containing <code>../</code> or URL-encoded path segments can rewrite the resource targeted. Microsoft Graph generally validates tenant ID format, but the client should not rely on that for defence-in-depth."
+    ],
+    hunk: {
+      file: "Infrastructure/Services/GraphTenantClient.cs",
+      header: "@@ -0,0 +82,4 @@",
+      lines: [
+        { type: "ctx", n: 82, text: "public async Task<UsersResponse> ListUsersAsync(string tenantId)" },
+        { type: "ctx", n: 83, text: "{" },
+        { type: "add", n: 84, text: '    var url = $"https://graph.microsoft.com/v1.0/{tenantId}/users";' },
+        { type: "add", n: 85, text: "    return await _client.GetFromJsonAsync<UsersResponse>(url);" },
+      ]
+    },
+    fix: {
+      summary: "Validate tenantId against a strict regex (GUID or domain pattern) before constructing the URL, and use Uri.EscapeDataString for the path segment.",
+      code: `if (!Guid.TryParse(tenantId, out _) &&
+    !DomainRegex.IsMatch(tenantId))
+{
+    throw new ArgumentException("Invalid tenant identifier", nameof(tenantId));
+}
+var url = $"https://graph.microsoft.com/v1.0/{Uri.EscapeDataString(tenantId)}/users";`
+    }
+  },
+  {
+    id: 4,
+    severity: "medium",
+    question: "Is there test coverage for the OAuth handler's failure paths?",
+    file: "Tests/Test.UnitTests/GraphOAuthMessageHandlerTests.cs",
+    line: 1,
+    cwe: [],
+    category: "Test gap",
+    reasoning: [
+      "The new <code>GraphOAuthMessageHandler</code> has happy-path tests but no coverage for: (1) token acquisition failure, (2) cached-token expiry mid-request, (3) downstream 401 handling.",
+      "Given the auth flow is the main risk surface flagged by the other findings here, missing failure-path tests means a regression in this area could ship undetected."
+    ],
+    hunk: {
+      file: "Tests/Test.UnitTests/GraphOAuthMessageHandlerTests.cs",
+      header: "@@ -0,0 +1,12 @@",
+      lines: [
+        { type: "add", n: 1, text: "public class GraphOAuthMessageHandlerTests" },
+        { type: "add", n: 2, text: "{" },
+        { type: "add", n: 3, text: "    [Fact]" },
+        { type: "add", n: 4, text: "    public async Task SendAsync_AttachesBearerToken_WhenAuthorizationMissing()" },
+        { type: "add", n: 5, text: "    { /* ... */ }" },
+        { type: "ctx", n: 6, text: "    // No tests for: token-acquisition-failure, expired-token, downstream-401" },
+        { type: "add", n: 7, text: "}" },
+      ]
+    },
+    fix: {
+      summary: "Add three test cases: (a) token provider throws → handler surfaces a typed exception, (b) cached token expired → handler refreshes before sending, (c) downstream returns 401 → handler invalidates cache and retries once.",
+      code: null
+    }
+  }
+];
+
+// State per decision: pending | accepted | dismissed | requested_fix
+const state = decisions.map(() => "pending");
+let cursor = 0;
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+
+function renderHunk(h) {
+  const rows = h.lines.map(l => {
+    const marker = l.type === "add" ? "+" : l.type === "del" ? "-" : " ";
+    return `<div class="row ${l.type}">
+      <span class="ln">${l.n}</span>
+      <span class="marker">${marker}</span>
+      <span class="content mono">${escapeHtml(l.text)}</span>
+    </div>`;
+  }).join("");
+  return `<div class="hunk">
+    <div class="hunk-header">${escapeHtml(h.file)} &nbsp; ${escapeHtml(h.header)}</div>
+    <pre>${rows}</pre>
+  </div>`;
+}
+
+function renderDecision(idx) {
+  const d = decisions[idx];
+  const cwePills = (d.cwe || []).map(c => `<span class="pill cwe">${c}</span>`).join("");
+  const reasoning = d.reasoning.map(p => `<p>${p}</p>`).join("");
+  const fixHtml = d.fix ? `
+    <div class="section">
+      <div class="fix-box">
+        <div class="fix-box-label">Recommended fix</div>
+        <p style="margin: 0 0 ${d.fix.code ? '8px' : '0'};">${escapeHtml(d.fix.summary)}</p>
+        ${d.fix.code ? `<pre class="mono">${escapeHtml(d.fix.code)}</pre>` : ""}
+      </div>
+    </div>` : "";
+
+  document.getElementById("main").innerHTML = `
+    <div class="question-eyebrow">Decision ${idx+1}</div>
+    <h1 class="question">${escapeHtml(d.question)}</h1>
+    <div class="meta-row">
+      <span class="pill sev-${d.severity}">${d.severity.toUpperCase()}</span>
+      ${cwePills}
+      <span class="pill muted">${escapeHtml(d.category)}</span>
+      <span class="filepath"><strong>${escapeHtml(d.file)}</strong>:${d.line}</span>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Why I'm asking</div>
+      <div class="reasoning">${reasoning}</div>
+    </div>
+
+    <div class="section">
+      <div class="section-label">Relevant code</div>
+      ${renderHunk(d.hunk)}
+    </div>
+
+    ${fixHtml}
+
+    <div class="actions">
+      <button class="primary" data-act="accept" title="Acknowledge — I'll address this">
+        ✓ Accept &amp; continue <span class="kbd">A</span>
+      </button>
+      <button data-act="fix" title="Mark as needing a code change before merge">
+        ✎ Request fix <span class="kbd">F</span>
+      </button>
+      <button class="ghost" data-act="dismiss" title="Tell the agent: this isn't worth flagging">
+        — Dismiss as noise <span class="kbd">D</span>
+      </button>
+      <button class="ghost" data-act="skip" title="Decide later" style="margin-left: auto;">
+        Skip <span class="kbd">S</span>
+      </button>
+    </div>
+  `;
+
+  document.querySelectorAll("[data-act]").forEach(btn => {
+    btn.addEventListener("click", () => act(btn.dataset.act));
+  });
+}
+
+function renderRail() {
+  const rail = document.getElementById("rail");
+  rail.innerHTML = decisions.map((d, i) => {
+    const s = state[i];
+    const isActive = i === cursor;
+    const cls = ["rail-item"];
+    if (isActive) cls.push("active");
+    if (s === "accepted" || s === "requested_fix") cls.push("done");
+    if (s === "dismissed") cls.push("dismissed");
+    const num = (s === "accepted" || s === "requested_fix") ? "✓"
+              : s === "dismissed" ? "—"
+              : (i + 1);
+    return `<div class="${cls.join(' ')}" data-idx="${i}">
+      <div class="rail-num">${num}</div>
+      <span class="dot sev-${d.severity}" style="width:6px;height:6px;border-radius:50%;background:var(--${d.severity === 'low' ? 'blue' : d.severity === 'medium' ? 'yellow' : d.severity === 'high' ? 'orange' : 'red'});flex-shrink:0;"></span>
+      <span class="rail-text">${escapeHtml(d.question)}</span>
+    </div>`;
+  }).join("");
+  rail.querySelectorAll(".rail-item").forEach(el => {
+    el.addEventListener("click", () => {
+      cursor = parseInt(el.dataset.idx, 10);
+      render();
+    });
+  });
+}
+
+function renderProgress() {
+  const decided = state.filter(s => s !== "pending").length;
+  document.getElementById("progress-text").textContent =
+    `${decided} of ${decisions.length} decided`;
+  document.getElementById("progress-fill").style.width =
+    `${(decided / decisions.length) * 100}%`;
+}
+
+function renderDone() {
+  document.getElementById("main").innerHTML = `
+    <div class="done-card">
+      <div class="check">✓</div>
+      <h2>Queue cleared</h2>
+      <p>4 decisions made · 22 noise findings filtered.<br>
+      The review will move to <strong>auto-approve</strong> if no fixes were requested.</p>
+      <button class="primary" onclick="reset()">Reset prototype</button>
+    </div>
+  `;
+}
+
+function render() {
+  if (state.every(s => s !== "pending") && cursor >= decisions.length) {
+    renderDone();
+  } else {
+    renderDecision(cursor);
+  }
+  renderRail();
+  renderProgress();
+}
+
+function act(action) {
+  if (action === "accept") state[cursor] = "accepted";
+  else if (action === "fix") state[cursor] = "requested_fix";
+  else if (action === "dismiss") state[cursor] = "dismissed";
+  // skip: leave pending
+  // advance to next pending decision
+  let next = cursor;
+  for (let i = 1; i <= decisions.length; i++) {
+    const j = (cursor + i) % decisions.length;
+    if (state[j] === "pending") { next = j; break; }
+    if (i === decisions.length) { next = decisions.length; } // all done
+  }
+  cursor = next;
+  render();
+}
+
+function reset() {
+  state.fill("pending");
+  cursor = 0;
+  render();
+}
+window.reset = reset;
+
+// Keyboard nav
+document.addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA") return;
+  if (cursor >= decisions.length) return;
+  const map = { "a": "accept", "A": "accept", "f": "fix", "F": "fix", "d": "dismiss", "D": "dismiss", "s": "skip", "S": "skip" };
+  if (map[e.key]) { e.preventDefault(); act(map[e.key]); return; }
+  if (e.key === "j" || e.key === "ArrowDown") {
+    cursor = Math.min(cursor + 1, decisions.length - 1); render();
+  } else if (e.key === "k" || e.key === "ArrowUp") {
+    cursor = Math.max(cursor - 1, 0); render();
+  }
+});
+
+document.getElementById("show-noise").addEventListener("click", (e) => {
+  e.preventDefault();
+  alert("(prototype) This would expand the 22 noise-classified findings inline so you can audit the agent's filter.");
+});
+
+render();
+</script>
+</body>
+</html>
