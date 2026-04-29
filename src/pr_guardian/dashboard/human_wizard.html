@@ -258,10 +258,13 @@ function extractHunkAroundLine(parsed, findingLine) {
 function buildCapabilitiesAndDecisions(reviewData, diffData) {
   const files = (diffData?.files) || [];
 
+  // Only `decision`-class findings become wizard concerns. `fyi` and
+  // `noise` (including dismissed) findings are kept for the wrap-up
+  // counts but never surfaced as a per-concern card.
   const findingsByFile = {};
   for (const agent of (reviewData.agent_results || [])) {
     for (const f of (agent.findings || [])) {
-      if (!f.file || f.dismissal) continue;
+      if (!f.file || f.triage !== "decision") continue;
       if (!findingsByFile[f.file]) findingsByFile[f.file] = [];
       findingsByFile[f.file].push({ ...f, agent_name: agent.agent_name });
     }
@@ -374,6 +377,9 @@ function buildWWH(reviewData, capabilities, files) {
 function buildStats(reviewData, files, decisions) {
   const allFindings = (reviewData.agent_results || []).flatMap(a => a.findings || []);
   const dismissed = allFindings.filter(f => f.dismissal).length;
+  const triage = reviewData.triage_counts || { noise: 0, fyi: 0, decision: 0 };
+  // noise from triage already includes dismissed; subtract to keep them distinct in the UI.
+  const noiseOnly = Math.max(0, (triage.noise || 0) - dismissed);
   const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
   return {
     author: reviewData.author || 'unknown',
@@ -382,7 +388,10 @@ function buildStats(reviewData, files, decisions) {
     additions: totalLoc,
     total: allFindings.length,
     surfaced: decisions.length,
-    suppressed: dismissed,
+    fyi: triage.fyi || 0,
+    noise: noiseOnly,
+    dismissed,
+    suppressed: dismissed + (triage.fyi || 0) + noiseOnly,
     risk: reviewData.risk_tier || '—',
   };
 }
@@ -661,7 +670,15 @@ function renderWrap() {
     </div>
 
     <div class="noise-line">
-      <strong>${stats.suppressed} finding${stats.suppressed === 1 ? '' : 's'} previously dismissed</strong> on this PR — already triaged by a reviewer (or filtered by severity).
+      ${(() => {
+        const bits = [];
+        if (stats.dismissed) bits.push(`<strong>${stats.dismissed}</strong> previously dismissed`);
+        if (stats.fyi)       bits.push(`<strong>${stats.fyi}</strong> informational (FYI)`);
+        if (stats.noise)     bits.push(`<strong>${stats.noise}</strong> filtered as noise`);
+        return bits.length
+          ? `${bits.join(" · ")} on this PR — set aside so you can focus on the decisions above.`
+          : `No findings filtered or dismissed on this PR.`;
+      })()}
     </div>
 
     <label class="comment-label" for="reviewer-comment">Comment to the author (optional)</label>
