@@ -57,6 +57,12 @@
     <p>The PR breaks into <strong>capabilities</strong> (what the change does) rather than path-prefix chapters. Each capability collapses by default, expands to show concerns first, then files grouped by <strong>layer</strong> (Models / Services / Endpoints / Infra / Tests / Docs). Cross-capability concerns are pinned to their root cause with an "also affects" note. Clean capabilities show <code>✓ clean</code> and stay collapsed.</p>
   </a>
 
+  <a class="card" href="./capability-narrative.html">
+    <span class="tag">Prototype E</span>
+    <h2>Capability Narrative (B + D mix)</h2>
+    <p>D's capability scaffold with B's prose voice. Opens with a <strong>What / Why / How</strong> intro to set the story up, then each capability is a paragraph (not a structured concern card) with severity pills inline and diff/fix expanders attached to the relevant sentences. Layered file drill-in is collapsed at the bottom of each capability. Clean capabilities still get a one-paragraph summary so the reviewer knows the agent looked at them.</p>
+  </a>
+
   <div class="note">
     <strong>Scaffold decisions (locked):</strong>
     no <em>pros</em> section — clean capabilities just say <code>✓ clean</code>;
