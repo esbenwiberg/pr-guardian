@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -16,8 +17,10 @@ from pr_guardian.auth.identity import Identity
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
 from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
 from pr_guardian.core.events import event_bus
+from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import finding_signature
+from pr_guardian.platform.factory import create_adapter
 
 log = structlog.get_logger()
 
@@ -334,6 +337,136 @@ async def undismiss_finding(dismissal_id: uuid.UUID):
     if not deleted:
         raise HTTPException(404, "Dismissal not found")
     return {"status": "removed"}
+
+
+# ---------------------------------------------------------------------------
+# Human verdict submission (used by the wizard's final-step buttons)
+# ---------------------------------------------------------------------------
+
+_VALID_VERDICTS = {"approve", "approve_with_fixes", "decline"}
+
+
+class SubmitVerdictRequest(BaseModel):
+    verdict: str
+    comment: str = ""
+
+
+def _summarise_decisions(review_dict: dict) -> dict[str, int]:
+    """Tally the per-finding dismissal statuses on this review's PR."""
+    counts = {"acknowledged": 0, "will_fix": 0, "false_positive": 0, "by_design": 0}
+    for agent in (review_dict.get("agent_results") or []):
+        for f in (agent.get("findings") or []):
+            d = f.get("dismissal")
+            if d and d.get("status") in counts:
+                counts[d["status"]] += 1
+    return counts
+
+
+def _build_verdict_body(verdict: str, reviewer_comment: str, decision_counts: dict[str, int]) -> str:
+    """Compose the comment body posted to the platform alongside the verdict."""
+    accepted = decision_counts.get("acknowledged", 0)
+    fixes = decision_counts.get("will_fix", 0)
+    dismissed = decision_counts.get("false_positive", 0) + decision_counts.get("by_design", 0)
+
+    headline = {
+        "approve": "**Reviewed and approved.**",
+        "approve_with_fixes": "**Approved — with the follow-ups noted below.**",
+        "decline": "**Changes requested before this can merge.**",
+    }[verdict]
+
+    parts: list[str] = [headline]
+    if reviewer_comment.strip():
+        parts.append(reviewer_comment.strip())
+
+    summary_bits: list[str] = []
+    if accepted: summary_bits.append(f"{accepted} accepted")
+    if fixes: summary_bits.append(f"{fixes} fix{'es' if fixes != 1 else ''} requested")
+    if dismissed: summary_bits.append(f"{dismissed} dismissed")
+    if summary_bits:
+        parts.append("---")
+        parts.append("Per-concern decisions: " + " · ".join(summary_bits) + ".")
+    parts.append("_Posted from PR Guardian wizard review._")
+    return "\n\n".join(parts)
+
+
+@router.post("/reviews/{review_id}/submit-verdict")
+async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
+    """Post the reviewer's final verdict back to the platform (GitHub / ADO)
+    and record it on the review for audit. Used by the wizard's final step."""
+    if body.verdict not in _VALID_VERDICTS:
+        raise HTTPException(400, f"Invalid verdict. Must be one of: {sorted(_VALID_VERDICTS)}")
+
+    review = await storage.get_review(review_id)
+    if not review:
+        raise HTTPException(404, "Review not found")
+
+    platform_str = (review.get("platform") or "").lower()
+    if platform_str not in {p.value for p in Platform}:
+        raise HTTPException(400, f"Review has no usable platform field: {platform_str!r}")
+
+    pr = PlatformPR(
+        platform=Platform(platform_str),
+        pr_id=review.get("pr_id", ""),
+        repo=review.get("repo", ""),
+        repo_url=review.get("pr_url", ""),  # not strictly required by the methods we call
+        source_branch=review.get("source_branch", ""),
+        target_branch=review.get("target_branch", ""),
+        author=review.get("author", ""),
+        title=review.get("title", ""),
+        head_commit_sha=review.get("head_commit_sha", ""),
+        org=review.get("org", ""),
+        project=review.get("project", ""),
+    )
+
+    adapter = create_adapter(platform_str)
+    decision_counts = _summarise_decisions(review)
+    comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts)
+
+    actions: list[str] = []
+    posted = True
+    error: str | None = None
+    try:
+        if body.verdict == "approve":
+            await adapter.approve_pr(pr)
+            actions.append("approve_pr")
+            if body.comment.strip():
+                await adapter.post_comment(pr, comment_body)
+                actions.append("post_comment")
+        elif body.verdict == "approve_with_fixes":
+            await adapter.approve_pr(pr)
+            actions.append("approve_pr")
+            await adapter.post_comment(pr, comment_body)
+            actions.append("post_comment")
+        elif body.verdict == "decline":
+            await adapter.request_changes(pr, comment_body)
+            actions.append("request_changes")
+    except Exception as exc:  # noqa: BLE001 — surface any platform error to the caller
+        posted = False
+        error = f"{type(exc).__name__}: {exc}"
+        log.error("submit_verdict_failed", review_id=str(review_id), error=error)
+
+    # Always record the attempt on the review (even on platform failure) so the
+    # audit trail captures intent.
+    await storage.append_review_log_entry(review_id, {
+        "kind": "human_verdict",
+        "verdict": body.verdict,
+        "reviewer_comment": body.comment,
+        "decision_counts": decision_counts,
+        "platform_actions": actions,
+        "posted": posted,
+        "error": error,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    if not posted:
+        raise HTTPException(502, f"Failed to post verdict to platform: {error}")
+
+    return {
+        "posted": True,
+        "verdict": body.verdict,
+        "platform_actions": actions,
+        "decision_counts": decision_counts,
+    }
 
 
 @router.post("/reviews/{review_id}/re-review")
