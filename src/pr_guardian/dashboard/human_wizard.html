@@ -255,7 +255,7 @@ function extractHunkAroundLine(parsed, findingLine) {
   return { header: parsed.header, lines: captured.slice(0, 12) };
 }
 
-function buildCapabilitiesAndDecisions(reviewData, diffData) {
+function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
   const files = (diffData?.files) || [];
 
   // Only `decision`-class findings become wizard concerns. `fyi` and
@@ -278,41 +278,82 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
     locs: (f.additions || 0) + (f.deletions || 0),
     findings: findingsByFile[f.path] || [],
   }));
+  const fileByPath = {};
+  for (const f of annotated) fileByPath[f.path] = f;
+
+  // Group files into capabilities. Prefer the LLM clusters from /capabilities
+  // (Phase 3a) when they validated successfully; otherwise fall back to the
+  // path-prefix heuristic.
   const groups = {};
-  for (const f of annotated) {
-    const parts = f.path.split('/');
-    const prefix = parts.length > 2 ? parts.slice(0, 2).join('/') : (parts[0] || 'root');
-    if (!groups[prefix]) groups[prefix] = [];
-    groups[prefix].push(f);
+  const groupOrder = [];
+  const groupNames = {};   // prefix → display name (LLM may name capabilities richly)
+  const groupIntents = {}; // prefix → LLM-supplied intent text
+
+  if (capsData?.source === "llm" && Array.isArray(capsData.capabilities) && capsData.capabilities.length) {
+    capsData.capabilities.forEach((cap, idx) => {
+      const key = `llm-${idx}`;
+      const bucket = [];
+      for (const path of (cap.files || [])) {
+        if (fileByPath[path]) bucket.push(fileByPath[path]);
+      }
+      if (!bucket.length) return;
+      groups[key] = bucket;
+      groupOrder.push(key);
+      groupNames[key] = cap.name || `Capability ${idx + 1}`;
+      groupIntents[key] = cap.intent || '';
+    });
+    // Any file the LLM missed (defensive — server-side validation should
+    // already prevent this) gets bundled into a final "Other" group.
+    const claimed = new Set(Object.values(groups).flat().map(f => f.path));
+    const orphans = annotated.filter(f => !claimed.has(f.path));
+    if (orphans.length) {
+      const key = `llm-other`;
+      groups[key] = orphans;
+      groupOrder.push(key);
+      groupNames[key] = "Other";
+      groupIntents[key] = "Files the clusterer didn't assign to a named capability.";
+    }
+  } else {
+    // Path-prefix fallback (heuristic from 1b).
+    for (const f of annotated) {
+      const parts = f.path.split('/');
+      const prefix = parts.length > 2 ? parts.slice(0, 2).join('/') : (parts[0] || 'root');
+      if (!groups[prefix]) { groups[prefix] = []; groupOrder.push(prefix); }
+      groups[prefix].push(f);
+    }
   }
 
   // Build capabilities + a parallel map { capId → {files, findings} } so the
   // capability objects exposed to the renderer stay clean (no internal
   // bookkeeping fields to drop later).
   const capContents = {};
-  const capabilities = Object.entries(groups).map(([prefix, fs], idx) => {
+  const capabilities = groupOrder.map((groupKey, idx) => {
+    const fs = groups[groupKey];
     const findings = fs.flatMap(f => f.findings);
     const layers = Array.from(new Set(fs.map(f => ROLE_TO_LAYER[f.role] || 'Code')));
     const locs = fs.reduce((s, f) => s + f.locs, 0);
     const id = `cap-${idx + 1}`;
     capContents[id] = { files: fs, findings };
+    const name = groupNames[groupKey] || groupKey;
+    const intent = groupIntents[groupKey]
+      || `${fs.length} file${fs.length === 1 ? '' : 's'} touching ${layers.join(' / ')} (${locs} LOC). ` +
+         (findings.length === 0
+           ? `The agent reviewed this group and surfaced no concerns for you.`
+           : `The agent surfaced ${findings.length} concern${findings.length === 1 ? '' : 's'} here — see below.`);
     return {
       id,
-      name: prefix,
-      intent: `${fs.length} file${fs.length === 1 ? '' : 's'} touching ${layers.join(' / ')} (${locs} LOC). ` +
-              (findings.length === 0
-                ? `The agent reviewed this group and surfaced no concerns for you.`
-                : `The agent surfaced ${findings.length} concern${findings.length === 1 ? '' : 's'} here — see below.`),
+      name,
+      intent,
       files: fs.length,
       locs,
       layers,
       clean: findings.length === 0,
     };
   });
-  capabilities.sort((a, b) => {
-    if (a.clean !== b.clean) return a.clean ? 1 : -1;
-    return a.name.localeCompare(b.name);
-  });
+  // Stable sort: non-clean first, original order preserved inside each group
+  // (so LLM-supplied capability ordering survives — the LLM may intentionally
+  // place the most-important capability first).
+  capabilities.sort((a, b) => Number(a.clean) - Number(b.clean));
 
   const decisions = [];
   for (const cap of capabilities) {
@@ -349,7 +390,7 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
   return { capabilities, decisions };
 }
 
-function buildWWH(reviewData, capabilities, files) {
+function buildWWH(reviewData, capabilities, files, capsData) {
   const fileCount = files.length;
   const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
   const roleCounts = {};
@@ -369,8 +410,11 @@ function buildWWH(reviewData, capabilities, files) {
     : `<em>No description provided.</em>`;
   const dirty = capabilities.filter(c => !c.clean);
   const clean = capabilities.filter(c => c.clean);
-  const how = `Grouped into ${capabilities.length} capabilit${capabilities.length === 1 ? 'y' : 'ies'} ` +
-              `(${dirty.length} with concerns, ${clean.length} clean) by top-level path prefix.`;
+  const groupedBy = capsData?.source === "llm"
+    ? `clustered by capability (LLM)`
+    : `grouped by top-level path prefix`;
+  const how = `Split into ${capabilities.length} capabilit${capabilities.length === 1 ? 'y' : 'ies'} ` +
+              `(${dirty.length} with concerns, ${clean.length} clean), ${groupedBy}.`;
   return { what, why, how };
 }
 
@@ -398,9 +442,13 @@ function buildStats(reviewData, files, decisions) {
 
 async function loadAndBuild() {
   if (!REVIEW_ID) throw new Error('No review id in URL');
-  const [reviewResp, diffResp] = await Promise.allSettled([
+  // /capabilities runs an LLM call server-side and may take several seconds;
+  // we still race it with /review and /diff so the rest of the page is ready
+  // the moment it returns.
+  const [reviewResp, diffResp, capsResp] = await Promise.allSettled([
     fetch(`/api/dashboard/reviews/${REVIEW_ID}`),
     fetch(`/api/dashboard/reviews/${REVIEW_ID}/diff`),
+    fetch(`/api/dashboard/reviews/${REVIEW_ID}/capabilities`),
   ]);
   if (reviewResp.status !== 'fulfilled' || !reviewResp.value.ok) {
     throw new Error('Failed to load review');
@@ -410,15 +458,18 @@ async function loadAndBuild() {
   const diffData = (diffResp.status === 'fulfilled' && diffResp.value.ok)
     ? await diffResp.value.json() : { files: [] };
   const files = diffData.files || [];
+  const capsData = (capsResp.status === 'fulfilled' && capsResp.value.ok)
+    ? await capsResp.value.json() : null;
 
-  const { capabilities, decisions } = buildCapabilitiesAndDecisions(reviewData, diffData);
+  const { capabilities, decisions } = buildCapabilitiesAndDecisions(reviewData, diffData, capsData);
   window.PR_TITLE = reviewData.title
     ? `${reviewData.repo} #${reviewData.pr_id} — ${reviewData.title}`
     : `${reviewData.repo} #${reviewData.pr_id}`;
   window.PR_STATS = buildStats(reviewData, files, decisions);
-  window.WWH = buildWWH(reviewData, capabilities, files);
+  window.WWH = buildWWH(reviewData, capabilities, files, capsData);
   window.CAPABILITIES = capabilities;
   window.DECISIONS = decisions;
+  window.CAPS_SOURCE = capsData?.source || "fallback_no_call";
 }
 </script>
 <script>
