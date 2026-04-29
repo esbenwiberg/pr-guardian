@@ -16,12 +16,20 @@ from pr_guardian.auth.identity import Identity
 
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
 from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
+from pr_guardian.config.loader import apply_global_settings, load_service_defaults
+from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import event_bus
 from pr_guardian.decision.finding_triage import tag_findings_with_triage
+from pr_guardian.llm.factory import create_llm_client
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import finding_signature
 from pr_guardian.platform.factory import create_adapter
+from pr_guardian.wizard.capability_clusterer import (
+    FileSummary,
+    FindingSummary,
+    cluster_capabilities,
+)
 
 log = structlog.get_logger()
 
@@ -169,6 +177,118 @@ async def dashboard_review_diff(review_id: uuid.UUID):
             for f in diff.files
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Wizard capability clustering (Phase 3b)
+# ---------------------------------------------------------------------------
+
+# Cache the LLM clusterer's response per (review_id, head_commit_sha). A new
+# commit on the PR invalidates the cache by changing the SHA, so the wizard
+# always sees clusters that match what's actually in the diff.
+_capability_cache: dict[tuple[str, str], dict] = {}
+
+
+def _role_for_path(path: str) -> str:
+    pl = path.lower()
+    parts = pl.split("/")
+    if any(p in {"test", "tests", "__tests__", "spec", "specs"} for p in parts) \
+            or pl.endswith((".test.py", ".test.ts", ".test.js", ".spec.py", ".spec.ts", ".spec.js"))\
+            or "_test." in pl or "_spec." in pl:
+        return "TEST"
+    if "dockerfile" in pl or ".github" in parts or "ci" in parts or "circleci" in parts:
+        return "INFRA"
+    if any(p in {"docs", "documentation"} for p in parts) or pl.endswith((".md", ".rst")):
+        return "DOCS"
+    if pl.endswith((".lock", "package-lock.json", "yarn.lock", "poetry.lock", "cargo.lock")):
+        return "GENERATED"
+    if pl.endswith((".cfg", ".ini", ".yaml", ".yml", ".toml", ".conf")) \
+            and not pl.endswith(("pyproject.toml",)):
+        return "CONFIG"
+    return "PRODUCTION"
+
+
+@router.get("/reviews/{review_id}/capabilities")
+async def dashboard_review_capabilities(review_id: uuid.UUID):
+    """Return LLM-clustered capabilities for the wizard view.
+
+    Cached in-memory per (review_id, head_commit_sha). On cache miss, fetches
+    the diff from the platform, calls cluster_capabilities, and stores the
+    result. The wizard treats `source != "llm"` as a signal to fall back to
+    its built-in path-prefix heuristic.
+    """
+    row = await storage.get_review(review_id)
+    if not row:
+        raise HTTPException(404, "Review not found")
+    head = row.get("head_commit_sha") or ""
+    cache_key = (str(review_id), head)
+    cached = _capability_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cache": "hit"}
+
+    if not row.get("pr_url"):
+        raise HTTPException(422, "Review has no PR URL — cannot fetch diff")
+
+    from pr_guardian.api.review import _hydrate_pr, _parse_pr_url
+
+    stub, platform_name = _parse_pr_url(row["pr_url"])
+    adapter = create_adapter(platform_name)
+    try:
+        pr = await _hydrate_pr(adapter, stub, platform_name)
+        diff = await adapter.fetch_diff(pr)
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to fetch diff from platform: {exc}")
+
+    findings_by_path: dict[str, list[dict]] = {}
+    for agent in row.get("agent_results") or []:
+        for f in agent.get("findings") or []:
+            if f.get("dismissal") or not f.get("file"):
+                continue
+            findings_by_path.setdefault(f["file"], []).append(f)
+
+    files = [
+        FileSummary(
+            path=f.path,
+            role=_role_for_path(f.path),
+            locs=(f.additions or 0) + (f.deletions or 0),
+            finding_count=len(findings_by_path.get(f.path, [])),
+        )
+        for f in diff.files
+    ]
+    findings = [
+        FindingSummary(
+            file=f.get("file", ""),
+            severity=f.get("severity", "low"),
+            category=f.get("category", "") or "",
+        )
+        for items in findings_by_path.values()
+        for f in items
+    ]
+
+    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
+    llm = create_llm_client(config)
+
+    result = await cluster_capabilities(
+        files=files,
+        findings=findings,
+        pr_title=row.get("title") or "",
+        pr_body=row.get("body") or "",
+        llm_client=llm,
+    )
+
+    response = {
+        "source": result.source,
+        "capabilities": [
+            {"name": c.name, "intent": c.intent, "files": list(c.files), "layers": list(c.layers)}
+            for c in result.capabilities
+        ],
+        "model": result.model,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "error": result.error,
+    }
+    _capability_cache[cache_key] = response
+    return {**response, "cache": "miss"}
 
 
 class ResolvePRRequest(BaseModel):
