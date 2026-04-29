@@ -1,0 +1,189 @@
+"""Unit tests for the wizard's submit-verdict endpoint.
+
+Exercises POST /api/dashboard/reviews/{id}/submit-verdict end-to-end via
+FastAPI's TestClient. Uses monkeypatch to stub the storage helpers and the
+platform adapter so the test stays in-process and does not require a DB,
+network, or real GitHub/ADO credentials.
+"""
+from __future__ import annotations
+
+import uuid
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def client():
+    from pr_guardian.main import app
+    return TestClient(app)
+
+
+@pytest.fixture
+def fake_review():
+    return {
+        "id": str(uuid.uuid4()),
+        "pr_id": "42",
+        "repo": "org/repo",
+        "platform": "github",
+        "head_commit_sha": "abc123",
+        "pr_url": "https://github.com/org/repo/pull/42",
+        "source_branch": "feature",
+        "target_branch": "main",
+        "author": "dev",
+        "title": "My PR",
+        "agent_results": [
+            {"agent_name": "security",
+             "findings": [
+                 {"id": str(uuid.uuid4()),
+                  "severity": "medium",
+                  "file": "a.py", "line": 1,
+                  "description": "x",
+                  "dismissal": {"status": "acknowledged"}},
+                 {"id": str(uuid.uuid4()),
+                  "severity": "high",
+                  "file": "b.py", "line": 2,
+                  "description": "y",
+                  "dismissal": {"status": "will_fix"}},
+             ]},
+        ],
+    }
+
+
+def _patch_endpoint_deps(monkeypatch, fake_review, mock_adapter):
+    from pr_guardian.api import dashboard as dash
+
+    async def _get_review(_id):
+        return fake_review
+
+    appended = []
+
+    async def _append(_id, entry):
+        appended.append(entry)
+        return True
+
+    monkeypatch.setattr(dash.storage, "get_review", _get_review)
+    monkeypatch.setattr(dash.storage, "append_review_log_entry", _append)
+    monkeypatch.setattr(dash, "create_adapter", lambda _platform: mock_adapter)
+    return appended
+
+
+def _make_mock_adapter():
+    adapter = AsyncMock()
+    adapter.approve_pr = AsyncMock(return_value=None)
+    adapter.request_changes = AsyncMock(return_value=None)
+    adapter.post_comment = AsyncMock(return_value=None)
+    return adapter
+
+
+def test_approve_calls_approve_pr_and_skips_comment_when_blank(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    appended = _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["posted"] is True
+    assert body["verdict"] == "approve"
+    assert body["platform_actions"] == ["approve_pr"]
+
+    adapter.approve_pr.assert_awaited_once()
+    adapter.post_comment.assert_not_awaited()
+    adapter.request_changes.assert_not_awaited()
+
+    assert len(appended) == 1
+    assert appended[0]["kind"] == "human_verdict"
+    assert appended[0]["verdict"] == "approve"
+    assert appended[0]["posted"] is True
+
+
+def test_approve_with_comment_also_posts_comment(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": "Looks good — small nit on naming."},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["platform_actions"] == ["approve_pr", "post_comment"]
+    adapter.approve_pr.assert_awaited_once()
+    adapter.post_comment.assert_awaited_once()
+    body = adapter.post_comment.await_args.args[1]
+    assert "small nit on naming" in body
+    assert "1 accepted" in body and "1 fix" in body  # decision summary appended
+
+
+def test_approve_with_fixes_always_posts_comment(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve_with_fixes", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["platform_actions"] == ["approve_pr", "post_comment"]
+    adapter.approve_pr.assert_awaited_once()
+    adapter.post_comment.assert_awaited_once()
+
+
+def test_decline_calls_request_changes_with_comment(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "decline", "comment": "Auth flow needs rework."},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["platform_actions"] == ["request_changes"]
+    adapter.request_changes.assert_awaited_once()
+    body = adapter.request_changes.await_args.args[1]
+    assert "Auth flow needs rework" in body
+    adapter.approve_pr.assert_not_awaited()
+
+
+def test_invalid_verdict_returns_400(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "merge_anyway", "comment": ""},
+    )
+    assert resp.status_code == 400
+
+
+def test_missing_review_returns_404(client, monkeypatch):
+    from pr_guardian.api import dashboard as dash
+
+    async def _no_review(_id):
+        return None
+
+    monkeypatch.setattr(dash.storage, "get_review", _no_review)
+    rid = uuid.uuid4()
+    resp = client.post(
+        f"/api/dashboard/reviews/{rid}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 404
+
+
+def test_platform_failure_returns_502_and_records_attempt(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    adapter.approve_pr = AsyncMock(side_effect=RuntimeError("network down"))
+    appended = _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 502
+    # Even on failure, the attempt is recorded in pipeline_log for audit.
+    assert len(appended) == 1
+    assert appended[0]["posted"] is False
+    assert "network down" in appended[0]["error"]

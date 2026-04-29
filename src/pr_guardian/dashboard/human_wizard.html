@@ -668,13 +668,43 @@ function renderWrap() {
     <textarea id="reviewer-comment" class="comment-box" placeholder="e.g. Please fix the auth-retry interaction and add the failure-path tests in one revision; the Retry-After change can ship as a follow-up.">${escapeHtml(reviewerComment)}</textarea>
 
     <div class="final-actions">
-      <button class="primary">Approve with fixes requested</button>
-      <button>Approve as-is</button>
-      <button class="danger">Decline — needs rework</button>
+      <button class="primary" data-verdict="approve_with_fixes">Approve with fixes requested</button>
+      <button data-verdict="approve">Approve as-is</button>
+      <button class="danger" data-verdict="decline">Decline — needs rework</button>
     </div>
+    <div id="verdict-status" style="margin-top: 14px; font-size: 13px; color: var(--muted); min-height: 1.4em;"></div>
   `;
   const ta = document.getElementById("reviewer-comment");
   if (ta) ta.addEventListener("input", () => { reviewerComment = ta.value; });
+
+  document.querySelectorAll("[data-verdict]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const verdict = btn.dataset.verdict;
+      const status = document.getElementById("verdict-status");
+      const buttons = document.querySelectorAll("[data-verdict]");
+      buttons.forEach(b => b.disabled = true);
+      status.textContent = `Posting ${verdict.replace(/_/g, " ")}…`;
+      status.style.color = "var(--muted)";
+      try {
+        const resp = await fetch(`/api/dashboard/reviews/${REVIEW_ID}/submit-verdict`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ verdict, comment: reviewerComment }),
+        });
+        const text = await resp.text();
+        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${text}`);
+        let result; try { result = JSON.parse(text); } catch { result = {}; }
+        const actions = (result.platform_actions || []).join(", ") || "no platform calls";
+        status.textContent = `✓ Verdict posted to platform (${actions}). You can close this tab.`;
+        status.style.color = "var(--green)";
+      } catch (err) {
+        const msg = (err && err.message) ? err.message : String(err);
+        status.textContent = `✗ Couldn't post verdict: ${msg}`;
+        status.style.color = "var(--red)";
+        buttons.forEach(b => b.disabled = false);
+      }
+    });
+  });
 }
 
 // ── Footer nav ──
