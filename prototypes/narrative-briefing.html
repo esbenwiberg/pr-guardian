@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Guardian — Narrative Briefing (Prototype B)</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: rgba(15,23,42,0.55);
+    --border: rgba(51,65,85,0.55);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --indigo: #a5b4fc;
+    --green: #34d399;
+    --orange: #fb923c;
+    --red: #f87171;
+    --yellow: #facc15;
+    --blue: #60a5fa;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-serif, Georgia, "Iowan Old Style", "Apple Garamond", "Palatino Linotype", Georgia, serif; font-size: 17px; line-height: 1.7; }
+  .sans { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .mono, code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 24px; border-bottom: 1px solid var(--border); background: rgba(11,18,32,0.92); backdrop-filter: blur(8px); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; }
+  .crumbs { color: var(--muted); }
+  .crumbs strong { color: var(--text); font-weight: 600; }
+  .crumbs span.sep { color: var(--dim); margin: 0 6px; }
+  .verdict-chip { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 600; background: rgba(234,179,8,0.10); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+
+  article { max-width: 720px; margin: 0 auto; padding: 48px 24px 96px; }
+
+  /* Title block */
+  .eyebrow { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 16px; }
+  h1 { font-size: 34px; font-weight: 600; line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.01em; }
+  .subtitle { color: var(--muted); font-size: 16px; margin: 0 0 28px; font-style: italic; }
+  .stats { display: flex; gap: 18px; flex-wrap: wrap; padding: 14px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-bottom: 36px; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; color: var(--muted); }
+  .stats span strong { color: var(--text); font-weight: 600; }
+
+  /* Section breaks */
+  h2 { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim); margin: 44px 0 16px; }
+  h2:first-of-type { margin-top: 0; }
+
+  p { margin: 0 0 18px; color: #d6dde8; }
+  p.lede { font-size: 19px; line-height: 1.65; color: var(--text); }
+  em { color: var(--text); font-style: italic; }
+  strong { color: var(--text); }
+  code { background: rgba(148,163,184,0.10); padding: 1px 6px; border-radius: 3px; font-size: 0.86em; color: var(--text); }
+
+  /* Concern blocks */
+  .concern { margin: 28px 0; padding: 0 0 0 20px; border-left: 2px solid var(--border); }
+  .concern.sev-low { border-left-color: var(--blue); }
+  .concern.sev-medium { border-left-color: var(--yellow); }
+  .concern.sev-high { border-left-color: var(--orange); }
+  .concern.sev-critical { border-left-color: var(--red); }
+  .concern-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .concern-head h3 { margin: 0; font-size: 17px; font-weight: 600; color: var(--text); }
+  .pill { display: inline-flex; align-items: center; font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 3px; letter-spacing: 0.06em; }
+  .pill.sev-low      { background: rgba(59,130,246,0.12);  color: var(--blue); }
+  .pill.sev-medium   { background: rgba(234,179,8,0.10);   color: var(--yellow); }
+  .pill.sev-high     { background: rgba(249,115,22,0.12);  color: var(--orange); }
+  .pill.sev-critical { background: rgba(239,68,68,0.12);   color: var(--red); }
+  .pill.cwe { background: rgba(148,163,184,0.10); color: var(--muted); font-family: ui-monospace, monospace; font-weight: 500; }
+
+  /* Inline expanders */
+  details { margin: 12px 0 0; }
+  summary { cursor: pointer; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; color: var(--indigo); padding: 5px 0; display: inline-block; list-style: none; user-select: none; }
+  summary::-webkit-details-marker { display: none; }
+  summary::before { content: "▸ "; display: inline-block; transition: transform 0.15s; color: var(--dim); }
+  details[open] summary::before { content: "▾ "; }
+  summary:hover { color: #c7d2fe; }
+
+  .hunk { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; background: rgba(2,6,23,0.5); margin-top: 8px; font-family: ui-monospace, monospace; }
+  .hunk-header { font-size: 11px; padding: 6px 12px; color: var(--muted); background: rgba(30,41,59,0.6); border-bottom: 1px solid var(--border); }
+  .hunk pre { margin: 0; padding: 10px 0; font-size: 12.5px; line-height: 1.55; overflow-x: auto; }
+  .hunk .row { display: flex; padding: 0 4px; white-space: pre; }
+  .hunk .ln { width: 40px; text-align: right; padding-right: 12px; color: rgba(148,163,184,0.4); user-select: none; flex-shrink: 0; }
+  .hunk .marker { width: 14px; user-select: none; flex-shrink: 0; color: var(--dim); }
+  .hunk .add { background: rgba(16,185,129,0.07); }
+  .hunk .add .content, .hunk .add .marker { color: #6ee7b7; }
+  .hunk .del { background: rgba(239,68,68,0.07); }
+  .hunk .del .content, .hunk .del .marker { color: #fca5a5; }
+  .hunk .ctx .content { color: #cbd5e1; }
+  .filepath { font-family: ui-monospace, monospace; font-size: 11px; color: var(--muted); margin-top: 4px; display: block; }
+
+  .fix-hint { margin-top: 10px; padding: 12px 14px; border-radius: 8px; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.2); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13.5px; line-height: 1.6; color: #d6dde8; }
+  .fix-hint strong { color: var(--green); display: block; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
+
+  /* Noise footer */
+  .noise { margin-top: 56px; padding: 22px 24px; border: 1px dashed var(--border); border-radius: 10px; background: rgba(15,23,42,0.4); font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13.5px; line-height: 1.65; color: var(--muted); }
+  .noise summary { color: var(--muted); }
+  .noise ul { margin: 12px 0 0; padding: 0 0 0 20px; }
+  .noise li { margin: 4px 0; }
+  .noise li code { font-size: 0.86em; }
+
+  /* Verdict block */
+  .verdict { margin-top: 56px; padding: 28px 28px; border-radius: 14px; background: linear-gradient(180deg, rgba(99,102,241,0.08), rgba(99,102,241,0.02)); border: 1px solid rgba(99,102,241,0.25); font-family: ui-sans-serif, system-ui, sans-serif; }
+  .verdict-label { font-size: 11px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--indigo); margin-bottom: 10px; }
+  .verdict p { font-size: 15.5px; line-height: 1.6; color: var(--text); margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; }
+  .verdict .actions { display: flex; gap: 8px; margin-top: 18px; }
+  .verdict button { font-family: inherit; font-size: 13px; font-weight: 600; padding: 8px 14px; border-radius: 6px; border: 1px solid var(--border); background: rgba(30,41,59,0.6); color: var(--text); cursor: pointer; }
+  .verdict button.primary { background: rgba(99,102,241,0.18); border-color: rgba(99,102,241,0.5); color: var(--indigo); }
+  .verdict button:hover { filter: brightness(1.15); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="crumbs">
+    <a href="./index.html">Reviews</a>
+    <span class="sep">/</span>
+    <a href="#">Findings</a>
+    <span class="sep">/</span>
+    <strong>Narrative Briefing</strong>
+  </div>
+  <span class="verdict-chip">⚠ needs human review</span>
+</header>
+
+<article>
+
+  <div class="eyebrow">Briefing · Review #41466cf2 · 22 minutes ago</div>
+  <h1>Microsoft Graph integration with retry &amp; OAuth handling</h1>
+  <p class="subtitle">A briefing prepared by the review agent. 3 things worth your attention; everything else has been set aside.</p>
+
+  <div class="stats">
+    <span><strong>esbenwiberg</strong> · 4 commits</span>
+    <span><strong>25 files</strong> · +261 / −0</span>
+    <span><strong>23 findings</strong> total · 3 surfaced · 20 suppressed</span>
+    <span>risk tier <strong>MEDIUM</strong></span>
+  </div>
+
+  <h2>What this PR is doing</h2>
+  <p class="lede">
+    This change adds a Microsoft Graph HTTP client to the platform — a typed
+    <code>IGraphService</code> registered through DI, wrapped in a Polly retry
+    pipeline, and authenticated by a new <code>GraphOAuthMessageHandler</code>
+    that caches tokens. There is also new infrastructure plumbing
+    (<em>Infrastructure/Graph</em>, <em>Infrastructure/Services</em>) and a
+    pair of unit-test files covering the happy path. The shape is conventional
+    and the registration site is idiomatic.
+  </p>
+  <p>
+    The risk surface is narrow but real. Two of the things that worry me sit
+    inside the retry pipeline; the third is in the tenant-scoped Graph
+    client. None of them are show-stoppers, but each is the kind of thing
+    that's easier to fix now than after it ships.
+  </p>
+
+  <h2>What I'd flag for you</h2>
+
+  <div class="concern sev-medium">
+    <div class="concern-head">
+      <h3>The 401 retry branch is fighting your OAuth handler.</h3>
+      <span class="pill sev-medium">MEDIUM</span>
+      <span class="pill cwe">CWE-287</span>
+      <span class="pill cwe">CWE-755</span>
+    </div>
+    <p>
+      The Polly policy retries on <code>HttpStatusCode.Unauthorized</code>
+      <em>only when</em> <code>ReasonPhrase == "TenantThrottle"</code>. That's
+      a fragile match — <code>ReasonPhrase</code> is optional in HTTP/2 and
+      frequently stripped by load balancers — but the deeper issue is that
+      <code>GraphOAuthMessageHandler</code> only attaches a token when
+      <code>Authorization</code> is null. So a real 401 (expired token) loops
+      three times with the same dead bearer and fails. Token refresh belongs
+      in the handler, not in the retry policy.
+    </p>
+    <details>
+      <summary>Show the diff</summary>
+      <span class="filepath">Infrastructure/Graph/GraphServiceCollectionEx.cs · line 26</span>
+      <div class="hunk">
+        <div class="hunk-header">@@ -0,0 +25,3 @@</div>
+        <pre><div class="row add"><span class="ln">25</span><span class="marker">+</span><span class="content">.OrResult(msg =&gt; (int)msg.StatusCode == 429)</span></div><div class="row add"><span class="ln">26</span><span class="marker">+</span><span class="content">.OrResult(msg =&gt; msg.StatusCode == HttpStatusCode.Unauthorized &amp;&amp; msg.ReasonPhrase == "TenantThrottle")</span></div><div class="row add"><span class="ln">27</span><span class="marker">+</span><span class="content">.WaitAndRetryAsync(3, retryAttempt =&gt;</span></div></pre>
+      </div>
+    </details>
+    <details>
+      <summary>Recommended fix</summary>
+      <div class="fix-hint">
+        <strong>Fix sketch</strong>
+        Drop the 401 branch from the Polly policy. In
+        <code>GraphOAuthMessageHandler.SendAsync</code>, detect 401, invalidate
+        the cached token, rebuild the auth header, and resend once. That keeps
+        the retry policy focused on transient HTTP errors and puts auth
+        recovery where it actually has the cache to work with.
+      </div>
+    </details>
+  </div>
+
+  <div class="concern sev-high">
+    <div class="concern-head">
+      <h3>Tenant ID is interpolated into a Graph URL without validation.</h3>
+      <span class="pill sev-high">HIGH</span>
+      <span class="pill cwe">CWE-918</span>
+      <span class="pill cwe">CWE-20</span>
+    </div>
+    <p>
+      <code>GraphTenantClient.ListUsersAsync</code> takes a tenant identifier
+      from a request header and drops it straight into a URL template:
+      <code>$"https://graph.microsoft.com/v1.0/{tenantId}/users"</code>.
+      The host is fixed, so this isn't classic SSRF, but a tenant value
+      containing path segments (encoded or otherwise) can shift which
+      Graph resource you're hitting. Microsoft's own validation isn't
+      enough — defence in depth wants this guarded at our boundary, where
+      we know what a tenant ID is supposed to look like (a GUID or a verified
+      domain).
+    </p>
+    <details>
+      <summary>Show the diff</summary>
+      <span class="filepath">Infrastructure/Services/GraphTenantClient.cs · line 84</span>
+      <div class="hunk">
+        <div class="hunk-header">@@ -0,0 +82,4 @@</div>
+        <pre><div class="row ctx"><span class="ln">82</span><span class="marker"> </span><span class="content">public async Task&lt;UsersResponse&gt; ListUsersAsync(string tenantId)</span></div><div class="row ctx"><span class="ln">83</span><span class="marker"> </span><span class="content">{</span></div><div class="row add"><span class="ln">84</span><span class="marker">+</span><span class="content">    var url = $"https://graph.microsoft.com/v1.0/{tenantId}/users";</span></div><div class="row add"><span class="ln">85</span><span class="marker">+</span><span class="content">    return await _client.GetFromJsonAsync&lt;UsersResponse&gt;(url);</span></div></pre>
+      </div>
+    </details>
+  </div>
+
+  <div class="concern sev-low">
+    <div class="concern-head">
+      <h3>The 429 retry ignores Microsoft's <code>Retry-After</code> hint.</h3>
+      <span class="pill sev-low">LOW</span>
+    </div>
+    <p>
+      Standard exponential backoff (<code>2^n</code> seconds) is fine in
+      isolation, but Graph returns <code>Retry-After</code> on 429s and
+      ignoring it tends to make throttling worse, not better — you keep
+      hitting the same tenant ceiling on every retry. A small
+      <code>WaitAndRetryAsync</code> overload that reads the header and falls
+      back to exponential when absent is the conventional fix here.
+    </p>
+    <details>
+      <summary>Show the diff</summary>
+      <span class="filepath">Infrastructure/Graph/GraphServiceCollectionEx.cs · line 27</span>
+      <div class="hunk">
+        <div class="hunk-header">@@ -0,0 +25,3 @@</div>
+        <pre><div class="row add"><span class="ln">25</span><span class="marker">+</span><span class="content">.OrResult(msg =&gt; (int)msg.StatusCode == 429)</span></div><div class="row ctx"><span class="ln">26</span><span class="marker"> </span><span class="content">// ...</span></div><div class="row add"><span class="ln">27</span><span class="marker">+</span><span class="content">.WaitAndRetryAsync(3, retryAttempt =&gt; TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)))</span></div></pre>
+      </div>
+    </details>
+  </div>
+
+  <h2>What I set aside as noise</h2>
+  <details class="noise">
+    <summary><strong>20 findings hidden</strong> — click to audit my filter</summary>
+    <ul>
+      <li><strong>11 ×</strong> formatting and brace-style nits in <code>Infrastructure/Graph/*</code> — auto-format will fix on next save.</li>
+      <li><strong>3 ×</strong> <em>"missing XML doc comment"</em> on internal <code>partial</code> classes — internal-only, not part of any public surface.</li>
+      <li><strong>2 ×</strong> generated DTO files flagged for naming style — generated code, not author-controlled.</li>
+      <li><strong>2 ×</strong> duplicate-finding from a second agent on the same line as the 401 retry concern above.</li>
+      <li><strong>1 ×</strong> <em>"prefer var over explicit type"</em> on a 1-line lambda — codebase uses both freely.</li>
+      <li><strong>1 ×</strong> spec-file note marked low-confidence: pattern match without enough surrounding context to be reliable.</li>
+    </ul>
+    <p style="margin-top: 12px;">If you'd rather see all 23 findings as a flat list, switch to
+      <a href="#">Findings view</a>. Dismissing a noise category here teaches the
+      filter for next time.</p>
+  </details>
+
+  <div class="verdict">
+    <div class="verdict-label">My read</div>
+    <p>
+      The shape of the change is fine and most of the file count is
+      mechanical (DI wiring, tests, generated DTOs). What stops this from
+      being an auto-approve is the auth-retry interaction — that's a real
+      runtime bug under token expiry, not a style nit. The tenant-ID
+      interpolation is a smaller blast radius but easy to harden now.
+      I'd recommend asking for a fix on the first two and merging the
+      <code>Retry-After</code> change as a follow-up if you'd rather not
+      hold the PR.
+    </p>
+    <div class="actions">
+      <button class="primary">Approve with fixes requested</button>
+      <button>Approve as-is</button>
+      <button>Decline — needs rework</button>
+    </div>
+  </div>
+
+</article>
+
+</body>
+</html>

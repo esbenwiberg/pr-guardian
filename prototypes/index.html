@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PR Guardian — Review-Mode Prototypes</title>
+<style>
+  :root {
+    --bg: #0b1220;
+    --panel: rgba(15,23,42,0.55);
+    --border: rgba(51,65,85,0.55);
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --indigo: #a5b4fc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--text); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.6; }
+  a { color: var(--indigo); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  main { max-width: 760px; margin: 0 auto; padding: 80px 24px; }
+  .eyebrow { font-size: 11px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dim); margin-bottom: 12px; }
+  h1 { font-size: 30px; font-weight: 600; margin: 0 0 12px; letter-spacing: -0.01em; }
+  .lede { color: var(--muted); margin: 0 0 40px; font-size: 16px; }
+  .card { display: block; padding: 24px 26px; border: 1px solid var(--border); border-radius: 12px; background: var(--panel); margin-bottom: 16px; transition: border-color 0.15s, background 0.15s; }
+  .card:hover { border-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.04); text-decoration: none; }
+  .card h2 { font-size: 18px; font-weight: 600; margin: 0 0 6px; color: var(--text); }
+  .card p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+  .card .tag { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; padding: 2px 8px; border-radius: 4px; background: rgba(99,102,241,0.15); color: var(--indigo); margin-bottom: 10px; }
+  .note { margin-top: 32px; padding: 16px 20px; border-left: 3px solid rgba(234,179,8,0.5); background: rgba(234,179,8,0.04); color: var(--muted); font-size: 13.5px; line-height: 1.65; }
+  .note strong { color: var(--text); }
+  code { font-family: ui-monospace, monospace; background: rgba(148,163,184,0.10); padding: 1px 6px; border-radius: 3px; font-size: 0.88em; }
+</style>
+</head>
+<body>
+
+<main>
+  <div class="eyebrow">PR Guardian · Design exploration</div>
+  <h1>Alternative review modes</h1>
+  <p class="lede">Two static prototypes exploring how to present a large PR's findings without the noise of the chapter view. Same example data (Microsoft Graph integration, 25 files, 23 findings) so the modes are directly comparable.</p>
+
+  <a class="card" href="./decision-queue.html">
+    <span class="tag">Prototype A</span>
+    <h2>Decision Queue</h2>
+    <p>One finding at a time, framed as a question with a single decision to make. Keyboard-driven (<code>j</code>/<code>k</code> nav, <code>a</code>/<code>f</code>/<code>d</code>/<code>s</code> act). 22 noise findings hidden, surfaced on demand. Empty queue = auto-approve.</p>
+  </a>
+
+  <a class="card" href="./narrative-briefing.html">
+    <span class="tag">Prototype B</span>
+    <h2>Narrative Briefing</h2>
+    <p>Single scrollable page written as a briefing from the agent: what the PR is doing, three things worth your attention as prose, with diffs and fixes hidden behind inline expanders. 20 noise findings collapsed into an auditable footer.</p>
+  </a>
+
+  <a class="card" href="./capability-briefing.html">
+    <span class="tag">Prototype D</span>
+    <h2>Capability Briefing (hybrid)</h2>
+    <p>The PR breaks into <strong>capabilities</strong> (what the change does) rather than path-prefix chapters. Each capability collapses by default, expands to show concerns first, then files grouped by <strong>layer</strong> (Models / Services / Endpoints / Infra / Tests / Docs). Cross-capability concerns are pinned to their root cause with an "also affects" note. Clean capabilities show <code>✓ clean</code> and stay collapsed.</p>
+  </a>
+
+  <div class="note">
+    <strong>Scaffold decisions (locked):</strong>
+    no <em>pros</em> section — clean capabilities just say <code>✓ clean</code>;
+    cross-capability concerns are <em>pinned to root cause</em> with an
+    "also affects" mention; closed layer vocabulary
+    (Models / Services / Endpoints / Validation / Infra / Tests / Config / Docs);
+    fall back to mode B when surfaced findings ≤ 2 or capabilities = 1;
+    triage (noise / fyi / decision) is a separate pipeline stage that all
+    three modes consume.
+  </div>
+
+  <div class="note" style="border-left-color: rgba(99,102,241,0.5); background: rgba(99,102,241,0.04);">
+    <strong>Hosting:</strong> static files in <code>/prototypes/</code>.
+    Open via <code>file://</code> or any static server. A <code>StaticFiles</code>
+    mount on the dev server is the next step once we pick a direction to take forward.
+  </div>
+</main>
+
+</body>
+</html>
