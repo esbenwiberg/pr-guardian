@@ -104,6 +104,7 @@
       <span class="text-xs text-slate-400" id="hdr-progress-text"></span>
       <div class="progress-rail w-32"><div class="progress-fill" id="hdr-progress-bar" style="width:0%"></div></div>
     </div>
+    <a id="hdr-wizard-link" href="#" class="btn btn-sm btn-ghost text-slate-400" style="display:none" title="Try the wizard view (alpha)">Try wizard →</a>
     <a id="hdr-pr-link" href="#" target="_blank" class="btn btn-sm btn-secondary" style="display:none">View PR</a>
   </div>
 </header>
@@ -489,6 +490,15 @@ function buildOrientScreen() {
   if (d.pr_url) {
     document.getElementById('hdr-pr-link').href = d.pr_url;
     document.getElementById('hdr-pr-link').style.display = '';
+  }
+
+  // Wizard link (alpha): only when we have a real review id
+  if (!LIVE_MODE && REVIEW_ID) {
+    const wl = document.getElementById('hdr-wizard-link');
+    if (wl) {
+      wl.href = `/reviews/${REVIEW_ID}/wizard`;
+      wl.style.display = '';
+    }
   }
 
   if (LIVE_MODE) {
