@@ -282,6 +282,7 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
             {"name": c.name, "intent": c.intent, "files": list(c.files), "layers": list(c.layers)}
             for c in result.capabilities
         ],
+        "briefing": result.briefing,
         "model": result.model,
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,

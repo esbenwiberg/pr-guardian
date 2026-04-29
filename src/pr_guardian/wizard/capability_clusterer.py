@@ -81,6 +81,7 @@ class ClusterResult:
     """Outcome of clustering. `source` makes the fallback path observable."""
     capabilities: list[Capability]
     source: str  # "llm" | "fallback_small_pr" | "fallback_no_files" | "fallback_error"
+    briefing: dict[str, str] | None = None
     model: str = ""
     input_tokens: int = 0
     output_tokens: int = 0
@@ -123,7 +124,7 @@ async def cluster_capabilities(
     try:
         response = await llm_client.complete(
             system=system, user=user, model=model,
-            max_tokens=4096, temperature=0.1, response_format="json",
+            max_tokens=6144, temperature=0.1, response_format="json",
         )
     except Exception as exc:  # noqa: BLE001 — the goal is graceful fallback
         log.warning("capability_clusterer_llm_call_failed", error=str(exc))
@@ -134,7 +135,7 @@ async def cluster_capabilities(
         )
 
     try:
-        capabilities = _parse_and_validate(response.content, files=files, soft_cap=soft_cap)
+        capabilities, briefing = _parse_and_validate(response.content, files=files, soft_cap=soft_cap)
     except _ParseError as exc:
         log.warning("capability_clusterer_parse_failed", error=str(exc), raw=response.content[:500])
         return ClusterResult(
@@ -149,6 +150,7 @@ async def cluster_capabilities(
 
     return ClusterResult(
         capabilities=capabilities,
+        briefing=briefing,
         source="llm",
         model=response.model,
         input_tokens=response.input_tokens,
@@ -165,10 +167,10 @@ async def cluster_capabilities(
 def _build_system_prompt(soft_cap: int) -> str:
     layers = ", ".join(LAYER_VOCAB)
     return (
-        "You are clustering files in a pull request into a small number of "
-        "capabilities so a human reviewer can read the change one capability "
-        "at a time.\n\n"
-        f"RULES:\n"
+        "You are preparing a pull-request review briefing for a human reviewer. "
+        "You will (a) cluster the changed files into capabilities and "
+        "(b) write a short opening briefing that orients the reviewer.\n\n"
+        f"CLUSTERING RULES:\n"
         f"- Output between 1 and {soft_cap} capabilities. Fewer is better.\n"
         "- Every input file must appear in exactly one capability.\n"
         "- Capability names should reveal *what the change does*, not where the "
@@ -180,13 +182,25 @@ def _build_system_prompt(soft_cap: int) -> str:
         "- If two files belong together logically (e.g. a service and the test "
         "that exercises it), put them in the same capability even if they live "
         "in different top-level folders.\n\n"
+        "BRIEFING RULES:\n"
+        "- `what` — one or two sentences plainly describing what this PR delivers. "
+        "Read it as if explaining to someone who hasn't seen the diff yet.\n"
+        "- `why` — one or two sentences inferring the motivation for the change "
+        "from the title, description, commit messages, and the shape of the diff. "
+        "If you genuinely cannot tell, say so briefly.\n"
+        "- `how` — one or two sentences describing the architectural shape of the "
+        "change: which layers are touched, where the risk concentrates, what the "
+        "structural pattern is. Specific, not generic.\n"
+        "- Use plain prose. No bullet lists, no markdown headings, no preamble. "
+        "Light inline `<code>` is fine for identifiers.\n\n"
         "OUTPUT FORMAT — return JSON only, no commentary:\n"
         "{\n"
         '  "capabilities": [\n'
         '    {"name": "...", "intent": "...", '
         '"files": ["path/a", "path/b"], '
         '"layers": ["Services", "Tests"]}\n'
-        "  ]\n"
+        "  ],\n"
+        '  "briefing": {"what": "...", "why": "...", "how": "..."}\n'
         "}\n"
     )
 
@@ -236,14 +250,17 @@ def _parse_and_validate(
     *,
     files: list[FileSummary],
     soft_cap: int,
-) -> list[Capability]:
+) -> tuple[list[Capability], dict[str, str] | None]:
     """Parse the LLM's JSON, coerce shape, enforce scaffold invariants.
 
-    Soft enforcement: invalid layers are dropped (not rejected); unknown file
-    paths are dropped; capabilities exceeding the soft cap are truncated.
-    Hard enforcement: response must be JSON with a `capabilities` array; every
-    input file must end up assigned to exactly one capability — otherwise we
-    fall through to fallback rather than show the reviewer a partial view."""
+    Returns (capabilities, briefing). Briefing is None if missing / malformed —
+    capabilities validation is the gating concern, briefing is best-effort.
+
+    Capability rules:
+    - Soft: invalid layers dropped; unknown file paths dropped; over-cap
+      capabilities truncated.
+    - Hard: response must be JSON with a `capabilities` array; every input
+      file must end up assigned to exactly one capability."""
     try:
         data = json.loads(_strip_fences(raw))
     except json.JSONDecodeError as exc:
@@ -284,6 +301,25 @@ def _parse_and_validate(
     if unassigned:
         raise _ParseError(f"{len(unassigned)} input files not assigned: {sorted(unassigned)[:5]}")
 
+    briefing = _coerce_briefing(data.get("briefing"))
+    return out, briefing
+
+
+def _coerce_briefing(raw: Any) -> dict[str, str] | None:
+    """Best-effort briefing extraction. Returns None if any of what/why/how is
+    missing or empty after trimming — partial briefings are worse than none,
+    because the wizard's heuristic stub is already a complete fallback."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, str] = {}
+    for key in ("what", "why", "how"):
+        v = raw.get(key)
+        if not isinstance(v, str):
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        out[key] = v
     return out
 
 

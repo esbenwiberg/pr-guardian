@@ -328,3 +328,131 @@ def test_layer_vocab_is_the_locked_closed_set():
 
 def test_soft_cap_defaults_to_six():
     assert SOFT_CAP_CAPABILITIES == 6
+
+
+# ---------------------------------------------------------------------------
+# Briefing extraction (Phase 4)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_briefing_is_parsed_when_well_formed():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+    raw = json.dumps({
+        "capabilities": [
+            {"name": "Cap", "intent": "i", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]},
+        ],
+        "briefing": {
+            "what": "Adds the typed Graph client.",
+            "why":  "Consolidates duplicated retry + auth from legacy plugins.",
+            "how":  "Layered shape: Infra registers, Services wraps, Tests cover.",
+        },
+    })
+    llm = _mock_llm(raw)
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="Graph", pr_body="", llm_client=llm)
+    assert result.source == "llm"
+    assert result.briefing == {
+        "what": "Adds the typed Graph client.",
+        "why":  "Consolidates duplicated retry + auth from legacy plugins.",
+        "how":  "Layered shape: Infra registers, Services wraps, Tests cover.",
+    }
+
+
+@pytest.mark.asyncio
+async def test_briefing_missing_returns_none_not_error():
+    """Briefing is best-effort. A response with valid capabilities but no
+    briefing block must still succeed — wizard falls back to its heuristic
+    stub for the W/W/H block."""
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+    raw = json.dumps({
+        "capabilities": [
+            {"name": "Cap", "intent": "i", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]},
+        ],
+    })
+    llm = _mock_llm(raw)
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="Graph", pr_body="", llm_client=llm)
+    assert result.source == "llm"
+    assert result.briefing is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("briefing", [
+    {"what": "x", "why": "y"},                      # missing how
+    {"what": "x", "why": "y", "how": ""},           # empty how
+    {"what": "  ", "why": "y", "how": "z"},         # whitespace what
+    {"what": "x", "why": "y", "how": 12345},        # non-string how
+    "not even a dict",                              # wrong shape
+])
+async def test_partial_or_malformed_briefing_returns_none(briefing):
+    """A partial briefing is worse than none — we don't show 'What' without
+    'Why' and 'How', because the heuristic stub at least produces all three."""
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+    raw = json.dumps({
+        "capabilities": [
+            {"name": "Cap", "intent": "i", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]},
+        ],
+        "briefing": briefing,
+    })
+    llm = _mock_llm(raw)
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="Graph", pr_body="", llm_client=llm)
+    assert result.source == "llm"
+    assert result.briefing is None
+
+
+@pytest.mark.asyncio
+async def test_briefing_strings_are_trimmed():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+    raw = json.dumps({
+        "capabilities": [
+            {"name": "Cap", "intent": "i", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]},
+        ],
+        "briefing": {"what": "  what.  \n", "why": "why.", "how": "\nhow."},
+    })
+    llm = _mock_llm(raw)
+    result = await cluster_capabilities(files=files, findings=findings,
+                                        pr_title="Graph", pr_body="", llm_client=llm)
+    assert result.briefing == {"what": "what.", "why": "why.", "how": "how."}
+
+
+@pytest.mark.asyncio
+async def test_fallback_paths_have_no_briefing():
+    """Every fallback path returns briefing=None — there's no LLM output to
+    extract one from."""
+    llm = _mock_llm("")
+    result = await cluster_capabilities(
+        files=[], findings=[], pr_title="x", pr_body="", llm_client=llm,
+    )
+    assert result.briefing is None
+
+    files = [_f("a.py")]
+    result = await cluster_capabilities(
+        files=files, findings=[_finding("a.py", "low")],
+        pr_title="x", pr_body="", llm_client=llm,
+    )
+    assert result.source == "fallback_small_pr"
+    assert result.briefing is None
+
+
+@pytest.mark.asyncio
+async def test_prompt_asks_for_briefing_with_what_why_how():
+    files = [_f("a.py"), _f("b.py"), _f("c.py")]
+    findings = [_finding("a.py"), _finding("b.py")]
+    raw = json.dumps({
+        "capabilities": [
+            {"name": "X", "intent": "y", "files": ["a.py", "b.py", "c.py"], "layers": ["Services"]},
+        ],
+        "briefing": {"what": "w", "why": "y", "how": "h"},
+    })
+    llm = _mock_llm(raw)
+    await cluster_capabilities(files=files, findings=findings,
+                               pr_title="Graph", pr_body="", llm_client=llm)
+    system = llm.complete.await_args.kwargs["system"]
+    assert "briefing" in system.lower()
+    assert "what" in system.lower() and "why" in system.lower() and "how" in system.lower()
