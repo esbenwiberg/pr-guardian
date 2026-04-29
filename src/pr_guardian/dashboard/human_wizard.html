@@ -200,49 +200,16 @@
 <main id="step"></main>
 <footer id="nav"></footer>
 
+<script src="/static/review-helpers.js"></script>
 <script>
-// ── Review-data loader for the wizard ─────────────────────────────────
-// Reads the review id from the URL, fetches the same JSON endpoints the
-// chapter view uses, and builds the wizard's data structures (PR_TITLE,
-// PR_STATS, WWH, CAPABILITIES, DECISIONS) by re-using the path-prefix
-// chapter heuristic from human_review.html. Phase 1b is read-only; the
-// per-concern action buttons are inert (Phase 1c will wire them) and the
-// final-verdict buttons are inert (Phase 1d).
-
-const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
+const { SEV_ORDER, detectRole, escapeHtml } = window.PRG;
 const PATH_PARTS = window.location.pathname.split('/');
 const REVIEW_ID = PATH_PARTS[PATH_PARTS.indexOf('reviews') + 1];
-
-// Mirrors detectRole() in human_review.html (which mirrors discovery/file_roles.py).
-function detectRole(path) {
-  const p = path;
-  const pl = p.toLowerCase();
-  if (/\/(tests?|spec|__tests?|__specs?)\//i.test(p) ||
-      /\.(test|spec)\.[a-z]+$/i.test(p) ||
-      /_(test|spec)\.[a-z]+$/i.test(p)) return 'TEST';
-  if (/dockerfile/i.test(pl) || /docker-compose/i.test(pl) ||
-      /\.github\//i.test(pl) || /\/(ci|circleci|github)\//i.test(pl) ||
-      /jenkinsfile/i.test(pl) || /\.travis\.yml/i.test(pl)) return 'INFRA';
-  if (/\/(docs?|documentation|wiki)\//i.test(pl) ||
-      /^readme/i.test(pl.split('/').pop()) ||
-      /\.(md|rst|txt)$/i.test(pl)) return 'DOCS';
-  if (/(package-lock\.json|yarn\.lock|poetry\.lock|cargo\.lock|composer\.lock|gemfile\.lock)/i.test(pl)) return 'GENERATED';
-  if (/(requirements.*\.txt|package\.json|pyproject\.toml|go\.mod|cargo\.toml|pom\.xml|gemfile|composer\.json)$/i.test(pl)) return 'DEPENDENCY';
-  if (/(makefile|build\.gradle|cmakefile|setup\.py|setup\.cfg|\.bazel|buck|\.mk)$/i.test(pl)) return 'BUILD';
-  if (/\.(env|config|cfg|ini|yaml|yml|toml|json|conf)$/i.test(pl) &&
-      !/package\.json$|pyproject\.toml$/i.test(pl)) return 'CONFIG';
-  return 'PRODUCTION';
-}
 
 const ROLE_TO_LAYER = {
   PRODUCTION: 'Code', TEST: 'Tests', INFRA: 'Infra', DOCS: 'Docs',
   CONFIG: 'Config', BUILD: 'Build', DEPENDENCY: 'Deps', GENERATED: 'Generated'
 };
-
-function escapeForData(s) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
 
 // First-sentence-as-question, rest-as-reasoning split.
 function splitQuestion(text) {
@@ -255,39 +222,42 @@ function splitQuestion(text) {
 }
 
 // Extract a minimal hunk for the finding from the file's patch.
-function extractHunkForFinding(filePatch, findingLine) {
-  if (!filePatch || !findingLine) return null;
-  const lines = filePatch.split('\n');
+// Parse a unified diff patch once into a flat list of { type, n, text }
+// rows with line numbers resolved against the new file. Hunk extraction
+// for a given finding then becomes a cheap filter.
+function parsePatchLines(patch) {
+  if (!patch) return { header: '', rows: [] };
   let header = '';
-  let cursor = 0; // current new-file line number
-  let captured = [];
-  for (let i = 0; i < lines.length; i++) {
-    const ln = lines[i];
+  let cursor = 0;
+  const rows = [];
+  for (const ln of patch.split('\n')) {
     if (ln.startsWith('@@')) {
-      const m = ln.match(/\+(\d+)/);
       header = ln;
+      const m = ln.match(/\+(\d+)/);
       if (m) cursor = parseInt(m[1], 10) - 1;
       continue;
     }
+    if (ln === '\\ No newline at end of file') continue;
     let type = 'ctx';
     let advance = true;
     if (ln.startsWith('+')) type = 'add';
     else if (ln.startsWith('-')) { type = 'del'; advance = false; }
-    else if (ln === '\\ No newline at end of file') continue;
     if (advance) cursor += 1;
-    if (Math.abs(cursor - findingLine) <= 4) {
-      captured.push({ type, n: type === 'del' ? null : cursor, text: ln.slice(1) });
-    }
+    rows.push({ type, n: type === 'del' ? null : cursor, text: ln.slice(1) });
   }
-  if (!captured.length) return null;
-  return { file: '', header: header || '', lines: captured.slice(0, 12) };
+  return { header, rows };
 }
 
-// Build capabilities by path-prefix grouping (matches computeChapters in
-// human_review.html). This is the Phase 1b heuristic; Phase 3 replaces it
-// with LLM-driven capability clustering.
+function extractHunkAroundLine(parsed, findingLine) {
+  if (!parsed || !findingLine) return null;
+  const captured = parsed.rows.filter(r => r.n != null && Math.abs(r.n - findingLine) <= 4);
+  if (!captured.length) return null;
+  return { header: parsed.header, lines: captured.slice(0, 12) };
+}
+
 function buildCapabilitiesAndDecisions(reviewData, diffData) {
   const files = (diffData?.files) || [];
+
   const findingsByFile = {};
   for (const agent of (reviewData.agent_results || [])) {
     for (const f of (agent.findings || [])) {
@@ -296,10 +266,9 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
       findingsByFile[f.file].push({ ...f, agent_name: agent.agent_name });
     }
   }
-  const patchByPath = {};
-  for (const f of files) patchByPath[f.path] = f.patch || '';
+  const parsedPatchByPath = {};
+  for (const f of files) parsedPatchByPath[f.path] = parsePatchLines(f.patch || '');
 
-  // Annotate + group by top-2 path prefix.
   const annotated = files.map(f => ({
     ...f,
     role: detectRole(f.path),
@@ -314,14 +283,18 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
     groups[prefix].push(f);
   }
 
-  // Materialise capabilities. Sort: capabilities-with-concerns first, then
-  // by max severity, then by name.
+  // Build capabilities + a parallel map { capId → {files, findings} } so the
+  // capability objects exposed to the renderer stay clean (no internal
+  // bookkeeping fields to drop later).
+  const capContents = {};
   const capabilities = Object.entries(groups).map(([prefix, fs], idx) => {
     const findings = fs.flatMap(f => f.findings);
     const layers = Array.from(new Set(fs.map(f => ROLE_TO_LAYER[f.role] || 'Code')));
     const locs = fs.reduce((s, f) => s + f.locs, 0);
+    const id = `cap-${idx + 1}`;
+    capContents[id] = { files: fs, findings };
     return {
-      id: `cap-${idx + 1}`,
+      id,
       name: prefix,
       intent: `${fs.length} file${fs.length === 1 ? '' : 's'} touching ${layers.join(' / ')} (${locs} LOC). ` +
               (findings.length === 0
@@ -331,8 +304,6 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
       locs,
       layers,
       clean: findings.length === 0,
-      _files: fs,
-      _findings: findings,
     };
   });
   capabilities.sort((a, b) => {
@@ -340,21 +311,15 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
     return a.name.localeCompare(b.name);
   });
 
-  // Build decisions: one per surfaced (non-dismissed) finding, mapped to
-  // its capability via the file path.
-  const fileToCap = {};
-  for (const cap of capabilities) {
-    for (const f of cap._files) fileToCap[f.path] = cap.id;
-  }
   const decisions = [];
-  capabilities.forEach(cap => {
-    const decsForCap = cap._findings.slice().sort((a, b) =>
+  for (const cap of capabilities) {
+    const sorted = capContents[cap.id].findings.slice().sort((a, b) =>
       (SEV_ORDER[a.severity] ?? 9) - (SEV_ORDER[b.severity] ?? 9)
     );
-    decsForCap.forEach((f, j) => {
+    sorted.forEach((f, j) => {
       const { q, rest } = splitQuestion(f.description || f.category || 'Concern');
       const reasoning = rest.length ? rest : (f.description ? [f.description] : []);
-      const hunk = extractHunkForFinding(patchByPath[f.file], f.line);
+      const hunk = extractHunkAroundLine(parsedPatchByPath[f.file], f.line);
       if (hunk) hunk.file = f.file;
       decisions.push({
         id: `d-${cap.id}-${j}`,
@@ -363,15 +328,12 @@ function buildCapabilitiesAndDecisions(reviewData, diffData) {
         severity: f.severity || 'low',
         question: q,
         cwe: f.cwe ? [f.cwe] : [],
-        reasoning: reasoning.map(escapeForData),
+        reasoning: reasoning.map(escapeHtml),
         hunk,
-        fix: f.suggestion ? escapeForData(f.suggestion) : null,
+        fix: f.suggestion ? escapeHtml(f.suggestion) : null,
       });
     });
-  });
-
-  // Drop the private fields before exposing.
-  capabilities.forEach(c => { delete c._files; delete c._findings; });
+  }
   return { capabilities, decisions };
 }
 
@@ -388,16 +350,15 @@ function buildWWH(reviewData, capabilities, files) {
     .map(([r, n]) => `${n} ${r.toLowerCase()}`)
     .join(', ');
   const what = reviewData.title
-    ? `<strong>${escapeForData(reviewData.title)}</strong> — ${fileCount} file${fileCount === 1 ? '' : 's'} changed (${totalLoc.toLocaleString()} LOC across ${roleSummary || 'no recognised roles'}).`
+    ? `<strong>${escapeHtml(reviewData.title)}</strong> — ${fileCount} file${fileCount === 1 ? '' : 's'} changed (${totalLoc.toLocaleString()} LOC across ${roleSummary || 'no recognised roles'}).`
     : `${fileCount} file${fileCount === 1 ? '' : 's'} changed (${totalLoc.toLocaleString()} LOC across ${roleSummary || 'no recognised roles'}).`;
   const why = reviewData.body
-    ? escapeForData(reviewData.body).split(/\n\s*\n/).slice(0, 2).join(' ')
-    : `<em>No description provided. Phase 4 will replace this paragraph with an LLM-generated motivation read from the spec or commit messages.</em>`;
+    ? escapeHtml(reviewData.body).split(/\n\s*\n/).slice(0, 2).join(' ')
+    : `<em>No description provided.</em>`;
   const dirty = capabilities.filter(c => !c.clean);
   const clean = capabilities.filter(c => c.clean);
   const how = `Grouped into ${capabilities.length} capabilit${capabilities.length === 1 ? 'y' : 'ies'} ` +
-              `(${dirty.length} with concerns, ${clean.length} clean) by top-level path prefix. ` +
-              `<em>Phase 1b heuristic — Phase 3 will replace this with capability clustering.</em>`;
+              `(${dirty.length} with concerns, ${clean.length} clean) by top-level path prefix.`;
   return { what, why, how };
 }
 
@@ -481,9 +442,6 @@ function showError(err) {
   document.getElementById("pips-nav").innerHTML = "";
 }
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
 
 function decsForCap(capId) {
   return decisions.map((d, i) => ({ d, i })).filter(x => x.d.capId === capId);
@@ -654,7 +612,7 @@ function renderWrap() {
     </div>
 
     <div class="noise-line">
-      <strong>${stats.suppressed} findings filtered as noise</strong> — formatting nits, doc-comment style, generated-code naming, and duplicates from a second agent on the same line. <a href="#" onclick="alert('(prototype) opens an audit list of suppressed findings.');return false;">Audit the filter</a>.
+      <strong>${stats.suppressed} finding${stats.suppressed === 1 ? '' : 's'} previously dismissed</strong> on this PR — already triaged by a reviewer (or filtered by severity).
     </div>
 
     <label class="comment-label" for="reviewer-comment">Comment to the author (optional)</label>
