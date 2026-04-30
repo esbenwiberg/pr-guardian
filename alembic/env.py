@@ -25,7 +25,8 @@ if db_url:
     if db_url.startswith("postgresql://"):
         db_url = "postgresql+asyncpg://" + db_url[len("postgresql://"):]
     db_url = db_url.replace("?sslmode=require", "?ssl=require").replace("&sslmode=require", "&ssl=require")
-    config.set_main_option("sqlalchemy.url", db_url)
+    # configparser uses % for interpolation — percent-encode any literal %
+    config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
