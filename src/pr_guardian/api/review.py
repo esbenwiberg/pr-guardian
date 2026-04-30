@@ -228,8 +228,10 @@ async def manual_repo_review(req: RepoReviewRequest):
             adapter, repo, ref=req.ref, max_files=req.max_files,
         )
     except ValueError as e:
+        await adapter.close()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        await adapter.close()
         raise HTTPException(status_code=502, detail=f"Could not fetch repo contents: {e}")
 
     log.info(

@@ -26,10 +26,11 @@ class TestManualRepoReviewErrors:
 
     def test_value_error_returns_400(self, client):
         """Repo-too-large ValueError → 400 so the UI can display the message."""
+        adapter = _mock_adapter()
         with (
             patch(
                 "pr_guardian.api.review.create_adapter",
-                return_value=_mock_adapter(),
+                return_value=adapter,
             ),
             patch(
                 "pr_guardian.api.review.build_repo_diff",
@@ -44,13 +45,15 @@ class TestManualRepoReviewErrors:
 
         assert resp.status_code == 400
         assert "500 reviewable files" in resp.json()["detail"]
+        adapter.close.assert_awaited_once()
 
     def test_generic_exception_returns_502(self, client):
         """Network or auth failures during diff build → 502 so the modal shows an error."""
+        adapter = _mock_adapter()
         with (
             patch(
                 "pr_guardian.api.review.create_adapter",
-                return_value=_mock_adapter(),
+                return_value=adapter,
             ),
             patch(
                 "pr_guardian.api.review.build_repo_diff",
@@ -65,6 +68,7 @@ class TestManualRepoReviewErrors:
 
         assert resp.status_code == 502
         assert "connection timeout" in resp.json()["detail"]
+        adapter.close.assert_awaited_once()
 
     def test_success_returns_queued(self, client):
         """Happy path: diff builds successfully → 200 with status=queued."""
