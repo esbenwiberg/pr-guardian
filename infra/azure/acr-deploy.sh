@@ -47,8 +47,18 @@ echo "    Active: $(az account show --query name -o tsv)"
 
 # 1b. Patch alembic/env.py so % chars in DATABASE_URL are escaped for configparser
 echo "--- Patching alembic/env.py for configparser % escaping (idempotent)..."
-sed -i 's|config\.set_main_option("sqlalchemy\.url", db_url)|config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))|' \
-    "$PROJECT_ROOT/alembic/env.py"
+python3 - "$PROJECT_ROOT/alembic/env.py" <<'PYEOF'
+import sys, pathlib
+f = pathlib.Path(sys.argv[1])
+old = 'config.set_main_option("sqlalchemy.url", db_url)'
+new = 'config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))'
+txt = f.read_text()
+if old in txt:
+    f.write_text(txt.replace(old, new))
+    print("    Patched.")
+else:
+    print("    Already patched, skipping.")
+PYEOF
 grep -n 'set_main_option' "$PROJECT_ROOT/alembic/env.py"
 
 # 2. Build image remotely via ACR Tasks (no local Docker needed)
