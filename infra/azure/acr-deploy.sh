@@ -45,6 +45,12 @@ echo "--- Switching subscription..."
 az account set --subscription "$SUBSCRIPTION"
 echo "    Active: $(az account show --query name -o tsv)"
 
+# 1b. Patch alembic/env.py so % chars in DATABASE_URL are escaped for configparser
+echo "--- Patching alembic/env.py for configparser % escaping (idempotent)..."
+sed -i 's|config\.set_main_option("sqlalchemy\.url", db_url)|config.set_main_option("sqlalchemy.url", db_url.replace("%", "%%"))|' \
+    "$PROJECT_ROOT/alembic/env.py"
+grep -n 'set_main_option' "$PROJECT_ROOT/alembic/env.py"
+
 # 2. Build image remotely via ACR Tasks (no local Docker needed)
 echo "--- Building image via ACR Tasks..."
 az acr build \
