@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import uuid
 from typing import Literal
@@ -169,12 +170,51 @@ class RepoReviewResponse(BaseModel):
     )
 
 
-async def _run_repo_review_background(pr: PlatformPR, adapter, diff) -> None:
+async def _run_repo_review_background(
+    repo: str, platform: str, adapter, ref: str, max_files: int,
+) -> None:
+    """Run a full repo review in the background.
+
+    Creates a DB record immediately so the review appears in Active Reviews,
+    then builds the diff and runs the pipeline. If diff-building fails the
+    record is marked as error so the user sees *something* rather than silence.
+    """
     import traceback
+    from pr_guardian.core.orchestrator import _try_import_storage
+    from pr_guardian.core.events import ReviewEvent, event_bus
+
+    synthetic_id = uuid.uuid4().hex[:12]
+    pr = build_synthetic_pr(repo, platform, ref, synthetic_id)
+
+    storage = _try_import_storage()
+    review_db_id: uuid.UUID | None = None
+
+    # Create the DB record before expensive diff-building so the review
+    # shows up in Active Reviews immediately and any failure is surfaced there.
+    if storage:
+        try:
+            review_db_id = await storage.create_review_record(pr, comment_mode="none")
+            await storage.update_review_stage(review_db_id, "queued", "Building repo diff")
+            event_bus.publish(ReviewEvent(
+                review_id=str(review_db_id),
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                stage="queued",
+                detail="Building repo diff",
+            ))
+        except Exception as e:
+            log.warning("repo_review_db_create_failed", error=str(e))
+
     try:
+        diff, meta = await build_repo_diff(adapter, repo, ref=ref, max_files=max_files)
+        log.info(
+            "repo_review_diff_built",
+            repo=repo, files_included=meta["files_included"], total_bytes=meta["total_bytes"],
+        )
         await run_review(
             pr,
             adapter,
+            existing_review_db_id=review_db_id,
             post_comment=False,
             dismissals=None,
             diff_override=diff,
@@ -183,8 +223,13 @@ async def _run_repo_review_background(pr: PlatformPR, adapter, diff) -> None:
     except Exception as e:
         log.error(
             "repo_review_background_failed",
-            repo=pr.repo, error=str(e), traceback=traceback.format_exc(),
+            repo=repo, error=str(e), traceback=traceback.format_exc(),
         )
+        if storage and review_db_id:
+            try:
+                await storage.mark_review_failed(review_db_id, str(e))
+            except Exception:
+                pass
     finally:
         if hasattr(adapter, "close"):
             try:
@@ -200,9 +245,8 @@ async def manual_repo_review(req: RepoReviewRequest):
     Treats the repository at ``ref`` as a synthetic PR where every file is new,
     then runs the standard PR review pipeline. Suitable for small repos only.
 
-    The repo diff is built synchronously before returning so that errors
-    (invalid token, repo too large, network failure) surface immediately as
-    HTTP error responses rather than being silently swallowed in the background.
+    Returns immediately (like a PR review) — the diff build and pipeline run
+    in the background. Progress is visible in Active Reviews via SSE.
     """
     if req.platform not in ("github", "ado"):
         raise HTTPException(status_code=400, detail="Unsupported platform")
@@ -214,6 +258,19 @@ async def manual_repo_review(req: RepoReviewRequest):
             detail="Repo must be in owner/repo (GitHub) or project/repo (ADO) format.",
         )
 
+    # Check that credentials are configured before queuing — gives immediate
+    # feedback for the common misconfiguration case, without making a network call.
+    if req.platform == "github" and not os.environ.get("GITHUB_TOKEN"):
+        raise HTTPException(
+            status_code=400,
+            detail="GitHub token not configured. Set the GITHUB_TOKEN environment variable.",
+        )
+    if req.platform == "ado" and not os.environ.get("ADO_PAT"):
+        raise HTTPException(
+            status_code=400,
+            detail="Azure DevOps token not configured. Set the ADO_PAT environment variable.",
+        )
+
     try:
         adapter = create_adapter(req.platform)
     except Exception as e:
@@ -221,27 +278,9 @@ async def manual_repo_review(req: RepoReviewRequest):
 
     log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
 
-    # Build diff synchronously so any failure (bad credentials, repo too large,
-    # network error) is returned as an HTTP error and shown in the modal.
-    try:
-        diff, meta = await build_repo_diff(
-            adapter, repo, ref=req.ref, max_files=req.max_files,
-        )
-    except ValueError as e:
-        await adapter.close()
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        await adapter.close()
-        raise HTTPException(status_code=502, detail=f"Could not fetch repo contents: {e}")
-
-    log.info(
-        "manual_repo_review_diff_built",
-        repo=repo, files_included=meta["files_included"], total_bytes=meta["total_bytes"],
+    asyncio.create_task(
+        _run_repo_review_background(repo, req.platform, adapter, req.ref, req.max_files)
     )
-
-    pr = build_synthetic_pr(repo, req.platform, req.ref, uuid.uuid4().hex[:12])
-
-    asyncio.create_task(_run_repo_review_background(pr, adapter, diff))
 
     return RepoReviewResponse(
         status="queued",
