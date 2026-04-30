@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 from typing import Literal
 
 import structlog
@@ -11,7 +12,8 @@ from pydantic import BaseModel, ConfigDict
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
-    run_repo_review,
+    build_synthetic_pr,
+    build_repo_diff,
 )
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.factory import create_adapter
@@ -170,17 +172,63 @@ class RepoReviewResponse(BaseModel):
 async def _run_repo_review_background(
     repo: str, platform: str, adapter, ref: str, max_files: int,
 ) -> None:
+    """Run a full repo review in the background.
+
+    Creates a DB record immediately so the review appears in Active Reviews,
+    then builds the diff and runs the pipeline. If diff-building fails the
+    record is marked as error so the user sees *something* rather than silence.
+    """
     import traceback
+    from pr_guardian.core.orchestrator import get_storage
+    from pr_guardian.core.events import ReviewEvent, event_bus
+
+    synthetic_id = uuid.uuid4().hex[:12]
+    pr = build_synthetic_pr(repo, platform, ref, synthetic_id)
+
+    storage = get_storage()
+    review_db_id: uuid.UUID | None = None
+
+    # Create the DB record before expensive diff-building so the review
+    # shows up in Active Reviews immediately and any failure is surfaced there.
+    if storage:
+        try:
+            review_db_id = await storage.create_review_record(pr, comment_mode="none")
+            await storage.update_review_stage(review_db_id, "queued", "Building repo diff")
+            event_bus.publish(ReviewEvent(
+                review_id=str(review_db_id),
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                stage="queued",
+                detail="Building repo diff",
+            ))
+        except Exception as e:
+            log.warning("repo_review_db_create_failed", error=str(e))
+
     try:
-        await run_repo_review(
-            repo=repo, platform=platform, adapter=adapter,
-            ref=ref, max_files=max_files,
+        diff, meta = await build_repo_diff(adapter, repo, ref=ref, max_files=max_files)
+        log.info(
+            "repo_review_diff_built",
+            repo=repo, files_included=meta["files_included"], total_bytes=meta["total_bytes"],
+        )
+        await run_review(
+            pr,
+            adapter,
+            existing_review_db_id=review_db_id,
+            post_comment=False,
+            dismissals=None,
+            diff_override=diff,
+            skip_platform_side_effects=True,
         )
     except Exception as e:
         log.error(
             "repo_review_background_failed",
             repo=repo, error=str(e), traceback=traceback.format_exc(),
         )
+        if storage and review_db_id:
+            try:
+                await storage.mark_review_failed(review_db_id, str(e))
+            except Exception:
+                pass
     finally:
         if hasattr(adapter, "close"):
             try:
@@ -195,6 +243,9 @@ async def manual_repo_review(req: RepoReviewRequest):
 
     Treats the repository at ``ref`` as a synthetic PR where every file is new,
     then runs the standard PR review pipeline. Suitable for small repos only.
+
+    Returns immediately (like a PR review) — the diff build and pipeline run
+    in the background. Progress is visible in Active Reviews via SSE.
     """
     if req.platform not in ("github", "ado"):
         raise HTTPException(status_code=400, detail="Unsupported platform")
@@ -214,9 +265,7 @@ async def manual_repo_review(req: RepoReviewRequest):
     log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
 
     asyncio.create_task(
-        _run_repo_review_background(
-            repo, req.platform, adapter, req.ref, req.max_files,
-        )
+        _run_repo_review_background(repo, req.platform, adapter, req.ref, req.max_files)
     )
 
     return RepoReviewResponse(

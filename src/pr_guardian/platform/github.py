@@ -22,13 +22,15 @@ class GitHubAdapter:
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
+            headers: dict[str, str] = {
+                "Accept": "application/vnd.github.v3+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            if self._token:
+                headers["Authorization"] = f"token {self._token}"
             self._client = httpx.AsyncClient(
                 base_url="https://api.github.com",
-                headers={
-                    "Authorization": f"token {self._token}",
-                    "Accept": "application/vnd.github.v3+json",
-                    "X-GitHub-Api-Version": "2022-11-28",
-                },
+                headers=headers,
                 timeout=30.0,
             )
         return self._client

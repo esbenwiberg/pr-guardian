@@ -77,6 +77,11 @@ def _try_import_storage():
     except Exception:
         return None
 
+
+def get_storage():
+    """Public accessor for lazily-imported storage (None when DB is not configured)."""
+    return _try_import_storage()
+
 AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
     "performance": PerformanceAgent,
@@ -92,6 +97,7 @@ async def run_review(
     adapter: PlatformAdapter,
     service_config: GuardianConfig | None = None,
     *,
+    existing_review_db_id: uuid.UUID | None = None,
     post_comment: bool = True,
     base_url: str = "",
     dismissals: list[dict] | None = None,
@@ -103,10 +109,10 @@ async def run_review(
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
 
     storage = _try_import_storage()
-    review_db_id: uuid.UUID | None = None
+    review_db_id: uuid.UUID | None = existing_review_db_id
 
-    # Create DB record and emit event
-    if storage:
+    # Create DB record only if one wasn't provided by the caller
+    if storage and review_db_id is None:
         try:
             review_db_id = await storage.create_review_record(pr, comment_mode=comment_mode)
         except Exception as e:
