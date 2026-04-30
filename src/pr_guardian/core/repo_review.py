@@ -8,13 +8,8 @@ Only suitable for small repos — token budget grows linearly with total code si
 """
 from __future__ import annotations
 
-import asyncio
-import uuid
-
 import structlog
 
-from pr_guardian.core.orchestrator import run_review
-from pr_guardian.models.output import ReviewResult
 from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
 from pr_guardian.platform.protocol import PlatformAdapter
 
@@ -144,40 +139,3 @@ def build_synthetic_pr(
         org="",
     )
 
-
-async def run_repo_review(
-    repo: str,
-    platform: str,
-    adapter: PlatformAdapter,
-    *,
-    ref: str = "HEAD",
-    max_files: int = DEFAULT_MAX_FILES,
-) -> ReviewResult:
-    """Run the full review pipeline against an entire repo snapshot.
-
-    Note: intended for small repos only. Platform side-effects (comments,
-    status checks, labels) are suppressed since there's no real PR.
-    """
-    synthetic_id = uuid.uuid4().hex[:12]
-    log.info("repo_review_started", repo=repo, ref=ref, synthetic_id=synthetic_id)
-
-    diff, meta = await build_repo_diff(
-        adapter, repo, ref=ref, max_files=max_files,
-    )
-    log.info(
-        "repo_review_diff_built",
-        repo=repo,
-        files_included=meta["files_included"],
-        total_bytes=meta["total_bytes"],
-    )
-
-    pr = build_synthetic_pr(repo, platform, ref, synthetic_id)
-
-    return await run_review(
-        pr,
-        adapter,
-        post_comment=False,
-        dismissals=None,
-        diff_override=diff,
-        skip_platform_side_effects=True,
-    )

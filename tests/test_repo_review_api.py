@@ -82,7 +82,7 @@ class TestManualRepoReviewQueueing:
         mock_task.assert_called_once()
         # The coroutine passed to create_task must be from _run_repo_review_background
         coro = mock_task.call_args[0][0]
-        assert "_run_repo_review_background" in str(type(coro).__qualname__) or hasattr(coro, "cr_code")
+        assert coro.__qualname__ == "_run_repo_review_background"
 
     def test_queued_response_includes_ref(self, client):
         with (
