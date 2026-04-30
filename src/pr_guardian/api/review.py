@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import uuid
 from typing import Literal
 
 import structlog
@@ -11,7 +12,8 @@ from pydantic import BaseModel, ConfigDict
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
-    run_repo_review,
+    _build_synthetic_pr,
+    build_repo_diff,
 )
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.factory import create_adapter
@@ -167,19 +169,21 @@ class RepoReviewResponse(BaseModel):
     )
 
 
-async def _run_repo_review_background(
-    repo: str, platform: str, adapter, ref: str, max_files: int,
-) -> None:
+async def _run_repo_review_background(pr: PlatformPR, adapter, diff) -> None:
     import traceback
     try:
-        await run_repo_review(
-            repo=repo, platform=platform, adapter=adapter,
-            ref=ref, max_files=max_files,
+        await run_review(
+            pr,
+            adapter,
+            post_comment=False,
+            dismissals=None,
+            diff_override=diff,
+            skip_platform_side_effects=True,
         )
     except Exception as e:
         log.error(
             "repo_review_background_failed",
-            repo=repo, error=str(e), traceback=traceback.format_exc(),
+            repo=pr.repo, error=str(e), traceback=traceback.format_exc(),
         )
     finally:
         if hasattr(adapter, "close"):
@@ -195,6 +199,10 @@ async def manual_repo_review(req: RepoReviewRequest):
 
     Treats the repository at ``ref`` as a synthetic PR where every file is new,
     then runs the standard PR review pipeline. Suitable for small repos only.
+
+    The repo diff is built synchronously before returning so that errors
+    (invalid token, repo too large, network failure) surface immediately as
+    HTTP error responses rather than being silently swallowed in the background.
     """
     if req.platform not in ("github", "ado"):
         raise HTTPException(status_code=400, detail="Unsupported platform")
@@ -213,11 +221,25 @@ async def manual_repo_review(req: RepoReviewRequest):
 
     log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
 
-    asyncio.create_task(
-        _run_repo_review_background(
-            repo, req.platform, adapter, req.ref, req.max_files,
+    # Build diff synchronously so any failure (bad credentials, repo too large,
+    # network error) is returned as an HTTP error and shown in the modal.
+    try:
+        diff, meta = await build_repo_diff(
+            adapter, repo, ref=req.ref, max_files=req.max_files,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch repo contents: {e}")
+
+    log.info(
+        "manual_repo_review_diff_built",
+        repo=repo, files_included=meta["files_included"], total_bytes=meta["total_bytes"],
     )
+
+    pr = _build_synthetic_pr(repo, req.platform, req.ref, uuid.uuid4().hex[:12])
+
+    asyncio.create_task(_run_repo_review_background(pr, adapter, diff))
 
     return RepoReviewResponse(
         status="queued",
