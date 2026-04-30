@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 import re
 import uuid
 from typing import Literal
@@ -180,13 +179,13 @@ async def _run_repo_review_background(
     record is marked as error so the user sees *something* rather than silence.
     """
     import traceback
-    from pr_guardian.core.orchestrator import _try_import_storage
+    from pr_guardian.core.orchestrator import get_storage
     from pr_guardian.core.events import ReviewEvent, event_bus
 
     synthetic_id = uuid.uuid4().hex[:12]
     pr = build_synthetic_pr(repo, platform, ref, synthetic_id)
 
-    storage = _try_import_storage()
+    storage = get_storage()
     review_db_id: uuid.UUID | None = None
 
     # Create the DB record before expensive diff-building so the review
@@ -256,19 +255,6 @@ async def manual_repo_review(req: RepoReviewRequest):
         raise HTTPException(
             status_code=400,
             detail="Repo must be in owner/repo (GitHub) or project/repo (ADO) format.",
-        )
-
-    # Check that credentials are configured before queuing — gives immediate
-    # feedback for the common misconfiguration case, without making a network call.
-    if req.platform == "github" and not os.environ.get("GITHUB_TOKEN"):
-        raise HTTPException(
-            status_code=400,
-            detail="GitHub token not configured. Set the GITHUB_TOKEN environment variable.",
-        )
-    if req.platform == "ado" and not os.environ.get("ADO_PAT"):
-        raise HTTPException(
-            status_code=400,
-            detail="Azure DevOps token not configured. Set the ADO_PAT environment variable.",
         )
 
     try:

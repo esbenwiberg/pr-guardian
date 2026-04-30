@@ -40,27 +40,6 @@ class TestManualRepoReviewValidation:
         )
         assert resp.status_code == 400
 
-    def test_missing_github_token_returns_400(self, client):
-        """No GITHUB_TOKEN → 400 with a human-readable message."""
-        env = {k: v for k, v in os.environ.items() if k != "GITHUB_TOKEN"}
-        with patch.dict(os.environ, env, clear=True):
-            resp = client.post(
-                "/api/review/repo",
-                json={"repo": "owner/repo", "platform": "github"},
-            )
-        assert resp.status_code == 400
-        assert "GITHUB_TOKEN" in resp.json()["detail"]
-
-    def test_missing_ado_pat_returns_400(self, client):
-        """No ADO_PAT → 400 with a human-readable message."""
-        env = {k: v for k, v in os.environ.items() if k != "ADO_PAT"}
-        with patch.dict(os.environ, env, clear=True):
-            resp = client.post(
-                "/api/review/repo",
-                json={"repo": "project/repo", "platform": "ado"},
-            )
-        assert resp.status_code == 400
-        assert "ADO_PAT" in resp.json()["detail"]
 
 
 class TestManualRepoReviewQueueing:
@@ -137,7 +116,7 @@ class TestRepoReviewBackground:
         adapter = _mock_adapter()
 
         with (
-            patch("pr_guardian.core.orchestrator._try_import_storage",
+            patch("pr_guardian.core.orchestrator.get_storage",
                   return_value=mock_storage),
             patch("pr_guardian.api.review.build_repo_diff",
                   new_callable=AsyncMock,
@@ -169,7 +148,7 @@ class TestRepoReviewBackground:
         }
 
         with (
-            patch("pr_guardian.core.orchestrator._try_import_storage",
+            patch("pr_guardian.core.orchestrator.get_storage",
                   return_value=mock_storage),
             patch("pr_guardian.api.review.build_repo_diff",
                   new_callable=AsyncMock,

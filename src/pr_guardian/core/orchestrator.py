@@ -77,6 +77,11 @@ def _try_import_storage():
     except Exception:
         return None
 
+
+def get_storage():
+    """Public accessor for lazily-imported storage (None when DB is not configured)."""
+    return _try_import_storage()
+
 AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
     "performance": PerformanceAgent,
