@@ -12,7 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
-    _build_synthetic_pr,
+    build_synthetic_pr,
     build_repo_diff,
 )
 from pr_guardian.models.pr import Platform, PlatformPR
@@ -237,7 +237,7 @@ async def manual_repo_review(req: RepoReviewRequest):
         repo=repo, files_included=meta["files_included"], total_bytes=meta["total_bytes"],
     )
 
-    pr = _build_synthetic_pr(repo, req.platform, req.ref, uuid.uuid4().hex[:12])
+    pr = build_synthetic_pr(repo, req.platform, req.ref, uuid.uuid4().hex[:12])
 
     asyncio.create_task(_run_repo_review_background(pr, adapter, diff))
 

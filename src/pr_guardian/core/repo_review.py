@@ -124,7 +124,7 @@ async def build_repo_diff(
     return Diff(files=diff_files), meta
 
 
-def _build_synthetic_pr(
+def build_synthetic_pr(
     repo: str,
     platform: str,
     ref: str,
@@ -171,7 +171,7 @@ async def run_repo_review(
         total_bytes=meta["total_bytes"],
     )
 
-    pr = _build_synthetic_pr(repo, platform, ref, synthetic_id)
+    pr = build_synthetic_pr(repo, platform, ref, synthetic_id)
 
     return await run_review(
         pr,
