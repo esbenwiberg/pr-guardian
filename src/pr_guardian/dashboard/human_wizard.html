@@ -309,7 +309,17 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
       const key = `llm-${idx}`;
       const bucket = [];
       for (const path of (cap.files || [])) {
-        if (fileByPath[path]) bucket.push(fileByPath[path]);
+        // Use the real diff entry when available. When the diff endpoint failed
+        // (e.g. expired platform credentials), fileByPath is empty — create a
+        // synthetic stub so LLM clusters still render and are walkable.
+        bucket.push(fileByPath[path] || {
+          path,
+          role: detectRole(path),
+          locs: 0,
+          additions: 0,
+          deletions: 0,
+          findings: findingsByFile[path] || [],
+        });
       }
       if (!bucket.length) return;
       groups[key] = bucket;
@@ -317,8 +327,9 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
       groupNames[key] = cap.name || `Capability ${idx + 1}`;
       groupIntents[key] = cap.intent || '';
     });
-    // Any file the LLM missed (defensive — server-side validation should
-    // already prevent this) gets bundled into a final "Other" group.
+    // Any diff file the LLM didn't assign to a capability gets bundled into
+    // a final "Other" group (defensive — server-side validation should already
+    // prevent this, but guards against any mismatch).
     const claimed = new Set(Object.values(groups).flat().map(f => f.path));
     const orphans = annotated.filter(f => !claimed.has(f.path));
     if (orphans.length) {
@@ -329,8 +340,24 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
       groupIntents[key] = "Files the clusterer didn't assign to a named capability.";
     }
   } else {
-    // Path-prefix fallback (heuristic from 1b).
-    for (const f of annotated) {
+    // Path-prefix fallback. Also pulls in files that only appear in stored
+    // findings (i.e. when the diff endpoint was unavailable), so capability
+    // steps still render even when live platform access has expired.
+    const diffPaths = new Set(annotated.map(f => f.path));
+    const fallbackFiles = [
+      ...annotated,
+      ...Object.keys(findingsByFile)
+        .filter(p => !diffPaths.has(p))
+        .map(p => ({
+          path: p,
+          role: detectRole(p),
+          locs: 0,
+          additions: 0,
+          deletions: 0,
+          findings: findingsByFile[p],
+        })),
+    ];
+    for (const f of fallbackFiles) {
       const parts = f.path.split('/');
       const prefix = parts.length > 2 ? parts.slice(0, 2).join('/') : (parts[0] || 'root');
       if (!groups[prefix]) { groups[prefix] = []; groupOrder.push(prefix); }
@@ -428,9 +455,12 @@ function buildWWH(reviewData, capabilities, files, capsData) {
     };
   }
 
-  // Heuristic stub fallback — same shape as before 4.
-  const fileCount = files.length;
-  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
+  // Heuristic stub fallback — used when the LLM briefing is unavailable.
+  // Derive stats from diff files when available; fall back to capability
+  // aggregates when the diff endpoint was unavailable (expired credentials).
+  const fileCount = files.length || capabilities.reduce((s, c) => s + c.files, 0);
+  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0)
+    || capabilities.reduce((s, c) => s + c.locs, 0);
   const roleCounts = {};
   for (const f of files) {
     const r = detectRole(f.path);
@@ -443,23 +473,31 @@ function buildWWH(reviewData, capabilities, files, capsData) {
   const what = reviewData.title
     ? `<strong>${escapeHtml(reviewData.title)}</strong> — ${fileCount} file${fileCount === 1 ? '' : 's'} changed (${totalLoc.toLocaleString()} LOC across ${roleSummary || 'no recognised roles'}).`
     : `${fileCount} file${fileCount === 1 ? '' : 's'} changed (${totalLoc.toLocaleString()} LOC across ${roleSummary || 'no recognised roles'}).`;
-  const why = reviewData.body
-    ? escapeHtml(reviewData.body).split(/\n\s*\n/).slice(0, 2).join(' ')
+  // reviewData.body is never returned by the API (PR description isn't stored);
+  // use the stored AI review summary as a best-effort "why" when available.
+  const whyText = reviewData.body || reviewData.summary;
+  const why = whyText
+    ? escapeHtml(whyText).split(/\n\s*\n/).slice(0, 2).join(' ')
     : `<em>No description provided.</em>`;
   return { what, why, how: groupingFootnote.trim() };
 }
 
-function buildStats(reviewData, files, decisions) {
+function buildStats(reviewData, files, decisions, capabilities) {
   const allFindings = (reviewData.agent_results || []).flatMap(a => a.findings || []);
   const dismissed = allFindings.filter(f => f.dismissal).length;
   const triage = reviewData.triage_counts || { noise: 0, fyi: 0, decision: 0 };
   // noise from triage already includes dismissed; subtract to keep them distinct in the UI.
   const noiseOnly = Math.max(0, (triage.noise || 0) - dismissed);
-  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
+  // When the diff endpoint was unavailable, derive counts from capabilities
+  // so the stats bar shows meaningful numbers rather than "0 files · +0".
+  const caps = capabilities || [];
+  const fileCount = files.length || caps.reduce((s, c) => s + c.files, 0);
+  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0)
+    || caps.reduce((s, c) => s + c.locs, 0);
   return {
     author: reviewData.author || 'unknown',
     commits: reviewData.commits || 0,
-    files: files.length,
+    files: fileCount,
     additions: totalLoc,
     total: allFindings.length,
     surfaced: decisions.length,
@@ -505,7 +543,7 @@ async function loadAndBuild() {
   window.PR_TITLE = reviewData.title
     ? `${reviewData.repo} #${reviewData.pr_id} — ${reviewData.title}`
     : `${reviewData.repo} #${reviewData.pr_id}`;
-  window.PR_STATS = buildStats(reviewData, files, decisions);
+  window.PR_STATS = buildStats(reviewData, files, decisions, capabilities);
   window.WWH = buildWWH(reviewData, capabilities, files, capsData);
   window.CAPABILITIES = capabilities;
   window.DECISIONS = decisions;
@@ -664,10 +702,10 @@ function renderCapability(capId) {
         ${decidedTag}
       </div>
       <div class="concern-prose">${reasoning}</div>
-      <details class="expander">
+      ${d.hunk ? `<details class="expander">
         <summary>Show the diff</summary>
         ${renderHunk(d.hunk)}
-      </details>
+      </details>` : ''}
       ${d.fix ? `<details class="expander">
         <summary>Recommended fix</summary>
         <div class="fix-hint"><strong>Fix sketch</strong>${d.fix}</div>

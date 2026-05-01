@@ -264,9 +264,9 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         except Exception as exc:
             log.warning("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
     if not pr_body:
-        # Use the stored body (if any) or the AI-generated review summary as
-        # supplemental context when the PR description can't be fetched from
-        # the platform.
+        # The DB does not store the original PR description, so fall back to
+        # the AI-generated review summary which captures the same intent and
+        # gives the LLM useful context for the briefing.
         pr_body = row.get("body") or row.get("summary") or ""
 
     findings_by_path: dict[str, list[dict]] = {}
