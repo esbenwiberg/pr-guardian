@@ -296,10 +296,10 @@ def _parse_and_validate(
     capabilities validation is the gating concern, briefing is best-effort.
 
     Capability rules:
-    - Soft: invalid layers dropped; unknown file paths dropped; over-cap
-      capabilities truncated.
-    - Hard: response must be JSON with a `capabilities` array; every input
-      file must end up assigned to exactly one capability."""
+    - Soft: invalid layers dropped; unknown file paths dropped.
+    - Hard: response must be JSON with a non-empty `capabilities` array.
+    - Any files the LLM omits are appended to the last capability so no
+      file is ever lost (avoids spurious fallback_error on large PRs)."""
     try:
         data = json.loads(_strip_fences(raw))
     except json.JSONDecodeError as exc:
@@ -313,7 +313,7 @@ def _parse_and_validate(
     out: list[Capability] = []
     seen_paths: set[str] = set()
 
-    for entry in raw_caps[:soft_cap]:
+    for entry in raw_caps:
         if not isinstance(entry, dict):
             continue
         name = str(entry.get("name", "")).strip()
@@ -338,7 +338,13 @@ def _parse_and_validate(
 
     unassigned = valid_paths - seen_paths
     if unassigned:
-        raise _ParseError(f"{len(unassigned)} input files not assigned: {sorted(unassigned)[:5]}")
+        last = out[-1]
+        out[-1] = Capability(
+            name=last.name,
+            intent=last.intent,
+            files=last.files + tuple(sorted(unassigned)),
+            layers=last.layers,
+        )
 
     briefing = _coerce_briefing(data.get("briefing"))
     return out, briefing

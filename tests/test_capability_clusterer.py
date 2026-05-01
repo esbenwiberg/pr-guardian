@@ -206,12 +206,12 @@ async def test_unknown_file_paths_in_response_are_dropped():
 
 
 @pytest.mark.asyncio
-async def test_capabilities_exceeding_soft_cap_are_truncated():
+async def test_capabilities_exceeding_soft_cap_all_accepted():
+    """LLM returning more caps than soft_cap is fine — all caps are kept and
+    all files assigned, so source is 'llm' not 'fallback_error'."""
     files = [_f(f"f{i}.py") for i in range(10)]
     findings = [_finding("f0.py"), _finding("f1.py")]
 
-    # 8 capabilities returned; soft cap defaults to 6, so 2 get truncated and
-    # those files end up unassigned, triggering parse-error fallback.
     raw = json.dumps({"capabilities": [
         {"name": f"Cap{i}", "intent": "i", "files": [f"f{i}.py"], "layers": ["Services"]}
         for i in range(8)
@@ -220,14 +220,15 @@ async def test_capabilities_exceeding_soft_cap_are_truncated():
 
     result = await cluster_capabilities(files=files, findings=findings,
                                         pr_title="x", pr_body="", llm_client=llm)
-    # Truncation produced unassigned files → parse error → fallback to single cap.
-    assert result.source == "fallback_error"
-    assert "not assigned" in result.error
+    assert result.source == "llm"
+    all_assigned = {f for c in result.capabilities for f in c.files}
+    assert all_assigned == {f"f{i}.py" for i in range(10)}
 
 
 @pytest.mark.asyncio
-async def test_unassigned_files_trigger_fallback():
-    """If the LLM omits some files, fall back rather than show a partial view."""
+async def test_unassigned_files_swept_into_last_capability():
+    """If the LLM omits some files they are appended to the last capability
+    rather than causing a fallback_error."""
     files = [_f("a.py"), _f("b.py"), _f("c.py")]
     findings = [_finding("a.py"), _finding("b.py")]
 
@@ -239,7 +240,8 @@ async def test_unassigned_files_trigger_fallback():
 
     result = await cluster_capabilities(files=files, findings=findings,
                                         pr_title="x", pr_body="", llm_client=llm)
-    assert result.source == "fallback_error"
+    assert result.source == "llm"
+    assert "c.py" in result.capabilities[-1].files
 
 
 @pytest.mark.asyncio
