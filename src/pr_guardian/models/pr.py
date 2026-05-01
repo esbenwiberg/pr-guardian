@@ -22,6 +22,11 @@ class PlatformPR:
     author: str
     title: str
     head_commit_sha: str
+    # PR description fetched from the platform during hydration.  None means
+    # the body has not been fetched yet; "" means the PR genuinely has no
+    # description.  fetch_pr_body_and_commits checks for None to avoid a
+    # redundant GET when _hydrate_pr already retrieved the body.
+    body: str | None = None
     # Platform-specific metadata for API callbacks
     org: str = ""            # ADO org or GitHub owner
     project: str = ""        # ADO project (empty for GitHub)

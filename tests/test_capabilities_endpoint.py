@@ -59,16 +59,27 @@ def _fake_diff_files():
     ]
 
 
-def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=None):
+def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=None,
+                    body_raises=None, hydrate_raises=None):
     from pr_guardian.api import dashboard as dash
 
     async def _get(_id): return review
     monkeypatch.setattr(dash.storage, "get_review", _get)
 
-    async def _hydrate(_a, _s, _p): return SimpleNamespace(pr_id="42", repo="org/repo")
+    if hydrate_raises:
+        async def _hydrate(_a, _s, _p): raise hydrate_raises
+    else:
+        async def _hydrate(_a, _s, _p): return SimpleNamespace(pr_id="42", repo="org/repo")
     monkeypatch.setattr("pr_guardian.api.review._hydrate_pr", _hydrate)
     monkeypatch.setattr("pr_guardian.api.review._parse_pr_url",
                         lambda url: (SimpleNamespace(), "github"))
+
+    # Build a fake adapter that supports all methods called by the capabilities endpoint.
+    pr_body = review.get("body", "")
+    if body_raises:
+        async def _pr_body_and_commits(_pr): raise body_raises
+    else:
+        async def _pr_body_and_commits(_pr): return pr_body, []
 
     fake_adapter = SimpleNamespace()
     if diff_raises:
@@ -77,6 +88,7 @@ def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=Non
     else:
         async def _diff(_pr): return SimpleNamespace(files=_fake_diff_files())
         fake_adapter.fetch_diff = _diff
+    fake_adapter.fetch_pr_body_and_commits = _pr_body_and_commits
     monkeypatch.setattr(dash, "create_adapter", lambda _p: fake_adapter)
 
     monkeypatch.setattr(dash, "create_llm_client", lambda _config: object())
@@ -143,6 +155,9 @@ def test_passes_files_findings_pr_metadata_to_clusterer(client, fake_review, mon
     assert roles_by_path["svc.py"] == "PRODUCTION"
     assert call_kwargs["pr_title"] == "Add Graph integration"
     assert call_kwargs["pr_body"] == "Wires up the Graph client."
+    # commit_messages and file_patches are always passed (even when empty).
+    assert isinstance(call_kwargs["commit_messages"], list)
+    assert isinstance(call_kwargs["file_patches"], dict)
     # Both findings on svc.py make it through to the clusterer.
     finding_files = [f.file for f in call_kwargs["findings"]]
     assert finding_files.count("svc.py") == 2
@@ -209,10 +224,51 @@ def test_review_without_pr_url_returns_422(client, fake_review, monkeypatch):
     assert resp.status_code == 422
 
 
-def test_diff_fetch_failure_returns_502(client, fake_review, monkeypatch):
-    _patch_endpoint(monkeypatch, fake_review, diff_raises=RuntimeError("github 500"))
+def test_diff_fetch_failure_falls_back_to_stored_findings(client, fake_review, monkeypatch):
+    """When platform diff fetch fails, the endpoint falls back to stored findings
+    and still calls the clusterer (no longer returns 502)."""
+    fallback = ClusterResult(
+        capabilities=[Capability("Auth changes", "Stored-findings-only view.",
+                                 ("svc.py",), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=100, output_tokens=30,
+        briefing={"what": "w", "why": "y", "how": "h"},
+    )
+    cluster_mock = _patch_endpoint(monkeypatch, fake_review,
+                                   cluster_result=fallback,
+                                   diff_raises=RuntimeError("github 500"))
     resp = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities")
-    assert resp.status_code == 502
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "llm"
+    # Clusterer was called with only the files that appear in stored findings
+    cluster_mock.assert_awaited_once()
+    call_kwargs = cluster_mock.await_args.kwargs
+    # Only svc.py has findings in fake_review; model.py and tests/x.py are diff-only
+    assert {f.path for f in call_kwargs["files"]} == {"svc.py"}
+
+
+def test_hydrate_pr_failure_falls_back_to_stored_data(client, fake_review, monkeypatch):
+    """When _hydrate_pr itself raises, both diff and pr_body/commits are unavailable.
+    The endpoint must still succeed, using only stored DB values (body, findings)."""
+    fallback = ClusterResult(
+        capabilities=[Capability("Auth changes", "Stored-findings-only view.",
+                                 ("svc.py",), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=50, output_tokens=20,
+        briefing={"what": "w", "why": "y", "how": "h"},
+    )
+    cluster_mock = _patch_endpoint(monkeypatch, fake_review,
+                                   cluster_result=fallback,
+                                   hydrate_raises=RuntimeError("creds expired"))
+    resp = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "llm"
+    # Clusterer must be called with only files that appear in stored findings (no diff available).
+    cluster_mock.assert_awaited_once()
+    call_kwargs = cluster_mock.await_args.kwargs
+    assert {f.path for f in call_kwargs["files"]} == {"svc.py"}
+    # pr_body must fall back to the DB-stored body since platform fetch was skipped.
+    assert call_kwargs["pr_body"] == fake_review["body"]
 
 
 def test_clusterer_fallback_response_propagates_to_client(client, fake_review, monkeypatch):
@@ -265,6 +321,24 @@ def test_briefing_propagates_from_clusterer_to_response(client, fake_review, mon
     _patch_endpoint(monkeypatch, fake_review, cluster_result=cluster)
     body = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities").json()
     assert body["briefing"] == {"what": "w", "why": "y", "how": "h"}
+
+
+def test_pr_body_platform_failure_falls_back_to_db_stored_body(client, fake_review, monkeypatch):
+    """When fetch_pr_body_and_commits raises, pr_body falls back to the DB-stored value."""
+    cluster = ClusterResult(
+        capabilities=[Capability("X", "y", ("svc.py", "model.py", "tests/x.py"), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=1, output_tokens=1,
+    )
+    cluster_mock = _patch_endpoint(
+        monkeypatch, fake_review,
+        cluster_result=cluster,
+        body_raises=RuntimeError("platform unavailable"),
+    )
+    resp = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities")
+    assert resp.status_code == 200
+    # The DB-stored body ("Wires up the Graph client.") must be passed to clusterer.
+    call_kwargs = cluster_mock.await_args.kwargs
+    assert call_kwargs["pr_body"] == fake_review["body"]
 
 
 def test_briefing_is_none_when_clusterer_skips_it(client, fake_review, monkeypatch):

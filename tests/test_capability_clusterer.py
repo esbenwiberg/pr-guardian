@@ -12,8 +12,10 @@ import pytest
 from pr_guardian.llm.protocol import LLMResponse
 from pr_guardian.wizard.capability_clusterer import (
     LAYER_VOCAB,
-    SMALL_PR_THRESHOLD,
     SOFT_CAP_CAPABILITIES,
+    _MAX_PATCH_CHARS,
+    _MAX_PATCH_PER_FILE,
+    _build_user_prompt,
     Capability,
     FileSummary,
     FindingSummary,
@@ -59,34 +61,41 @@ async def test_no_files_returns_empty_no_files_fallback():
 
 
 @pytest.mark.asyncio
-async def test_small_pr_returns_single_capability_without_calling_llm():
+async def test_small_pr_still_calls_llm():
+    """LLM is called for all PRs with files, regardless of finding count.
+    Even a PR with only 1 high-severity finding gets a proper AI briefing."""
     files = [_f("a.py"), _f("b.py")]
-    findings = [_finding("a.py", "high")]  # 1 surfaced — below threshold (2)
-    assert SMALL_PR_THRESHOLD == 2  # contract pin
+    findings = [_finding("a.py", "high")]  # only 1 surfaced — LLM still called
 
-    llm = _mock_llm("")
+    raw = json.dumps({"capabilities": [
+        {"name": "Core changes", "intent": "Single capability.", "files": ["a.py", "b.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
     result = await cluster_capabilities(
         files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
     )
 
-    assert result.source == "fallback_small_pr"
+    assert result.source == "llm"
     assert len(result.capabilities) == 1
-    assert result.capabilities[0].files == ("a.py", "b.py")
-    llm.complete.assert_not_awaited()
+    llm.complete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_low_only_findings_count_as_below_threshold():
-    """Only medium/high/critical count toward the 'should we cluster?' decision —
-    a PR full of low-severity nits looks small for clustering purposes."""
+async def test_low_only_findings_still_calls_llm():
+    """All-low-severity findings no longer suppress the LLM call — every PR
+    with touched files gets an AI-generated briefing and capability grouping."""
     files = [_f("a.py"), _f("b.py")]
-    findings = [_finding("a.py", "low"), _finding("b.py", "low"), _finding("a.py", "low")]
-    llm = _mock_llm("")
+    findings = [_finding("a.py", "low"), _finding("b.py", "low")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "Minor tweaks", "intent": "Low-severity fixes.", "files": ["a.py", "b.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
     result = await cluster_capabilities(
         files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
     )
-    assert result.source == "fallback_small_pr"
-    llm.complete.assert_not_awaited()
+    assert result.source == "llm"
+    llm.complete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -422,21 +431,13 @@ async def test_briefing_strings_are_trimmed():
 
 
 @pytest.mark.asyncio
-async def test_fallback_paths_have_no_briefing():
-    """Every fallback path returns briefing=None — there's no LLM output to
-    extract one from."""
+async def test_fallback_no_files_has_no_briefing():
+    """The only remaining fallback path (no files) returns briefing=None."""
     llm = _mock_llm("")
     result = await cluster_capabilities(
         files=[], findings=[], pr_title="x", pr_body="", llm_client=llm,
     )
-    assert result.briefing is None
-
-    files = [_f("a.py")]
-    result = await cluster_capabilities(
-        files=files, findings=[_finding("a.py", "low")],
-        pr_title="x", pr_body="", llm_client=llm,
-    )
-    assert result.source == "fallback_small_pr"
+    assert result.source == "fallback_no_files"
     assert result.briefing is None
 
 
@@ -456,3 +457,159 @@ async def test_prompt_asks_for_briefing_with_what_why_how():
     system = llm.complete.await_args.kwargs["system"]
     assert "briefing" in system.lower()
     assert "what" in system.lower() and "why" in system.lower() and "how" in system.lower()
+
+
+# ---------------------------------------------------------------------------
+# _build_user_prompt — patch-budget and per-file truncation logic
+# ---------------------------------------------------------------------------
+
+
+def test_file_patches_appear_in_prompt():
+    files = [_f("api.py"), _f("models.py")]
+    prompt = _build_user_prompt(
+        files, [], "My PR", "",
+        file_patches={"api.py": "+def foo():\n+    pass", "models.py": "+class Bar: ..."},
+    )
+    assert "FILE DIFFS (excerpts):" in prompt
+    assert "--- api.py ---" in prompt
+    assert "+def foo():" in prompt
+
+
+def test_patch_truncated_per_file_and_marker_shown():
+    # Unique sentinel after the cut-off — must not appear if truncation works.
+    overrun_sentinel = "OVERRUN_SENTINEL_UNIQUE_XYZ"
+    long_patch = "+" + "a" * _MAX_PATCH_PER_FILE + overrun_sentinel
+    files = [_f("big.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={"big.py": long_patch})
+    assert "... (truncated)" in prompt
+    assert overrun_sentinel not in prompt
+
+
+def test_no_truncation_marker_when_patch_fits():
+    short_patch = "+" + "x" * (_MAX_PATCH_PER_FILE - 10)
+    files = [_f("small.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={"small.py": short_patch})
+    assert "... (truncated)" not in prompt
+
+
+def test_truncation_marker_shown_when_budget_is_binding():
+    """Truncation marker appears when patch_budget (not per-file cap) is the binding constraint.
+
+    Six filler files each consume _MAX_PATCH_PER_FILE-1 chars, leaving a remaining
+    budget that is less than the last file's patch size but still above zero.  The
+    last file's patch is smaller than the per-file cap, so the only constraint that
+    can truncate it is the overall budget.
+    """
+    filler_size = _MAX_PATCH_PER_FILE - 1  # 599 — stays under per-file cap each time
+    filler_count = 6
+    consumed = filler_size * filler_count          # 3594
+    remaining = _MAX_PATCH_CHARS - consumed        # 406
+    last_size = remaining + 50                     # 456 — exceeds remaining, fits per-file cap
+    assert last_size <= _MAX_PATCH_PER_FILE, "last patch must fit per-file cap for this test to be meaningful"
+
+    filler_patch = "+" + "a" * (filler_size - 1)  # filler_size chars total
+    last_patch = "+" + "b" * (last_size - 1)       # last_size chars total
+
+    files = [_f(f"filler{i}.py") for i in range(filler_count)] + [_f("last.py")]
+    file_patches = {f"filler{i}.py": filler_patch for i in range(filler_count)}
+    file_patches["last.py"] = last_patch
+
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
+    # last.py must appear (some budget remains) and must be truncated by the budget cap.
+    assert "--- last.py ---" in prompt
+    assert "... (truncated)" in prompt
+    # Filler files must NOT be truncated (they each fit within both caps).
+    for i in range(filler_count):
+        header = f"--- filler{i}.py ---"
+        assert header in prompt
+    # No filler file should produce a truncation marker — collect lines after each
+    # filler header and verify "... (truncated)" does not immediately follow one.
+    lines = prompt.split("\n")
+    for idx, line in enumerate(lines):
+        if any(line.strip() == f"--- filler{i}.py ---" for i in range(filler_count)):
+            # Allow the patch line and check that truncation marker is not present
+            # within the next two lines (patch + possible marker).
+            nearby = lines[idx + 1 : idx + 3]
+            assert "... (truncated)" not in nearby, \
+                f"filler file unexpectedly truncated near line {idx}"
+
+
+def test_patch_budget_stops_including_files_after_limit():
+    """Once _MAX_PATCH_CHARS is exhausted the remaining files produce no diff section."""
+    # Each file fills exactly one per-file budget slot; create enough to exceed total budget.
+    files = [_f(f"file{i}.py") for i in range(20)]
+    full_patch = "+" + "a" * _MAX_PATCH_PER_FILE
+    file_patches = {f"file{i}.py": full_patch for i in range(20)}
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
+    file_headers = [line for line in prompt.split("\n") if line.startswith("--- file")]
+    max_files = _MAX_PATCH_CHARS // _MAX_PATCH_PER_FILE
+    assert len(file_headers) <= max_files + 1  # +1 for rounding edge
+
+
+def test_file_order_in_diff_follows_files_list_not_dict_order():
+    """Patches appear in the order of the files list, regardless of dict insertion order."""
+    files = [_f("z.py"), _f("a.py"), _f("m.py")]
+    file_patches = {"a.py": "+a", "m.py": "+m", "z.py": "+z"}
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
+    z_pos = prompt.index("--- z.py ---")
+    a_pos = prompt.index("--- a.py ---")
+    m_pos = prompt.index("--- m.py ---")
+    assert z_pos < a_pos < m_pos
+
+
+def test_degraded_prompt_includes_pr_body_when_commits_and_diffs_absent():
+    """Most-degraded fallback: no commit messages, no file patches, only stored pr_body.
+
+    The LLM prompt must still contain the PR description so the briefing has
+    enough context. An empty pr_body would leave the model with nothing but the
+    file list, silently producing a useless briefing.
+    """
+    files = [_f("svc.py")]
+    stored_body = "Adds token refresh so sessions survive past the 1-hour expiry."
+    prompt = _build_user_prompt(
+        files, [], "Refactor auth", stored_body,
+        commit_messages=[], file_patches={},
+    )
+    assert "PR DESCRIPTION:" in prompt
+    assert stored_body in prompt
+    # Commit messages and diffs sections must be absent — nothing to show.
+    assert "COMMIT MESSAGES" not in prompt
+    assert "FILE DIFFS" not in prompt
+    # File listing must still be present.
+    assert "svc.py" in prompt
+
+
+def test_files_not_in_patches_produce_no_diff_header():
+    files = [_f("a.py"), _f("b.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={"a.py": "+x"})
+    assert "--- a.py ---" in prompt
+    assert "--- b.py ---" not in prompt
+
+
+def test_empty_patches_dict_produces_no_diff_section():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={})
+    assert "FILE DIFFS" not in prompt
+
+
+def test_none_patches_produces_no_diff_section():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=None)
+    assert "FILE DIFFS" not in prompt
+
+
+def test_commit_messages_appear_in_prompt():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(
+        files, [], "My PR", "",
+        commit_messages=["feat: first commit", "fix: second commit"],
+    )
+    assert "COMMIT MESSAGES (2 of 2):" in prompt
+    assert "- feat: first commit" in prompt
+    assert "- fix: second commit" in prompt
+
+
+def test_no_commit_messages_no_section():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(files, [], "title", "", commit_messages=[])
+    assert "COMMIT MESSAGES" not in prompt

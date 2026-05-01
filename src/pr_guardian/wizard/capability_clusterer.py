@@ -6,9 +6,13 @@ inside a locked scaffold:
 - Closed layer vocabulary (Models / Services / Endpoints / Validation /
   Infra / Tests / Config / Docs).
 - Soft cap on capability count (default 6).
-- Fallback to a single-capability "All changes" when the surfaced-findings
-  count is too low for clustering to add value, when the LLM call fails,
-  or when the LLM returns a malformed response.
+- Every PR that has touched files gets an LLM call: the AI clusters
+  files into logical areas and writes a what/why/how briefing using the
+  PR description, commit messages, and file diffs.  Token cost is
+  proportional to diff size (capped at _MAX_PATCH_CHARS total).
+- Fallback to a single-capability "All changes" only when the LLM call
+  fails or returns a malformed response.  The fallback_no_files path
+  (no touched files at all) never calls the LLM.
 
 This module provides an `async cluster_capabilities(...)` entry point.
 3b wires it into the wizard's data path; 3a only ships the module + tests.
@@ -43,7 +47,11 @@ LAYER_VOCAB: tuple[str, ...] = (
 LAYER_VOCAB_SET = frozenset(LAYER_VOCAB)
 
 SOFT_CAP_CAPABILITIES = 6
-SMALL_PR_THRESHOLD = 2  # surfaced findings below this → single-capability fallback
+
+# Maximum characters of patch content included in the LLM prompt (across all files).
+_MAX_PATCH_CHARS = 4000
+# Maximum patch chars per individual file.
+_MAX_PATCH_PER_FILE = 600
 
 
 # ---------------------------------------------------------------------------
@@ -103,23 +111,25 @@ async def cluster_capabilities(
     llm_client: LLMClient,
     model: str | None = None,
     soft_cap: int = SOFT_CAP_CAPABILITIES,
+    commit_messages: list[str] | None = None,
+    file_patches: dict[str, str] | None = None,
 ) -> ClusterResult:
-    """Cluster the given files into capabilities. Falls back to a single
-    capability when the PR is too small to benefit from clustering, when no
-    files were touched, or when the LLM call fails / returns garbage."""
+    """Cluster the given files into capabilities using the LLM.
+
+    Falls back to a single capability only when no files were touched or when
+    the LLM call fails / returns a malformed response. The briefing is always
+    AI-generated when files are present, using PR description, commit messages,
+    and file diffs as context.
+    """
     if not files:
         return ClusterResult(capabilities=[], source="fallback_no_files")
 
-    surfaced = sum(1 for f in findings if f.severity.lower() in ("high", "critical", "medium"))
-    if surfaced < SMALL_PR_THRESHOLD:
-        return ClusterResult(
-            capabilities=[_single_capability(files, name="All changes",
-                                             intent="Whole-PR view; not enough surfaced findings to warrant clustering.")],
-            source="fallback_small_pr",
-        )
-
     system = _build_system_prompt(soft_cap)
-    user = _build_user_prompt(files, findings, pr_title, pr_body)
+    user = _build_user_prompt(
+        files, findings, pr_title, pr_body,
+        commit_messages=commit_messages or [],
+        file_patches=file_patches or {},
+    )
 
     try:
         response = await llm_client.complete(
@@ -210,12 +220,22 @@ def _build_user_prompt(
     findings: list[FindingSummary],
     pr_title: str,
     pr_body: str,
+    commit_messages: list[str] | None = None,
+    file_patches: dict[str, str] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("PR TITLE: " + (pr_title.strip() or "(no title)"))
     if pr_body.strip():
         lines.append("\nPR DESCRIPTION:")
         lines.append(pr_body.strip()[:2000])
+
+    if commit_messages:
+        shown = commit_messages[:30]
+        lines.append(f"\nCOMMIT MESSAGES ({len(shown)} of {len(commit_messages)}):")
+        for msg in shown:
+            lines.append(f"- {msg.strip()[:120]}")
+        if len(commit_messages) > 30:
+            lines.append(f"... (truncated, {len(commit_messages) - 30} more not shown)")
 
     lines.append(f"\nFILES ({len(files)}):")
     for f in files:
@@ -232,6 +252,25 @@ def _build_user_prompt(
         for path, items in by_file.items():
             cats = ", ".join(f"{i.severity}:{i.category}" for i in items)
             lines.append(f"- {path} → {cats}")
+
+    if file_patches:
+        patch_budget = _MAX_PATCH_CHARS
+        patch_lines: list[str] = []
+        for f in files:
+            if patch_budget <= 0:
+                break
+            patch = (file_patches.get(f.path) or "").strip()
+            if not patch:
+                continue
+            excerpt = patch[:min(_MAX_PATCH_PER_FILE, patch_budget)]
+            patch_budget -= len(excerpt)
+            patch_lines.append(f"\n--- {f.path} ---")
+            patch_lines.append(excerpt)
+            if len(excerpt) < len(patch):
+                patch_lines.append("... (truncated)")
+        if patch_lines:
+            lines.append("\nFILE DIFFS (excerpts):")
+            lines.extend(patch_lines)
 
     return "\n".join(lines)
 
