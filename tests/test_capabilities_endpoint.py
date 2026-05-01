@@ -59,7 +59,7 @@ def _fake_diff_files():
     ]
 
 
-def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=None):
+def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=None, body_raises=None):
     from pr_guardian.api import dashboard as dash
 
     async def _get(_id): return review
@@ -72,8 +72,10 @@ def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=Non
 
     # Build a fake adapter that supports all methods called by the capabilities endpoint.
     pr_body = review.get("body", "")
-    async def _pr_body_and_commits(_pr):
-        return pr_body, []
+    if body_raises:
+        async def _pr_body_and_commits(_pr): raise body_raises
+    else:
+        async def _pr_body_and_commits(_pr): return pr_body, []
 
     fake_adapter = SimpleNamespace()
     if diff_raises:
@@ -274,6 +276,24 @@ def test_briefing_propagates_from_clusterer_to_response(client, fake_review, mon
     _patch_endpoint(monkeypatch, fake_review, cluster_result=cluster)
     body = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities").json()
     assert body["briefing"] == {"what": "w", "why": "y", "how": "h"}
+
+
+def test_pr_body_platform_failure_falls_back_to_db_stored_body(client, fake_review, monkeypatch):
+    """When fetch_pr_body_and_commits raises, pr_body falls back to the DB-stored value."""
+    cluster = ClusterResult(
+        capabilities=[Capability("X", "y", ("svc.py", "model.py", "tests/x.py"), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=1, output_tokens=1,
+    )
+    cluster_mock = _patch_endpoint(
+        monkeypatch, fake_review,
+        cluster_result=cluster,
+        body_raises=RuntimeError("platform unavailable"),
+    )
+    resp = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities")
+    assert resp.status_code == 200
+    # The DB-stored body ("Wires up the Graph client.") must be passed to clusterer.
+    call_kwargs = cluster_mock.await_args.kwargs
+    assert call_kwargs["pr_body"] == fake_review["body"]
 
 
 def test_briefing_is_none_when_clusterer_skips_it(client, fake_review, monkeypatch):

@@ -240,12 +240,14 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         raise HTTPException(502, f"Failed to fetch diff from platform: {exc}")
 
     # Fetch PR body and commit messages for the LLM briefing.  Best-effort —
-    # if the platform call fails we still proceed with empty strings.
+    # fall back to the DB-stored body (captured at review creation time) so the
+    # briefing still has context even when the platform call fails (auth expiry,
+    # deleted PR, rate-limit, etc.).
     try:
         pr_body, commit_messages = await adapter.fetch_pr_body_and_commits(pr)
     except Exception as exc:
         log.debug("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
-        pr_body, commit_messages = "", []
+        pr_body, commit_messages = row.get("body") or "", []
 
     findings_by_path: dict[str, list[dict]] = {}
     for agent in row.get("agent_results") or []:

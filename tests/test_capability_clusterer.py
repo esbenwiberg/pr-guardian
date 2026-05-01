@@ -13,6 +13,9 @@ from pr_guardian.llm.protocol import LLMResponse
 from pr_guardian.wizard.capability_clusterer import (
     LAYER_VOCAB,
     SOFT_CAP_CAPABILITIES,
+    _MAX_PATCH_CHARS,
+    _MAX_PATCH_PER_FILE,
+    _build_user_prompt,
     Capability,
     FileSummary,
     FindingSummary,
@@ -454,3 +457,95 @@ async def test_prompt_asks_for_briefing_with_what_why_how():
     system = llm.complete.await_args.kwargs["system"]
     assert "briefing" in system.lower()
     assert "what" in system.lower() and "why" in system.lower() and "how" in system.lower()
+
+
+# ---------------------------------------------------------------------------
+# _build_user_prompt — patch-budget and per-file truncation logic
+# ---------------------------------------------------------------------------
+
+
+def test_file_patches_appear_in_prompt():
+    files = [_f("api.py"), _f("models.py")]
+    prompt = _build_user_prompt(
+        files, [], "My PR", "",
+        file_patches={"api.py": "+def foo():\n+    pass", "models.py": "+class Bar: ..."},
+    )
+    assert "FILE DIFFS (excerpts):" in prompt
+    assert "--- api.py ---" in prompt
+    assert "+def foo():" in prompt
+
+
+def test_patch_truncated_per_file_and_marker_shown():
+    # Unique sentinel after the cut-off — must not appear if truncation works.
+    overrun_sentinel = "OVERRUN_SENTINEL_UNIQUE_XYZ"
+    long_patch = "+" + "a" * _MAX_PATCH_PER_FILE + overrun_sentinel
+    files = [_f("big.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={"big.py": long_patch})
+    assert "... (truncated)" in prompt
+    assert overrun_sentinel not in prompt
+
+
+def test_no_truncation_marker_when_patch_fits():
+    short_patch = "+" + "x" * (_MAX_PATCH_PER_FILE - 10)
+    files = [_f("small.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={"small.py": short_patch})
+    assert "... (truncated)" not in prompt
+
+
+def test_patch_budget_stops_including_files_after_limit():
+    """Once _MAX_PATCH_CHARS is exhausted the remaining files produce no diff section."""
+    # Each file fills exactly one per-file budget slot; create enough to exceed total budget.
+    files = [_f(f"file{i}.py") for i in range(20)]
+    full_patch = "+" + "a" * _MAX_PATCH_PER_FILE
+    file_patches = {f"file{i}.py": full_patch for i in range(20)}
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
+    file_headers = [line for line in prompt.split("\n") if line.startswith("--- file")]
+    max_files = _MAX_PATCH_CHARS // _MAX_PATCH_PER_FILE
+    assert len(file_headers) <= max_files + 1  # +1 for rounding edge
+
+
+def test_file_order_in_diff_follows_files_list_not_dict_order():
+    """Patches appear in the order of the files list, regardless of dict insertion order."""
+    files = [_f("z.py"), _f("a.py"), _f("m.py")]
+    file_patches = {"a.py": "+a", "m.py": "+m", "z.py": "+z"}
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
+    z_pos = prompt.index("--- z.py ---")
+    a_pos = prompt.index("--- a.py ---")
+    m_pos = prompt.index("--- m.py ---")
+    assert z_pos < a_pos < m_pos
+
+
+def test_files_not_in_patches_produce_no_diff_header():
+    files = [_f("a.py"), _f("b.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={"a.py": "+x"})
+    assert "--- a.py ---" in prompt
+    assert "--- b.py ---" not in prompt
+
+
+def test_empty_patches_dict_produces_no_diff_section():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches={})
+    assert "FILE DIFFS" not in prompt
+
+
+def test_none_patches_produces_no_diff_section():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=None)
+    assert "FILE DIFFS" not in prompt
+
+
+def test_commit_messages_appear_in_prompt():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(
+        files, [], "My PR", "",
+        commit_messages=["feat: first commit", "fix: second commit"],
+    )
+    assert "COMMIT MESSAGES (2):" in prompt
+    assert "- feat: first commit" in prompt
+    assert "- fix: second commit" in prompt
+
+
+def test_no_commit_messages_no_section():
+    files = [_f("a.py")]
+    prompt = _build_user_prompt(files, [], "title", "", commit_messages=[])
+    assert "COMMIT MESSAGES" not in prompt
