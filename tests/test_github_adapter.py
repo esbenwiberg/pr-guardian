@@ -156,3 +156,27 @@ async def test_body_already_set_skips_pr_get():
     body, commits = await _adapter(_resp(commits_json)).fetch_pr_body_and_commits(pr_with_body)
     assert body == "already fetched description"
     assert commits == ["feat: cached"]
+
+
+@pytest.mark.asyncio
+async def test_empty_body_already_hydrated_skips_pr_get():
+    """body='' means _hydrate_pr ran and the PR genuinely has no description.
+    The adapter must NOT fire a second GET — the empty string is a valid fetched
+    value, not the 'not yet fetched' sentinel (which is None)."""
+    commits_json = [{"commit": {"message": "feat: no-desc commit"}}]
+    pr_empty_body = PlatformPR(
+        platform=Platform.GITHUB,
+        pr_id="42",
+        repo="owner/repo",
+        repo_url="https://github.com/owner/repo",
+        source_branch="feature",
+        target_branch="main",
+        author="alice",
+        title="My PR",
+        head_commit_sha="abc123",
+        body="",  # hydrated — PR has no description
+    )
+    # Only one mock response (commits); a PR GET would exhaust the iterator and fail.
+    body, commits = await _adapter(_resp(commits_json)).fetch_pr_body_and_commits(pr_empty_body)
+    assert body == ""
+    assert commits == ["feat: no-desc commit"]

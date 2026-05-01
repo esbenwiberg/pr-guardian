@@ -6,9 +6,13 @@ inside a locked scaffold:
 - Closed layer vocabulary (Models / Services / Endpoints / Validation /
   Infra / Tests / Config / Docs).
 - Soft cap on capability count (default 6).
-- Fallback to a single-capability "All changes" when the surfaced-findings
-  count is too low for clustering to add value, when the LLM call fails,
-  or when the LLM returns a malformed response.
+- Every PR that has touched files gets an LLM call: the AI clusters
+  files into logical areas and writes a what/why/how briefing using the
+  PR description, commit messages, and file diffs.  Token cost is
+  proportional to diff size (capped at _MAX_PATCH_CHARS total).
+- Fallback to a single-capability "All changes" only when the LLM call
+  fails or returns a malformed response.  The fallback_no_files path
+  (no touched files at all) never calls the LLM.
 
 This module provides an `async cluster_capabilities(...)` entry point.
 3b wires it into the wizard's data path; 3a only ships the module + tests.

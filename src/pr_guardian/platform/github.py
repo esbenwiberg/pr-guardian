@@ -279,9 +279,10 @@ class GitHubAdapter:
         avoiding a second GET to the same endpoint.
         """
         client = self._get_client()
-        pr_body = pr.body  # populated by _hydrate_pr; empty string means not yet fetched
+        # None → body not yet fetched; "" → fetched but PR has no description.
+        pr_body: str = pr.body if pr.body is not None else ""
         commit_messages: list[str] = []
-        if not pr_body:
+        if pr.body is None:
             try:
                 pr_resp = await client.get(f"/repos/{pr.repo}/pulls/{pr.pr_id}")
                 pr_resp.raise_for_status()
