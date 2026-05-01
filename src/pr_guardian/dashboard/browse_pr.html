@@ -18,14 +18,12 @@
 </header>
 
 <main class="max-w-2xl mx-auto px-6 py-16">
-  <div class="card">
+  <div class="card" id="url-card">
     <div class="card-body space-y-4">
       <div>
         <h1 class="text-lg font-bold text-slate-50">Open any PR in review mode</h1>
         <p class="text-sm text-slate-400 mt-1">
-          Paste a GitHub or Azure DevOps PR URL. You'll get the chapter-by-chapter
-          reading view — useful for large PRs. If the PR has been AI-reviewed,
-          findings are loaded automatically.
+          Paste a GitHub or Azure DevOps PR URL. If the PR has been AI-reviewed, choose Wizard or Chapters.
         </p>
       </div>
 
@@ -47,6 +45,30 @@
       <div id="browse-recent-wrap" style="display:none" class="pt-4 border-t border-slate-800">
         <div class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Recent</div>
         <div id="browse-recent" class="space-y-1"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mode picker — shown after resolving an existing review -->
+  <div id="mode-card" style="display:none" class="card mt-4">
+    <div class="card-body space-y-4">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="text-base font-bold text-slate-50">This PR has an AI review</h2>
+          <p class="text-sm text-slate-400 mt-1">How would you like to read it?</p>
+        </div>
+        <button onclick="resetForm()" class="text-xs text-slate-500 hover:text-slate-300 underline">← Change URL</button>
+      </div>
+
+      <div class="grid grid-cols-2 gap-3 pt-1">
+        <a id="mode-wizard" href="#" class="block p-4 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors group">
+          <div class="text-sm font-semibold text-indigo-300 mb-1">Wizard</div>
+          <div class="text-xs text-slate-400 leading-relaxed">Step-by-step briefing → capability-by-capability triage → final verdict. Good for deep reviews.</div>
+        </a>
+        <a id="mode-chapters" href="#" class="block p-4 rounded-lg border border-slate-600/60 bg-slate-800/60 hover:bg-slate-700/60 transition-colors group">
+          <div class="text-sm font-semibold text-slate-200 mb-1">Chapters</div>
+          <div class="text-xs text-slate-400 leading-relaxed">Chapter-by-chapter diff view with inline findings. Good for large PRs you want to read linearly.</div>
+        </a>
       </div>
     </div>
   </div>
@@ -72,12 +94,26 @@ function renderRecent() {
   ).join('');
 }
 
+function showModePicker(reviewId) {
+  document.getElementById('mode-card').style.display = '';
+  document.getElementById('mode-wizard').href = `/reviews/${reviewId}/wizard`;
+  document.getElementById('mode-chapters').href = `/reviews/${reviewId}/human-review`;
+}
+
+function resetForm() {
+  document.getElementById('mode-card').style.display = 'none';
+  const btn = document.getElementById('browse-submit');
+  btn.disabled = false;
+  btn.textContent = 'Open';
+}
+
 async function submitUrl() {
   const input = document.getElementById('pr-url');
   const errEl = document.getElementById('browse-error');
   const btn   = document.getElementById('browse-submit');
   const url   = input.value.trim();
   errEl.textContent = '';
+  document.getElementById('mode-card').style.display = 'none';
   if (!url) { errEl.textContent = 'Enter a PR URL.'; return; }
 
   btn.disabled = true; btn.textContent = 'Opening…';
@@ -94,7 +130,9 @@ async function submitUrl() {
     const data = await resp.json();
     pushRecent(url);
     if (data.mode === 'existing') {
-      location.href = `/reviews/${data.review_id}/human-review`;
+      showModePicker(data.review_id);
+      btn.textContent = 'Open';
+      btn.disabled = false;
     } else {
       location.href = `/review-mode?pr=${encodeURIComponent(url)}`;
     }

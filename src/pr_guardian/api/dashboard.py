@@ -239,6 +239,14 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     except Exception as exc:
         raise HTTPException(502, f"Failed to fetch diff from platform: {exc}")
 
+    # Fetch PR body and commit messages for the LLM briefing.  Best-effort —
+    # if the platform call fails we still proceed with empty strings.
+    try:
+        pr_body, commit_messages = await adapter.fetch_pr_body_and_commits(pr)
+    except Exception as exc:
+        log.debug("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
+        pr_body, commit_messages = "", []
+
     findings_by_path: dict[str, list[dict]] = {}
     for agent in row.get("agent_results") or []:
         for f in agent.get("findings") or []:
@@ -265,6 +273,13 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         for f in items
     ]
 
+    # Include truncated file patches so the LLM can read actual code changes.
+    file_patches = {
+        f.path: (f.patch or "")
+        for f in diff.files
+        if f.patch
+    }
+
     config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
     llm = create_llm_client(config)
 
@@ -272,8 +287,10 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         files=files,
         findings=findings,
         pr_title=row.get("title") or "",
-        pr_body=row.get("body") or "",
+        pr_body=pr_body,
         llm_client=llm,
+        commit_messages=commit_messages,
+        file_patches=file_patches,
     )
 
     response = {

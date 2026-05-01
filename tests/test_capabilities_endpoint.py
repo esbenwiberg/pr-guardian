@@ -70,6 +70,11 @@ def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=Non
     monkeypatch.setattr("pr_guardian.api.review._parse_pr_url",
                         lambda url: (SimpleNamespace(), "github"))
 
+    # Build a fake adapter that supports all methods called by the capabilities endpoint.
+    pr_body = review.get("body", "")
+    async def _pr_body_and_commits(_pr):
+        return pr_body, []
+
     fake_adapter = SimpleNamespace()
     if diff_raises:
         async def _fail(_pr): raise diff_raises
@@ -77,6 +82,7 @@ def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=Non
     else:
         async def _diff(_pr): return SimpleNamespace(files=_fake_diff_files())
         fake_adapter.fetch_diff = _diff
+    fake_adapter.fetch_pr_body_and_commits = _pr_body_and_commits
     monkeypatch.setattr(dash, "create_adapter", lambda _p: fake_adapter)
 
     monkeypatch.setattr(dash, "create_llm_client", lambda _config: object())
@@ -143,6 +149,9 @@ def test_passes_files_findings_pr_metadata_to_clusterer(client, fake_review, mon
     assert roles_by_path["svc.py"] == "PRODUCTION"
     assert call_kwargs["pr_title"] == "Add Graph integration"
     assert call_kwargs["pr_body"] == "Wires up the Graph client."
+    # commit_messages and file_patches are always passed (even when empty).
+    assert isinstance(call_kwargs["commit_messages"], list)
+    assert isinstance(call_kwargs["file_patches"], dict)
     # Both findings on svc.py make it through to the clusterer.
     finding_files = [f.file for f in call_kwargs["findings"]]
     assert finding_files.count("svc.py") == 2

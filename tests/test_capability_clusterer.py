@@ -12,7 +12,6 @@ import pytest
 from pr_guardian.llm.protocol import LLMResponse
 from pr_guardian.wizard.capability_clusterer import (
     LAYER_VOCAB,
-    SMALL_PR_THRESHOLD,
     SOFT_CAP_CAPABILITIES,
     Capability,
     FileSummary,
@@ -59,34 +58,41 @@ async def test_no_files_returns_empty_no_files_fallback():
 
 
 @pytest.mark.asyncio
-async def test_small_pr_returns_single_capability_without_calling_llm():
+async def test_small_pr_still_calls_llm():
+    """LLM is called for all PRs with files, regardless of finding count.
+    Even a PR with only 1 high-severity finding gets a proper AI briefing."""
     files = [_f("a.py"), _f("b.py")]
-    findings = [_finding("a.py", "high")]  # 1 surfaced — below threshold (2)
-    assert SMALL_PR_THRESHOLD == 2  # contract pin
+    findings = [_finding("a.py", "high")]  # only 1 surfaced — LLM still called
 
-    llm = _mock_llm("")
+    raw = json.dumps({"capabilities": [
+        {"name": "Core changes", "intent": "Single capability.", "files": ["a.py", "b.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
     result = await cluster_capabilities(
         files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
     )
 
-    assert result.source == "fallback_small_pr"
+    assert result.source == "llm"
     assert len(result.capabilities) == 1
-    assert result.capabilities[0].files == ("a.py", "b.py")
-    llm.complete.assert_not_awaited()
+    llm.complete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_low_only_findings_count_as_below_threshold():
-    """Only medium/high/critical count toward the 'should we cluster?' decision —
-    a PR full of low-severity nits looks small for clustering purposes."""
+async def test_low_only_findings_still_calls_llm():
+    """All-low-severity findings no longer suppress the LLM call — every PR
+    with touched files gets an AI-generated briefing and capability grouping."""
     files = [_f("a.py"), _f("b.py")]
-    findings = [_finding("a.py", "low"), _finding("b.py", "low"), _finding("a.py", "low")]
-    llm = _mock_llm("")
+    findings = [_finding("a.py", "low"), _finding("b.py", "low")]
+
+    raw = json.dumps({"capabilities": [
+        {"name": "Minor tweaks", "intent": "Low-severity fixes.", "files": ["a.py", "b.py"], "layers": ["Services"]},
+    ]})
+    llm = _mock_llm(raw)
     result = await cluster_capabilities(
         files=files, findings=findings, pr_title="x", pr_body="", llm_client=llm,
     )
-    assert result.source == "fallback_small_pr"
-    llm.complete.assert_not_awaited()
+    assert result.source == "llm"
+    llm.complete.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -422,21 +428,13 @@ async def test_briefing_strings_are_trimmed():
 
 
 @pytest.mark.asyncio
-async def test_fallback_paths_have_no_briefing():
-    """Every fallback path returns briefing=None — there's no LLM output to
-    extract one from."""
+async def test_fallback_no_files_has_no_briefing():
+    """The only remaining fallback path (no files) returns briefing=None."""
     llm = _mock_llm("")
     result = await cluster_capabilities(
         files=[], findings=[], pr_title="x", pr_body="", llm_client=llm,
     )
-    assert result.briefing is None
-
-    files = [_f("a.py")]
-    result = await cluster_capabilities(
-        files=files, findings=[_finding("a.py", "low")],
-        pr_title="x", pr_body="", llm_client=llm,
-    )
-    assert result.source == "fallback_small_pr"
+    assert result.source == "fallback_no_files"
     assert result.briefing is None
 
 

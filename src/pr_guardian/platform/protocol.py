@@ -100,3 +100,13 @@ class PlatformAdapter(Protocol):
     ) -> list[dict]:
         """Fetch recent commits that touched a specific file path."""
         ...
+
+    async def fetch_pr_body_and_commits(
+        self, pr: PlatformPR,
+    ) -> tuple[str, list[str]]:
+        """Fetch the PR description body and a list of commit messages.
+
+        Returns (pr_body, commit_messages). Both are best-effort — callers
+        should treat empty strings / lists as acceptable outcomes.
+        """
+        ...

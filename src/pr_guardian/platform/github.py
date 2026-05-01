@@ -270,6 +270,34 @@ class GitHubAdapter:
         resp.raise_for_status()
         return resp.json()
 
+    async def fetch_pr_body_and_commits(
+        self, pr: PlatformPR,
+    ) -> tuple[str, list[str]]:
+        """Fetch the PR description and commit messages for capability clustering."""
+        client = self._get_client()
+        pr_body = ""
+        commit_messages: list[str] = []
+        try:
+            pr_resp = await client.get(f"/repos/{pr.repo}/pulls/{pr.pr_id}")
+            pr_resp.raise_for_status()
+            pr_body = pr_resp.json().get("body") or ""
+        except Exception as exc:
+            log.debug("github_fetch_pr_body_failed", pr_id=pr.pr_id, error=str(exc))
+        try:
+            commits_resp = await client.get(
+                f"/repos/{pr.repo}/pulls/{pr.pr_id}/commits",
+                params={"per_page": 50},
+            )
+            commits_resp.raise_for_status()
+            commit_messages = [
+                c.get("commit", {}).get("message", "").split("\n")[0].strip()
+                for c in commits_resp.json()
+                if c.get("commit", {}).get("message")
+            ]
+        except Exception as exc:
+            log.debug("github_fetch_pr_commits_failed", pr_id=pr.pr_id, error=str(exc))
+        return pr_body, commit_messages
+
     async def post_inline_comments(
         self,
         pr: PlatformPR,
