@@ -492,6 +492,20 @@ def test_no_truncation_marker_when_patch_fits():
     assert "... (truncated)" not in prompt
 
 
+def test_truncation_marker_shown_when_budget_is_binding():
+    """Truncation marker appears when patch_budget (not per-file cap) is the binding constraint."""
+    # First file consumes almost the entire budget, leaving only 1 char for the second file.
+    first_patch = "+" + "a" * (_MAX_PATCH_CHARS - 1)
+    # Second file is small enough to pass the per-file cap but exceeds remaining budget.
+    second_patch = "+" + "b" * 10
+    files = [_f("first.py"), _f("second.py")]
+    file_patches = {"first.py": first_patch, "second.py": second_patch}
+    prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
+    # The second file's patch must be truncated and must show the marker.
+    assert "--- second.py ---" in prompt
+    assert "... (truncated)" in prompt
+
+
 def test_patch_budget_stops_including_files_after_limit():
     """Once _MAX_PATCH_CHARS is exhausted the remaining files produce no diff section."""
     # Each file fills exactly one per-file budget slot; create enough to exceed total budget.

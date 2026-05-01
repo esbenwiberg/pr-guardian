@@ -259,7 +259,7 @@ def _build_user_prompt(
             patch_budget -= len(excerpt)
             patch_lines.append(f"\n--- {f.path} ---")
             patch_lines.append(excerpt)
-            if len(patch) > _MAX_PATCH_PER_FILE:
+            if len(excerpt) < len(patch):
                 patch_lines.append("... (truncated)")
         if patch_lines:
             lines.append("\nFILE DIFFS (excerpts):")
