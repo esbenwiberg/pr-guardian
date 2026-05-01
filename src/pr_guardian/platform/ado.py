@@ -745,20 +745,25 @@ class ADOAdapter:
     async def fetch_pr_body_and_commits(
         self, pr: PlatformPR,
     ) -> tuple[str, list[str]]:
-        """Fetch the PR description and commit messages for capability clustering."""
+        """Fetch the PR description and commit messages for capability clustering.
+
+        The body is skipped when already present on `pr` (populated by _hydrate_pr),
+        avoiding a second GET to the same endpoint.
+        """
         client = self._get_client()
-        pr_body = ""
+        pr_body = pr.body  # populated by _hydrate_pr; empty string means not yet fetched
         commit_messages: list[str] = []
-        try:
-            pr_url = (
-                f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
-                f"/pullRequests/{pr.pr_id}"
-            )
-            pr_resp = await client.get(pr_url, params={"api-version": "7.1"})
-            pr_resp.raise_for_status()
-            pr_body = pr_resp.json().get("description") or ""
-        except Exception as exc:
-            log.debug("ado_fetch_pr_body_failed", pr_id=pr.pr_id, error=str(exc))
+        if not pr_body:
+            try:
+                pr_url = (
+                    f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+                    f"/pullRequests/{pr.pr_id}"
+                )
+                pr_resp = await client.get(pr_url, params={"api-version": "7.1"})
+                pr_resp.raise_for_status()
+                pr_body = pr_resp.json().get("description") or ""
+            except Exception as exc:
+                log.debug("ado_fetch_pr_body_failed", pr_id=pr.pr_id, error=str(exc))
         try:
             commits_url = (
                 f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"

@@ -294,6 +294,7 @@ async def _hydrate_pr(adapter, stub: PlatformPR, platform: str) -> PlatformPR:
             author=data.get("user", {}).get("login", ""),
             title=data.get("title", ""),
             head_commit_sha=data.get("head", {}).get("sha", ""),
+            body=data.get("body") or "",
             org=stub.org,
         )
 
@@ -338,6 +339,7 @@ async def _hydrate_pr(adapter, stub: PlatformPR, platform: str) -> PlatformPR:
             author=data.get("createdBy", {}).get("uniqueName", ""),
             title=data.get("title", ""),
             head_commit_sha=head_sha,
+            body=data.get("description") or "",
             org=stub.org,
             project=stub.project,
         )

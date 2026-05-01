@@ -557,6 +557,28 @@ def test_file_order_in_diff_follows_files_list_not_dict_order():
     assert z_pos < a_pos < m_pos
 
 
+def test_degraded_prompt_includes_pr_body_when_commits_and_diffs_absent():
+    """Most-degraded fallback: no commit messages, no file patches, only stored pr_body.
+
+    The LLM prompt must still contain the PR description so the briefing has
+    enough context. An empty pr_body would leave the model with nothing but the
+    file list, silently producing a useless briefing.
+    """
+    files = [_f("svc.py")]
+    stored_body = "Adds token refresh so sessions survive past the 1-hour expiry."
+    prompt = _build_user_prompt(
+        files, [], "Refactor auth", stored_body,
+        commit_messages=[], file_patches={},
+    )
+    assert "PR DESCRIPTION:" in prompt
+    assert stored_body in prompt
+    # Commit messages and diffs sections must be absent — nothing to show.
+    assert "COMMIT MESSAGES" not in prompt
+    assert "FILE DIFFS" not in prompt
+    # File listing must still be present.
+    assert "svc.py" in prompt
+
+
 def test_files_not_in_patches_produce_no_diff_header():
     files = [_f("a.py"), _f("b.py")]
     prompt = _build_user_prompt(files, [], "title", "", file_patches={"a.py": "+x"})
