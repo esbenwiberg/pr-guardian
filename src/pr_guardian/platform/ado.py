@@ -305,15 +305,29 @@ class ADOAdapter:
         )
         resp.raise_for_status()
 
+    async def _get_current_user_id(self) -> str:
+        """Return the authenticated user's GUID via connectionData.
+
+        ADO's /reviewers/{id} endpoint requires the real identity GUID — "me"
+        is not a valid path segment and returns 400."""
+        client = self._get_client()
+        resp = await client.get(
+            f"{self._org_url}/_apis/connectionData",
+            params={"api-version": "7.1"},
+        )
+        resp.raise_for_status()
+        return resp.json()["authenticatedUser"]["id"]
+
     async def approve_pr(self, pr: PlatformPR) -> None:
         client = self._get_client()
+        reviewer_id = await self._get_current_user_id()
         url = (
             f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
-            f"/pullRequests/{pr.pr_id}/reviewers/me"
+            f"/pullRequests/{pr.pr_id}/reviewers/{reviewer_id}"
         )
         resp = await client.put(
             url,
-            json={"vote": 10},
+            json={"vote": 10, "id": reviewer_id},
             params={"api-version": "7.1"},
         )
         resp.raise_for_status()
@@ -321,13 +335,14 @@ class ADOAdapter:
     async def request_changes(self, pr: PlatformPR, body: str) -> None:
         client = self._get_client()
         # Vote -5 = "Rejected" in ADO
+        reviewer_id = await self._get_current_user_id()
         url = (
             f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
-            f"/pullRequests/{pr.pr_id}/reviewers/me"
+            f"/pullRequests/{pr.pr_id}/reviewers/{reviewer_id}"
         )
         resp = await client.put(
             url,
-            json={"vote": -5},
+            json={"vote": -5, "id": reviewer_id},
             params={"api-version": "7.1"},
         )
         resp.raise_for_status()
