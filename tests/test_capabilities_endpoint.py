@@ -220,10 +220,27 @@ def test_review_without_pr_url_returns_422(client, fake_review, monkeypatch):
     assert resp.status_code == 422
 
 
-def test_diff_fetch_failure_returns_502(client, fake_review, monkeypatch):
-    _patch_endpoint(monkeypatch, fake_review, diff_raises=RuntimeError("github 500"))
+def test_diff_fetch_failure_falls_back_to_stored_findings(client, fake_review, monkeypatch):
+    """When platform diff fetch fails, the endpoint falls back to stored findings
+    and still calls the clusterer (no longer returns 502)."""
+    fallback = ClusterResult(
+        capabilities=[Capability("Auth changes", "Stored-findings-only view.",
+                                 ("svc.py",), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=100, output_tokens=30,
+        briefing={"what": "w", "why": "y", "how": "h"},
+    )
+    cluster_mock = _patch_endpoint(monkeypatch, fake_review,
+                                   cluster_result=fallback,
+                                   diff_raises=RuntimeError("github 500"))
     resp = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities")
-    assert resp.status_code == 502
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "llm"
+    # Clusterer was called with only the files that appear in stored findings
+    cluster_mock.assert_awaited_once()
+    call_kwargs = cluster_mock.await_args.kwargs
+    # Only svc.py has findings in fake_review; model.py and tests/x.py are diff-only
+    assert {f.path for f in call_kwargs["files"]} == {"svc.py"}
 
 
 def test_clusterer_fallback_response_propagates_to_client(client, fake_review, monkeypatch):

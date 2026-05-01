@@ -213,9 +213,12 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     """Return LLM-clustered capabilities for the wizard view.
 
     Cached in-memory per (review_id, head_commit_sha). On cache miss, fetches
-    the diff from the platform, calls cluster_capabilities, and stores the
-    result. The wizard treats `source != "llm"` as a signal to fall back to
-    its built-in path-prefix heuristic.
+    the diff from the platform (best-effort), calls cluster_capabilities, and
+    stores the result. When the platform diff fetch fails (e.g. expired creds),
+    falls back to building file info from stored agent_results so the LLM call
+    can still happen and return an AI-generated briefing.
+    The wizard treats `source != "llm"` as a signal to fall back to its
+    built-in path-prefix heuristic.
     """
     row = await storage.get_review(review_id)
     if not row:
@@ -230,24 +233,41 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         raise HTTPException(422, "Review has no PR URL — cannot fetch diff")
 
     from pr_guardian.api.review import _hydrate_pr, _parse_pr_url
+    from pr_guardian.models.pr import Diff
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
     adapter = create_adapter(platform_name)
+
+    # Best-effort diff + context fetch — when platform credentials are
+    # unavailable or the PR is gone, fall back to building a minimal file list
+    # from the stored agent_results so the LLM can still cluster and brief.
+    diff: Diff | None = None
+    pr = None
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
-        diff = await adapter.fetch_diff(pr)
     except Exception as exc:
-        raise HTTPException(502, f"Failed to fetch diff from platform: {exc}")
+        log.debug("capabilities_hydrate_pr_failed", review_id=str(review_id), error=str(exc))
+
+    if pr is not None:
+        try:
+            diff = await adapter.fetch_diff(pr)
+        except Exception as exc:
+            log.debug("capabilities_diff_fetch_failed", review_id=str(review_id), error=str(exc))
 
     # Fetch PR body and commit messages for the LLM briefing.  Best-effort —
-    # fall back to the DB-stored body (captured at review creation time) so the
-    # briefing still has context even when the platform call fails (auth expiry,
-    # deleted PR, rate-limit, etc.).
-    try:
-        pr_body, commit_messages = await adapter.fetch_pr_body_and_commits(pr)
-    except Exception as exc:
-        log.debug("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
-        pr_body, commit_messages = row.get("body") or "", []
+    # fall back to the DB-stored summary so the briefing still has context.
+    pr_body = ""
+    commit_messages: list[str] = []
+    if pr is not None:
+        try:
+            pr_body, commit_messages = await adapter.fetch_pr_body_and_commits(pr)
+        except Exception as exc:
+            log.debug("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
+    if not pr_body:
+        # Use the stored body (if any) or the AI-generated review summary as
+        # supplemental context when the PR description can't be fetched from
+        # the platform.
+        pr_body = row.get("body") or row.get("summary") or ""
 
     findings_by_path: dict[str, list[dict]] = {}
     for agent in row.get("agent_results") or []:
@@ -256,15 +276,36 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
                 continue
             findings_by_path.setdefault(f["file"], []).append(f)
 
-    files = [
-        FileSummary(
-            path=f.path,
-            role=_role_for_path(f.path),
-            locs=(f.additions or 0) + (f.deletions or 0),
-            finding_count=len(findings_by_path.get(f.path, [])),
-        )
-        for f in diff.files
-    ]
+    if diff is not None:
+        files = [
+            FileSummary(
+                path=f.path,
+                role=_role_for_path(f.path),
+                locs=(f.additions or 0) + (f.deletions or 0),
+                finding_count=len(findings_by_path.get(f.path, [])),
+            )
+            for f in diff.files
+        ]
+        file_patches = {
+            f.path: (f.patch or "")
+            for f in diff.files
+            if f.patch
+        }
+    else:
+        # Build a minimal file list from stored findings when diff is unavailable.
+        # This allows the LLM to still cluster by file roles and finding patterns.
+        all_file_paths: set[str] = set(findings_by_path.keys())
+        files = [
+            FileSummary(
+                path=path,
+                role=_role_for_path(path),
+                locs=0,
+                finding_count=len(findings_by_path.get(path, [])),
+            )
+            for path in sorted(all_file_paths)
+        ]
+        file_patches = {}
+
     findings = [
         FindingSummary(
             file=f.get("file", ""),
@@ -274,13 +315,6 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         for items in findings_by_path.values()
         for f in items
     ]
-
-    # Include truncated file patches so the LLM can read actual code changes.
-    file_patches = {
-        f.path: (f.patch or "")
-        for f in diff.files
-        if f.patch
-    }
 
     config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
     llm = create_llm_client(config)

@@ -49,24 +49,27 @@
     </div>
   </div>
 
-  <!-- Mode picker — shown after resolving an existing review -->
+  <!-- Mode picker — shown after resolving any PR URL -->
   <div id="mode-card" style="display:none" class="card mt-4">
     <div class="card-body space-y-4">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-base font-bold text-slate-50">This PR has an AI review</h2>
-          <p class="text-sm text-slate-400 mt-1">How would you like to read it?</p>
+          <h2 id="mode-card-title" class="text-base font-bold text-slate-50">This PR has an AI review</h2>
+          <p id="mode-card-sub" class="text-sm text-slate-400 mt-1">How would you like to read it?</p>
         </div>
         <button onclick="resetForm()" class="text-xs text-slate-500 hover:text-slate-300 underline">← Change URL</button>
       </div>
 
       <div class="grid grid-cols-2 gap-3 pt-1">
-        <a id="mode-wizard" href="#" class="block p-4 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors group">
-          <div class="text-sm font-semibold text-indigo-300 mb-1">Wizard</div>
-          <div class="text-xs text-slate-400 leading-relaxed">Step-by-step briefing → capability-by-capability triage → final verdict. Good for deep reviews.</div>
-        </a>
+        <div id="mode-wizard-wrap">
+          <a id="mode-wizard" href="#" class="block p-4 rounded-lg border border-indigo-500/40 bg-indigo-500/10 hover:bg-indigo-500/20 transition-colors group">
+            <div class="text-sm font-semibold text-indigo-300 mb-1">🧙 Wizard</div>
+            <div class="text-xs text-slate-400 leading-relaxed">Step-by-step briefing → capability-by-capability triage → final verdict. Good for deep reviews.</div>
+          </a>
+          <div id="mode-wizard-note" style="display:none" class="mt-2 text-xs text-slate-500 italic leading-relaxed"></div>
+        </div>
         <a id="mode-chapters" href="#" class="block p-4 rounded-lg border border-slate-600/60 bg-slate-800/60 hover:bg-slate-700/60 transition-colors group">
-          <div class="text-sm font-semibold text-slate-200 mb-1">Chapters</div>
+          <div class="text-sm font-semibold text-slate-200 mb-1">📖 Chapters</div>
           <div class="text-xs text-slate-400 leading-relaxed">Chapter-by-chapter diff view with inline findings. Good for large PRs you want to read linearly.</div>
         </a>
       </div>
@@ -95,9 +98,45 @@ function renderRecent() {
 }
 
 function showModePicker(reviewId) {
-  document.getElementById('mode-card').style.display = '';
-  document.getElementById('mode-wizard').href = `/reviews/${reviewId}/wizard`;
+  const wizardEl  = document.getElementById('mode-wizard');
+  const noteEl    = document.getElementById('mode-wizard-note');
+  const titleEl   = document.getElementById('mode-card-title');
+  const subEl     = document.getElementById('mode-card-sub');
+  const wrapEl    = document.getElementById('mode-wizard-wrap');
+
+  titleEl.textContent = 'This PR has an AI review';
+  subEl.textContent   = 'How would you like to read it?';
+  wizardEl.href       = `/reviews/${reviewId}/wizard`;
+  // Re-enable wizard styling (may have been dimmed by showLiveModePicker)
+  wizardEl.style.opacity  = '';
+  wizardEl.style.cursor   = '';
+  wizardEl.style.pointerEvents = '';
+  noteEl.style.display = 'none';
+  noteEl.textContent   = '';
+
   document.getElementById('mode-chapters').href = `/reviews/${reviewId}/human-review`;
+  document.getElementById('mode-card').style.display = '';
+}
+
+function showLiveModePicker(prUrl) {
+  const wizardEl = document.getElementById('mode-wizard');
+  const noteEl   = document.getElementById('mode-wizard-note');
+  const titleEl  = document.getElementById('mode-card-title');
+  const subEl    = document.getElementById('mode-card-sub');
+
+  titleEl.textContent = 'Browse PR diff';
+  subEl.textContent   = 'This PR has not been AI-reviewed yet. Wizard requires a completed review.';
+
+  // Disable wizard for live PRs (no stored review = no findings for wizard)
+  wizardEl.href = '#';
+  wizardEl.style.opacity       = '0.4';
+  wizardEl.style.cursor        = 'not-allowed';
+  wizardEl.style.pointerEvents = 'none';
+  noteEl.style.display = 'block';
+  noteEl.textContent   = 'Wizard is only available for PRs that have been processed by the AI review pipeline.';
+
+  document.getElementById('mode-chapters').href = `/review-mode?pr=${encodeURIComponent(prUrl)}`;
+  document.getElementById('mode-card').style.display = '';
 }
 
 function resetForm() {
@@ -131,11 +170,11 @@ async function submitUrl() {
     pushRecent(url);
     if (data.mode === 'existing') {
       showModePicker(data.review_id);
-      btn.textContent = 'Open';
-      btn.disabled = false;
     } else {
-      location.href = `/review-mode?pr=${encodeURIComponent(url)}`;
+      showLiveModePicker(url);
     }
+    btn.textContent = 'Open';
+    btn.disabled = false;
   } catch (e) {
     errEl.textContent = String(e.message || e);
     btn.disabled = false; btn.textContent = 'Open';
