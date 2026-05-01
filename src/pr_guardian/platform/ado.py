@@ -763,7 +763,7 @@ class ADOAdapter:
                 pr_resp.raise_for_status()
                 pr_body = pr_resp.json().get("description") or ""
             except Exception as exc:
-                log.debug("ado_fetch_pr_body_failed", pr_id=pr.pr_id, error=str(exc))
+                log.warning("ado_fetch_pr_body_failed", pr_id=pr.pr_id, error=str(exc))
         try:
             commits_url = (
                 f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
@@ -777,7 +777,7 @@ class ADOAdapter:
                 if c.get("comment")
             ]
         except Exception as exc:
-            log.debug("ado_fetch_pr_commits_failed", pr_id=pr.pr_id, error=str(exc))
+            log.warning("ado_fetch_pr_commits_failed", pr_id=pr.pr_id, error=str(exc))
         return pr_body, commit_messages
 
     async def close(self) -> None:

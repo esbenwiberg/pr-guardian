@@ -604,7 +604,7 @@ def test_commit_messages_appear_in_prompt():
         files, [], "My PR", "",
         commit_messages=["feat: first commit", "fix: second commit"],
     )
-    assert "COMMIT MESSAGES (2):" in prompt
+    assert "COMMIT MESSAGES (2 of 2):" in prompt
     assert "- feat: first commit" in prompt
     assert "- fix: second commit" in prompt
 

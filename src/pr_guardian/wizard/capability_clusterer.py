@@ -226,9 +226,12 @@ def _build_user_prompt(
         lines.append(pr_body.strip()[:2000])
 
     if commit_messages:
-        lines.append(f"\nCOMMIT MESSAGES ({len(commit_messages)}):")
-        for msg in commit_messages[:30]:
+        shown = commit_messages[:30]
+        lines.append(f"\nCOMMIT MESSAGES ({len(shown)} of {len(commit_messages)}):")
+        for msg in shown:
             lines.append(f"- {msg.strip()[:120]}")
+        if len(commit_messages) > 30:
+            lines.append(f"... (truncated, {len(commit_messages) - 30} more not shown)")
 
     lines.append(f"\nFILES ({len(files)}):")
     for f in files:
