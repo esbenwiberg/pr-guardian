@@ -86,6 +86,7 @@
 
 <aside id="sidebar"></aside>
 <script src="/static/sidebar.js"></script>
+<script src="/static/review-helpers.js"></script>
 
 <div class="ml-16 lg:ml-64">
 
@@ -104,6 +105,7 @@
       <span class="text-xs text-slate-400" id="hdr-progress-text"></span>
       <div class="progress-rail w-32"><div class="progress-fill" id="hdr-progress-bar" style="width:0%"></div></div>
     </div>
+    <a id="hdr-wizard-link" href="#" class="btn btn-sm btn-ghost text-slate-400" style="display:none" title="Try the wizard view (alpha)">Try wizard →</a>
     <a id="hdr-pr-link" href="#" target="_blank" class="btn btn-sm btn-secondary" style="display:none">View PR</a>
   </div>
 </header>
@@ -241,10 +243,10 @@
 
 <script>
 // ── Constants ──────────────────────────────────────────────────────────
+const { SEV_ORDER, detectRole, escapeHtml: esc } = window.PRG;
 const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
 const LIVE_PR_URL = new URLSearchParams(location.search).get('pr') || '';
 const LIVE_MODE = !REVIEW_ID && !!LIVE_PR_URL;
-const SEV_ORDER = { critical: 0, high: 1, medium: 2, low: 3 };
 const ROLE_ORDER = { PRODUCTION: 0, CONFIG: 1, BUILD: 2, INFRA: 3, TEST: 4, DOCS: 5, DEPENDENCY: 6, GENERATED: 7 };
 
 // ── State ──────────────────────────────────────────────────────────────
@@ -305,27 +307,6 @@ async function init() {
   }
 
   buildOrientScreen();
-}
-
-// ── File-role detection (mirrors discovery/file_roles.py) ──────────────
-function detectRole(path) {
-  const p = path;
-  const pl = p.toLowerCase();
-  if (/\/(tests?|spec|__tests?|__specs?)\//i.test(p) ||
-      /\.(test|spec)\.[a-z]+$/i.test(p) ||
-      /_(test|spec)\.[a-z]+$/i.test(p)) return 'TEST';
-  if (/dockerfile/i.test(pl) || /docker-compose/i.test(pl) ||
-      /\.github\//i.test(pl) || /\/(ci|circleci|github)\//i.test(pl) ||
-      /jenkinsfile/i.test(pl) || /\.travis\.yml/i.test(pl)) return 'INFRA';
-  if (/\/(docs?|documentation|wiki)\//i.test(pl) ||
-      /^readme/i.test(pl.split('/').pop()) ||
-      /\.(md|rst|txt)$/i.test(pl)) return 'DOCS';
-  if (/(package-lock\.json|yarn\.lock|poetry\.lock|cargo\.lock|composer\.lock|gemfile\.lock)/i.test(pl)) return 'GENERATED';
-  if (/(requirements.*\.txt|package\.json|pyproject\.toml|go\.mod|cargo\.toml|pom\.xml|gemfile|composer\.json)$/i.test(pl)) return 'DEPENDENCY';
-  if (/(makefile|build\.gradle|cmakefile|setup\.py|setup\.cfg|\.bazel|buck|\.mk)$/i.test(pl)) return 'BUILD';
-  if (/\.(env|config|cfg|ini|yaml|yml|toml|json|conf)$/i.test(pl) &&
-      !/package\.json$|pyproject\.toml$/i.test(pl)) return 'CONFIG';
-  return 'PRODUCTION';
 }
 
 // ── Build flat list of findings per file ───────────────────────────────
@@ -430,7 +411,6 @@ function computeChapters(files, findingsByFile) {
 }
 
 // ── Severity badge helpers ─────────────────────────────────────────────
-function esc(s) { return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 function sevColor(s) {
   return { critical:'text-red-400', high:'text-orange-400', medium:'text-yellow-400', low:'text-blue-400' }[s] || 'text-slate-400';
@@ -489,6 +469,15 @@ function buildOrientScreen() {
   if (d.pr_url) {
     document.getElementById('hdr-pr-link').href = d.pr_url;
     document.getElementById('hdr-pr-link').style.display = '';
+  }
+
+  // Wizard link (alpha): only when we have a real review id
+  if (!LIVE_MODE && REVIEW_ID) {
+    const wl = document.getElementById('hdr-wizard-link');
+    if (wl) {
+      wl.href = `/reviews/${REVIEW_ID}/wizard`;
+      wl.style.display = '';
+    }
   }
 
   if (LIVE_MODE) {

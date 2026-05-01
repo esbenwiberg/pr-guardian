@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import os
 import uuid
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,9 +16,20 @@ from pr_guardian.auth.identity import Identity
 
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
 from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
+from pr_guardian.config.loader import apply_global_settings, load_service_defaults
+from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import event_bus
+from pr_guardian.decision.finding_triage import tag_findings_with_triage
+from pr_guardian.llm.factory import create_llm_client
+from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import finding_signature
+from pr_guardian.platform.factory import create_adapter
+from pr_guardian.wizard.capability_clusterer import (
+    FileSummary,
+    FindingSummary,
+    cluster_capabilities,
+)
 
 log = structlog.get_logger()
 
@@ -92,6 +104,13 @@ async def dashboard_review_detail(review_id: uuid.UUID):
 
         row["dismissal_count"] = dismissal_count
 
+        # Tag every finding with a triage class (noise / fyi / decision) so
+        # the wizard can decide what to surface vs. roll into an audit count.
+        # Runs after dismissal enrichment because dismissed findings classify
+        # as noise.
+        triage_counts = tag_findings_with_triage(row.get("agent_results", []))
+        row["triage_counts"] = triage_counts
+
         # Collect active dismissals that didn't match any current finding
         matched_sigs = {
             finding_signature(f.get("file", ""), f.get("category", ""), a["agent_name"])
@@ -109,6 +128,7 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     except Exception:
         row["dismissal_count"] = 0
         row["prior_dismissals"] = []
+        row.setdefault("triage_counts", {"noise": 0, "fyi": 0, "decision": 0})
 
     return row
 
@@ -157,6 +177,119 @@ async def dashboard_review_diff(review_id: uuid.UUID):
             for f in diff.files
         ],
     }
+
+
+# ---------------------------------------------------------------------------
+# Wizard capability clustering (Phase 3b)
+# ---------------------------------------------------------------------------
+
+# Cache the LLM clusterer's response per (review_id, head_commit_sha). A new
+# commit on the PR invalidates the cache by changing the SHA, so the wizard
+# always sees clusters that match what's actually in the diff.
+_capability_cache: dict[tuple[str, str], dict] = {}
+
+
+def _role_for_path(path: str) -> str:
+    pl = path.lower()
+    parts = pl.split("/")
+    if any(p in {"test", "tests", "__tests__", "spec", "specs"} for p in parts) \
+            or pl.endswith((".test.py", ".test.ts", ".test.js", ".spec.py", ".spec.ts", ".spec.js"))\
+            or "_test." in pl or "_spec." in pl:
+        return "TEST"
+    if "dockerfile" in pl or ".github" in parts or "ci" in parts or "circleci" in parts:
+        return "INFRA"
+    if any(p in {"docs", "documentation"} for p in parts) or pl.endswith((".md", ".rst")):
+        return "DOCS"
+    if pl.endswith((".lock", "package-lock.json", "yarn.lock", "poetry.lock", "cargo.lock")):
+        return "GENERATED"
+    if pl.endswith((".cfg", ".ini", ".yaml", ".yml", ".toml", ".conf")) \
+            and not pl.endswith(("pyproject.toml",)):
+        return "CONFIG"
+    return "PRODUCTION"
+
+
+@router.get("/reviews/{review_id}/capabilities")
+async def dashboard_review_capabilities(review_id: uuid.UUID):
+    """Return LLM-clustered capabilities for the wizard view.
+
+    Cached in-memory per (review_id, head_commit_sha). On cache miss, fetches
+    the diff from the platform, calls cluster_capabilities, and stores the
+    result. The wizard treats `source != "llm"` as a signal to fall back to
+    its built-in path-prefix heuristic.
+    """
+    row = await storage.get_review(review_id)
+    if not row:
+        raise HTTPException(404, "Review not found")
+    head = row.get("head_commit_sha") or ""
+    cache_key = (str(review_id), head)
+    cached = _capability_cache.get(cache_key)
+    if cached is not None:
+        return {**cached, "cache": "hit"}
+
+    if not row.get("pr_url"):
+        raise HTTPException(422, "Review has no PR URL — cannot fetch diff")
+
+    from pr_guardian.api.review import _hydrate_pr, _parse_pr_url
+
+    stub, platform_name = _parse_pr_url(row["pr_url"])
+    adapter = create_adapter(platform_name)
+    try:
+        pr = await _hydrate_pr(adapter, stub, platform_name)
+        diff = await adapter.fetch_diff(pr)
+    except Exception as exc:
+        raise HTTPException(502, f"Failed to fetch diff from platform: {exc}")
+
+    findings_by_path: dict[str, list[dict]] = {}
+    for agent in row.get("agent_results") or []:
+        for f in agent.get("findings") or []:
+            if f.get("dismissal") or not f.get("file"):
+                continue
+            findings_by_path.setdefault(f["file"], []).append(f)
+
+    files = [
+        FileSummary(
+            path=f.path,
+            role=_role_for_path(f.path),
+            locs=(f.additions or 0) + (f.deletions or 0),
+            finding_count=len(findings_by_path.get(f.path, [])),
+        )
+        for f in diff.files
+    ]
+    findings = [
+        FindingSummary(
+            file=f.get("file", ""),
+            severity=f.get("severity", "low"),
+            category=f.get("category", "") or "",
+        )
+        for items in findings_by_path.values()
+        for f in items
+    ]
+
+    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
+    llm = create_llm_client(config)
+
+    result = await cluster_capabilities(
+        files=files,
+        findings=findings,
+        pr_title=row.get("title") or "",
+        pr_body=row.get("body") or "",
+        llm_client=llm,
+    )
+
+    response = {
+        "source": result.source,
+        "capabilities": [
+            {"name": c.name, "intent": c.intent, "files": list(c.files), "layers": list(c.layers)}
+            for c in result.capabilities
+        ],
+        "briefing": result.briefing,
+        "model": result.model,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "error": result.error,
+    }
+    _capability_cache[cache_key] = response
+    return {**response, "cache": "miss"}
 
 
 class ResolvePRRequest(BaseModel):
@@ -334,6 +467,136 @@ async def undismiss_finding(dismissal_id: uuid.UUID):
     if not deleted:
         raise HTTPException(404, "Dismissal not found")
     return {"status": "removed"}
+
+
+# ---------------------------------------------------------------------------
+# Human verdict submission (used by the wizard's final-step buttons)
+# ---------------------------------------------------------------------------
+
+_VALID_VERDICTS = {"approve", "approve_with_fixes", "decline"}
+
+
+class SubmitVerdictRequest(BaseModel):
+    verdict: str
+    comment: str = ""
+
+
+def _summarise_decisions(review_dict: dict) -> dict[str, int]:
+    """Tally the per-finding dismissal statuses on this review's PR."""
+    counts = {"acknowledged": 0, "will_fix": 0, "false_positive": 0, "by_design": 0}
+    for agent in (review_dict.get("agent_results") or []):
+        for f in (agent.get("findings") or []):
+            d = f.get("dismissal")
+            if d and d.get("status") in counts:
+                counts[d["status"]] += 1
+    return counts
+
+
+def _build_verdict_body(verdict: str, reviewer_comment: str, decision_counts: dict[str, int]) -> str:
+    """Compose the comment body posted to the platform alongside the verdict."""
+    accepted = decision_counts.get("acknowledged", 0)
+    fixes = decision_counts.get("will_fix", 0)
+    dismissed = decision_counts.get("false_positive", 0) + decision_counts.get("by_design", 0)
+
+    headline = {
+        "approve": "**Reviewed and approved.**",
+        "approve_with_fixes": "**Approved — with the follow-ups noted below.**",
+        "decline": "**Changes requested before this can merge.**",
+    }[verdict]
+
+    parts: list[str] = [headline]
+    if reviewer_comment.strip():
+        parts.append(reviewer_comment.strip())
+
+    summary_bits: list[str] = []
+    if accepted: summary_bits.append(f"{accepted} accepted")
+    if fixes: summary_bits.append(f"{fixes} fix{'es' if fixes != 1 else ''} requested")
+    if dismissed: summary_bits.append(f"{dismissed} dismissed")
+    if summary_bits:
+        parts.append("---")
+        parts.append("Per-concern decisions: " + " · ".join(summary_bits) + ".")
+    parts.append("_Posted from PR Guardian wizard review._")
+    return "\n\n".join(parts)
+
+
+@router.post("/reviews/{review_id}/submit-verdict")
+async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
+    """Post the reviewer's final verdict back to the platform (GitHub / ADO)
+    and record it on the review for audit. Used by the wizard's final step."""
+    if body.verdict not in _VALID_VERDICTS:
+        raise HTTPException(400, f"Invalid verdict. Must be one of: {sorted(_VALID_VERDICTS)}")
+
+    review = await storage.get_review(review_id)
+    if not review:
+        raise HTTPException(404, "Review not found")
+
+    platform_str = (review.get("platform") or "").lower()
+    if platform_str not in {p.value for p in Platform}:
+        raise HTTPException(400, f"Review has no usable platform field: {platform_str!r}")
+
+    pr = PlatformPR(
+        platform=Platform(platform_str),
+        pr_id=review.get("pr_id", ""),
+        repo=review.get("repo", ""),
+        repo_url=review.get("pr_url", ""),  # not strictly required by the methods we call
+        source_branch=review.get("source_branch", ""),
+        target_branch=review.get("target_branch", ""),
+        author=review.get("author", ""),
+        title=review.get("title", ""),
+        head_commit_sha=review.get("head_commit_sha", ""),
+        org=review.get("org", ""),
+        project=review.get("project", ""),
+    )
+
+    adapter = create_adapter(platform_str)
+    decision_counts = _summarise_decisions(review)
+    comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts)
+
+    actions: list[str] = []
+    posted = True
+    error: str | None = None
+    try:
+        if body.verdict == "approve":
+            await adapter.approve_pr(pr)
+            actions.append("approve_pr")
+            if body.comment.strip():
+                await adapter.post_comment(pr, comment_body)
+                actions.append("post_comment")
+        elif body.verdict == "approve_with_fixes":
+            await adapter.approve_pr(pr)
+            actions.append("approve_pr")
+            await adapter.post_comment(pr, comment_body)
+            actions.append("post_comment")
+        elif body.verdict == "decline":
+            await adapter.request_changes(pr, comment_body)
+            actions.append("request_changes")
+    except Exception as exc:  # noqa: BLE001 — surface any platform error to the caller
+        posted = False
+        error = f"{type(exc).__name__}: {exc}"
+        log.error("submit_verdict_failed", review_id=str(review_id), error=error)
+
+    # Always record the attempt on the review (even on platform failure) so the
+    # audit trail captures intent.
+    await storage.append_review_log_entry(review_id, {
+        "kind": "human_verdict",
+        "verdict": body.verdict,
+        "reviewer_comment": body.comment,
+        "decision_counts": decision_counts,
+        "platform_actions": actions,
+        "posted": posted,
+        "error": error,
+        "at": datetime.now(timezone.utc).isoformat(),
+    })
+
+    if not posted:
+        raise HTTPException(502, f"Failed to post verdict to platform: {error}")
+
+    return {
+        "posted": True,
+        "verdict": body.verdict,
+        "platform_actions": actions,
+        "decision_counts": decision_counts,
+    }
 
 
 @router.post("/reviews/{review_id}/re-review")

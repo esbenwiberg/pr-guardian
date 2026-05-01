@@ -70,6 +70,19 @@ async def update_review_stage(review_id: uuid.UUID, stage: str, detail: str = ""
             await session.commit()
 
 
+async def append_review_log_entry(review_id: uuid.UUID, entry: dict[str, Any]) -> bool:
+    """Append a structured event onto a review's pipeline_log. Returns True on success."""
+    async with async_session() as session:
+        row = await session.get(ReviewRow, review_id)
+        if not row:
+            return False
+        existing = list(row.pipeline_log or [])
+        existing.append(entry)
+        row.pipeline_log = existing
+        await session.commit()
+        return True
+
+
 async def mark_review_failed(
     review_id: uuid.UUID,
     error: str,
