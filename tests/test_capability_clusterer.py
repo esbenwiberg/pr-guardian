@@ -493,17 +493,45 @@ def test_no_truncation_marker_when_patch_fits():
 
 
 def test_truncation_marker_shown_when_budget_is_binding():
-    """Truncation marker appears when patch_budget (not per-file cap) is the binding constraint."""
-    # First file consumes almost the entire budget, leaving only 1 char for the second file.
-    first_patch = "+" + "a" * (_MAX_PATCH_CHARS - 1)
-    # Second file is small enough to pass the per-file cap but exceeds remaining budget.
-    second_patch = "+" + "b" * 10
-    files = [_f("first.py"), _f("second.py")]
-    file_patches = {"first.py": first_patch, "second.py": second_patch}
+    """Truncation marker appears when patch_budget (not per-file cap) is the binding constraint.
+
+    Six filler files each consume _MAX_PATCH_PER_FILE-1 chars, leaving a remaining
+    budget that is less than the last file's patch size but still above zero.  The
+    last file's patch is smaller than the per-file cap, so the only constraint that
+    can truncate it is the overall budget.
+    """
+    filler_size = _MAX_PATCH_PER_FILE - 1  # 599 — stays under per-file cap each time
+    filler_count = 6
+    consumed = filler_size * filler_count          # 3594
+    remaining = _MAX_PATCH_CHARS - consumed        # 406
+    last_size = remaining + 50                     # 456 — exceeds remaining, fits per-file cap
+    assert last_size <= _MAX_PATCH_PER_FILE, "last patch must fit per-file cap for this test to be meaningful"
+
+    filler_patch = "+" + "a" * (filler_size - 1)  # filler_size chars total
+    last_patch = "+" + "b" * (last_size - 1)       # last_size chars total
+
+    files = [_f(f"filler{i}.py") for i in range(filler_count)] + [_f("last.py")]
+    file_patches = {f"filler{i}.py": filler_patch for i in range(filler_count)}
+    file_patches["last.py"] = last_patch
+
     prompt = _build_user_prompt(files, [], "title", "", file_patches=file_patches)
-    # The second file's patch must be truncated and must show the marker.
-    assert "--- second.py ---" in prompt
+    # last.py must appear (some budget remains) and must be truncated by the budget cap.
+    assert "--- last.py ---" in prompt
     assert "... (truncated)" in prompt
+    # Filler files must NOT be truncated (they each fit within both caps).
+    for i in range(filler_count):
+        header = f"--- filler{i}.py ---"
+        assert header in prompt
+    # No filler file should produce a truncation marker — collect lines after each
+    # filler header and verify "... (truncated)" does not immediately follow one.
+    lines = prompt.split("\n")
+    for idx, line in enumerate(lines):
+        if any(line.strip() == f"--- filler{i}.py ---" for i in range(filler_count)):
+            # Allow the patch line and check that truncation marker is not present
+            # within the next two lines (patch + possible marker).
+            nearby = lines[idx + 1 : idx + 3]
+            assert "... (truncated)" not in nearby, \
+                f"filler file unexpectedly truncated near line {idx}"
 
 
 def test_patch_budget_stops_including_files_after_limit():

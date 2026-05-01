@@ -59,13 +59,17 @@ def _fake_diff_files():
     ]
 
 
-def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=None, body_raises=None):
+def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=None,
+                    body_raises=None, hydrate_raises=None):
     from pr_guardian.api import dashboard as dash
 
     async def _get(_id): return review
     monkeypatch.setattr(dash.storage, "get_review", _get)
 
-    async def _hydrate(_a, _s, _p): return SimpleNamespace(pr_id="42", repo="org/repo")
+    if hydrate_raises:
+        async def _hydrate(_a, _s, _p): raise hydrate_raises
+    else:
+        async def _hydrate(_a, _s, _p): return SimpleNamespace(pr_id="42", repo="org/repo")
     monkeypatch.setattr("pr_guardian.api.review._hydrate_pr", _hydrate)
     monkeypatch.setattr("pr_guardian.api.review._parse_pr_url",
                         lambda url: (SimpleNamespace(), "github"))
@@ -241,6 +245,30 @@ def test_diff_fetch_failure_falls_back_to_stored_findings(client, fake_review, m
     call_kwargs = cluster_mock.await_args.kwargs
     # Only svc.py has findings in fake_review; model.py and tests/x.py are diff-only
     assert {f.path for f in call_kwargs["files"]} == {"svc.py"}
+
+
+def test_hydrate_pr_failure_falls_back_to_stored_data(client, fake_review, monkeypatch):
+    """When _hydrate_pr itself raises, both diff and pr_body/commits are unavailable.
+    The endpoint must still succeed, using only stored DB values (body, findings)."""
+    fallback = ClusterResult(
+        capabilities=[Capability("Auth changes", "Stored-findings-only view.",
+                                 ("svc.py",), ("Services",))],
+        source="llm", model="claude-sonnet", input_tokens=50, output_tokens=20,
+        briefing={"what": "w", "why": "y", "how": "h"},
+    )
+    cluster_mock = _patch_endpoint(monkeypatch, fake_review,
+                                   cluster_result=fallback,
+                                   hydrate_raises=RuntimeError("creds expired"))
+    resp = client.get(f"/api/dashboard/reviews/{fake_review['id']}/capabilities")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["source"] == "llm"
+    # Clusterer must be called with only files that appear in stored findings (no diff available).
+    cluster_mock.assert_awaited_once()
+    call_kwargs = cluster_mock.await_args.kwargs
+    assert {f.path for f in call_kwargs["files"]} == {"svc.py"}
+    # pr_body must fall back to the DB-stored body since platform fetch was skipped.
+    assert call_kwargs["pr_body"] == fake_review["body"]
 
 
 def test_clusterer_fallback_response_propagates_to_client(client, fake_review, monkeypatch):
