@@ -458,9 +458,8 @@ function buildWWH(reviewData, capabilities, files, capsData) {
   // Heuristic stub fallback — used when the LLM briefing is unavailable.
   // Derive stats from diff files when available; fall back to capability
   // aggregates when the diff endpoint was unavailable (expired credentials).
-  const fileCount = files.length || capabilities.reduce((s, c) => s + c.files, 0);
-  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0)
-    || capabilities.reduce((s, c) => s + c.locs, 0);
+  const fileCount = files.length || capabilities.reduce((s, c) => s + (c.files?.length ?? 0), 0);
+  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
   const roleCounts = {};
   for (const f of files) {
     const r = detectRole(f.path);
@@ -491,9 +490,8 @@ function buildStats(reviewData, files, decisions, capabilities) {
   // When the diff endpoint was unavailable, derive counts from capabilities
   // so the stats bar shows meaningful numbers rather than "0 files · +0".
   const caps = capabilities || [];
-  const fileCount = files.length || caps.reduce((s, c) => s + c.files, 0);
-  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0)
-    || caps.reduce((s, c) => s + c.locs, 0);
+  const fileCount = files.length || caps.reduce((s, c) => s + (c.files?.length ?? 0), 0);
+  const totalLoc = files.reduce((s, f) => s + (f.additions || 0) + (f.deletions || 0), 0);
   return {
     author: reviewData.author || 'unknown',
     commits: reviewData.commits || 0,
@@ -668,7 +666,7 @@ function renderBriefing() {
         return `<div class="cap-preview-row">
           <span class="cap-preview-dot ${c.clean ? 'clean' : 'has'}"></span>
           <span class="cap-preview-name">${escapeHtml(c.name)}</span>
-          <span class="cap-preview-meta">${c.files} files · ${c.locs} LOC</span>
+          <span class="cap-preview-meta">${c.files?.length ?? 0} files · ${c.locs ?? 0} LOC</span>
           <span class="cap-preview-tag ${c.clean ? 'clean' : 'has'}">${c.clean ? '✓ clean' : decs.length + ' concern' + (decs.length === 1 ? '' : 's')}</span>
         </div>`;
       }).join("")}
