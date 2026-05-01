@@ -246,13 +246,13 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
     except Exception as exc:
-        log.debug("capabilities_hydrate_pr_failed", review_id=str(review_id), error=str(exc))
+        log.warning("capabilities_hydrate_pr_failed", review_id=str(review_id), error=str(exc))
 
     if pr is not None:
         try:
             diff = await adapter.fetch_diff(pr)
         except Exception as exc:
-            log.debug("capabilities_diff_fetch_failed", review_id=str(review_id), error=str(exc))
+            log.warning("capabilities_diff_fetch_failed", review_id=str(review_id), error=str(exc))
 
     # Fetch PR body and commit messages for the LLM briefing.  Best-effort —
     # fall back to the DB-stored summary so the briefing still has context.
@@ -262,7 +262,7 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         try:
             pr_body, commit_messages = await adapter.fetch_pr_body_and_commits(pr)
         except Exception as exc:
-            log.debug("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
+            log.warning("capabilities_pr_context_failed", review_id=str(review_id), error=str(exc))
     if not pr_body:
         # Use the stored body (if any) or the AI-generated review summary as
         # supplemental context when the PR description can't be fetched from

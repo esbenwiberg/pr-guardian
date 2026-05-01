@@ -852,11 +852,11 @@ function render() {
 
 loadAndBuild()
   .then(initState)
+  .then(render)
   .then(() => {
     const ov = document.getElementById('loading-overlay');
     if (ov) ov.style.display = 'none';
   })
-  .then(render)
   .catch(err => {
     const ov = document.getElementById('loading-overlay');
     if (ov) ov.style.display = 'none';

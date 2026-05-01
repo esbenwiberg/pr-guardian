@@ -129,3 +129,30 @@ async def test_network_error_is_handled():
     body, commits = await adapter.fetch_pr_body_and_commits(_pr())
     assert body == ""
     assert commits == []
+
+
+# ---------------------------------------------------------------------------
+# Body-already-cached path — pre-populated pr.body skips the PR GET
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_body_already_set_skips_pr_get():
+    """When pr.body is pre-populated by _hydrate_pr, no PR GET is issued; only
+    the commits endpoint is called (one mock response, not two)."""
+    commits_json = [{"commit": {"message": "feat: cached"}}]
+    pr_with_body = PlatformPR(
+        platform=Platform.GITHUB,
+        pr_id="42",
+        repo="owner/repo",
+        repo_url="https://github.com/owner/repo",
+        source_branch="feature",
+        target_branch="main",
+        author="alice",
+        title="My PR",
+        head_commit_sha="abc123",
+        body="already fetched description",
+    )
+    body, commits = await _adapter(_resp(commits_json)).fetch_pr_body_and_commits(pr_with_body)
+    assert body == "already fetched description"
+    assert commits == ["feat: cached"]
