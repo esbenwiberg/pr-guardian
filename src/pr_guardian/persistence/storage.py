@@ -563,7 +563,9 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
                     )
                 ).first()
             if row:
-                return decrypt(row.encrypted_token)
+                decrypted = decrypt(row.encrypted_token)
+                if decrypted:
+                    return decrypted
     except Exception:
         log.warning("resolve_github_token_failed", hint="DB unavailable or decrypt error; falling back to env var")
     return os.environ.get("GITHUB_TOKEN", "")

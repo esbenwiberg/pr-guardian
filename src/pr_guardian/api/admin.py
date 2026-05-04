@@ -6,6 +6,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from pr_guardian.auth.dependencies import require_admin
 from pr_guardian.auth.identity import Identity
@@ -169,12 +170,15 @@ async def create_github_pat(body: CreateGithubPatRequest, identity: Identity = D
     if not body.token.strip():
         raise HTTPException(400, "Token is required")
 
-    pat = await storage.create_github_pat(
-        name=name,
-        token=body.token.strip(),
-        description=body.description.strip(),
-        is_default=body.is_default,
-    )
+    try:
+        pat = await storage.create_github_pat(
+            name=name,
+            token=body.token.strip(),
+            description=body.description.strip(),
+            is_default=body.is_default,
+        )
+    except IntegrityError:
+        raise HTTPException(409, "A GitHub PAT with that name already exists")
     log.info("github_pat_created", name=name, by=identity.display_name)
     return pat
 

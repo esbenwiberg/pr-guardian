@@ -321,8 +321,8 @@ async def test_resolve_github_token_db_error_falls_back_to_env(monkeypatch):
     assert token == "fallback_env_token"
 
 
-async def test_resolve_github_token_corrupt_ciphertext_returns_empty(monkeypatch):
-    """A corrupted encrypted_token must not raise — decrypt() returns '' on bad input."""
+async def test_resolve_github_token_corrupt_ciphertext_falls_back_to_env(monkeypatch):
+    """A corrupted encrypted_token must fall back to GITHUB_TOKEN env var."""
     monkeypatch.setenv("GITHUB_TOKEN", "env_fallback")
     row = MagicMock()
     row.encrypted_token = "definitely-not-valid-fernet-token"
@@ -334,5 +334,5 @@ async def test_resolve_github_token_corrupt_ciphertext_returns_empty(monkeypatch
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
         token = await resolve_github_token()
 
-    # decrypt() returns "" on failure; resolve_github_token returns "" rather than raising
-    assert token == ""
+    # decrypt() returns "" on bad ciphertext; resolve_github_token falls back to env var
+    assert token == "env_fallback"
