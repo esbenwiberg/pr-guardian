@@ -361,6 +361,48 @@ class GitHubAdapter:
                 else:
                     raise
 
+    async def list_accessible_repos(self) -> list[dict]:
+        """List repos the token has access to (owned + collaborated + org member)."""
+        client = self._get_client()
+        repos: list[dict] = []
+        page = 1
+        while len(repos) < 500:
+            resp = await client.get(
+                "/user/repos",
+                params={"type": "all", "per_page": 100, "page": page, "sort": "pushed"},
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            if not batch:
+                break
+            repos.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return repos
+
+    async def list_repo_open_prs(self, repo: str) -> list[dict]:
+        """List open PRs for a repo, enriched with review approval state."""
+        client = self._get_client()
+        resp = await client.get(
+            f"/repos/{repo}/pulls",
+            params={"state": "open", "per_page": 100},
+        )
+        resp.raise_for_status()
+        prs = resp.json()
+
+        for pr in prs:
+            try:
+                rev_resp = await client.get(
+                    f"/repos/{repo}/pulls/{pr['number']}/reviews",
+                    params={"per_page": 100},
+                )
+                rev_resp.raise_for_status()
+                pr["_reviews"] = rev_resp.json()
+            except Exception:
+                pr["_reviews"] = []
+        return prs
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

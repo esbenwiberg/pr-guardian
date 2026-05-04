@@ -796,6 +796,40 @@ class ADOAdapter:
             log.warning("ado_fetch_pr_commits_failed", pr_id=pr.pr_id, error=str(exc))
         return pr_body, commit_messages
 
+    async def list_projects(self) -> list[dict]:
+        """List all projects in the ADO organization."""
+        client = self._get_client()
+        resp = await client.get(
+            f"{self._org_url}/_apis/projects",
+            params={"api-version": "7.1", "$top": 200},
+        )
+        resp.raise_for_status()
+        return resp.json().get("value", [])
+
+    async def list_repos(self, project: str) -> list[dict]:
+        """List all git repos in a project."""
+        client = self._get_client()
+        resp = await client.get(
+            f"{self._org_url}/{project}/_apis/git/repositories",
+            params={"api-version": "7.1"},
+        )
+        resp.raise_for_status()
+        return resp.json().get("value", [])
+
+    async def list_repo_open_prs(self, project: str, repo: str) -> list[dict]:
+        """List active (open) PRs for a repo."""
+        client = self._get_client()
+        resp = await client.get(
+            f"{self._org_url}/{project}/_apis/git/repositories/{repo}/pullrequests",
+            params={
+                "searchCriteria.status": "active",
+                "$top": 100,
+                "api-version": "7.1",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("value", [])
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

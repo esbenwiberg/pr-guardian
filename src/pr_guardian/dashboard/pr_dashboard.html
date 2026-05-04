@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Dashboard · PR Guardian</title>
+<link rel="stylesheet" href="/static/styles.css">
+<style>
+  /* ── Side panel ─────────────────────────────────────────────────────── */
+  #panel-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.45);
+    z-index: 40; display: none;
+  }
+  #side-panel {
+    position: fixed; top: 0; right: 0; bottom: 0; width: 420px; max-width: 95vw;
+    background: #0f172a; border-left: 1px solid #1e293b;
+    z-index: 50; transform: translateX(100%);
+    transition: transform .2s cubic-bezier(.4,0,.2,1);
+    overflow-y: auto; display: flex; flex-direction: column;
+  }
+  #side-panel.open { transform: translateX(0); }
+  /* ── PR list row ────────────────────────────────────────────────────── */
+  .pr-row {
+    display: flex; flex-direction: column; gap: 4px;
+    padding: 14px 16px; border-bottom: 1px solid #1e293b;
+    cursor: pointer; transition: background .12s;
+  }
+  .pr-row:hover { background: #1e293b55; }
+  .pr-row.active { background: #1e293b; }
+  /* ── Filter chips ───────────────────────────────────────────────────── */
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 500;
+    border: 1px solid #334155; background: #1e293b; color: #94a3b8;
+    cursor: pointer; transition: all .12s; white-space: nowrap;
+  }
+  .chip:hover { border-color: #64748b; color: #e2e8f0; }
+  .chip.active { border-color: #6366f1; background: #6366f120; color: #a5b4fc; }
+  .chip .remove { opacity: .6; font-size: 13px; line-height: 1; }
+  .chip .remove:hover { opacity: 1; }
+  /* ── Status badges ──────────────────────────────────────────────────── */
+  .badge-approved   { color: #34d399; }
+  .badge-changes    { color: #f87171; }
+  .badge-pending    { color: #94a3b8; }
+  .badge-draft      { color: #64748b; }
+  .badge-stale      { color: #fb923c; }
+  /* ── Summary cards ──────────────────────────────────────────────────── */
+  .summary-card {
+    flex: 1; min-width: 0; padding: 16px 20px;
+    background: #1e293b; border-radius: 10px; border: 1px solid #334155;
+    cursor: pointer; transition: border-color .15s;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .summary-card:hover { border-color: #6366f1; }
+  .summary-card.active { border-color: #6366f1; background: #1e293b; }
+  .summary-card .sc-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
+  .summary-card .sc-value { font-size: 28px; font-weight: 700; color: #f1f5f9; line-height: 1; }
+  .summary-card .sc-sub { font-size: 11px; color: #64748b; }
+  /* ── Source badge ───────────────────────────────────────────────────── */
+  .src-gh  { background: #21262d; color: #58a6ff; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+  .src-ado { background: #1a1f3a; color: #a78bfa; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+</style>
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<aside id="sidebar"></aside>
+<script src="/static/sidebar.js"></script>
+
+<!-- Main layout -->
+<div class="ml-16 lg:ml-64 flex flex-col min-h-screen">
+
+  <!-- Header -->
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-6 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <h1 class="text-sm font-semibold text-slate-50">PR Dashboard</h1>
+    <div class="flex items-center gap-3">
+      <button id="btn-identity" title="Configure your GitHub / ADO identity"
+              class="text-xs text-slate-400 hover:text-slate-200 border border-slate-700 rounded-lg px-3 py-1.5 transition-colors">
+        ⚙ Identity
+      </button>
+      <button id="btn-refresh"
+              class="text-xs text-slate-400 hover:text-slate-200 border border-slate-700 rounded-lg px-3 py-1.5 transition-colors">
+        ↻ Sync
+      </button>
+    </div>
+  </header>
+
+  <div class="flex-1 max-w-[1400px] w-full mx-auto px-6 py-6">
+
+    <!-- Summary cards -->
+    <div class="flex gap-4 mb-6 flex-wrap">
+      <div class="summary-card active" id="card-mine" onclick="setView('mine')">
+        <div class="sc-label">My PRs</div>
+        <div class="sc-value" id="val-mine">-</div>
+        <div class="sc-sub" id="sub-mine"> </div>
+      </div>
+      <div class="summary-card" id="card-queue" onclick="setView('queue')">
+        <div class="sc-label">Review Queue</div>
+        <div class="sc-value" id="val-queue">-</div>
+        <div class="sc-sub" id="sub-queue"> </div>
+      </div>
+      <div class="summary-card" id="card-stale" onclick="setView('stale')">
+        <div class="sc-label">Stale (&gt;5d)</div>
+        <div class="sc-value" id="val-stale">-</div>
+        <div class="sc-sub" id="sub-stale"> </div>
+      </div>
+      <div class="summary-card" id="card-all" onclick="setView(null)">
+        <div class="sc-label">All Open</div>
+        <div class="sc-value" id="val-all">-</div>
+        <div class="sc-sub" id="sub-all"> </div>
+      </div>
+    </div>
+
+    <!-- Search + filters -->
+    <div class="flex flex-wrap items-center gap-2 mb-4">
+      <div class="relative flex-1 min-w-48 max-w-72">
+        <svg class="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/>
+        </svg>
+        <input id="search-input" type="search" placeholder="Search PRs…"
+               class="w-full pl-9 pr-3 py-1.5 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+      </div>
+      <!-- Active filter chips rendered here -->
+      <div id="active-chips" class="flex flex-wrap gap-1.5"></div>
+      <!-- Dropdown triggers -->
+      <div class="relative" id="dd-source-wrap">
+        <button class="chip" onclick="toggleDropdown('dd-source')">+ Source</button>
+        <div id="dd-source" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-32">
+          <div class="dd-opt" data-filter="platform" data-val="github">GitHub</div>
+          <div class="dd-opt" data-filter="platform" data-val="ado">Azure DevOps</div>
+        </div>
+      </div>
+      <div class="relative" id="dd-status-wrap">
+        <button class="chip" onclick="toggleDropdown('dd-status')">+ Status</button>
+        <div id="dd-status" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-40">
+          <div class="dd-opt" data-filter="approval_status" data-val="approved">Approved</div>
+          <div class="dd-opt" data-filter="approval_status" data-val="changes_requested">Changes requested</div>
+          <div class="dd-opt" data-filter="approval_status" data-val="pending">Pending review</div>
+          <div class="dd-opt" data-filter="approval_status" data-val="draft">Draft</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- PR list + side panel -->
+    <div class="flex gap-0 min-h-[400px]">
+
+      <!-- List -->
+      <div class="flex-1 card p-0 overflow-hidden" id="pr-list-wrap">
+        <div id="pr-list" class="divide-y divide-slate-800"></div>
+        <div id="pr-empty" class="hidden p-8 text-center text-slate-500 text-sm">No open PRs match this view.</div>
+        <div id="pr-loading" class="p-8 text-center text-slate-500 text-sm">Loading…</div>
+        <!-- Pagination -->
+        <div class="flex items-center justify-between px-4 py-3 border-t border-slate-800 text-xs text-slate-500" id="pagination" style="display:none!important">
+          <span id="page-info"></span>
+          <div class="flex gap-2">
+            <button id="btn-prev" class="chip" onclick="changePage(-1)">← Prev</button>
+            <button id="btn-next" class="chip" onclick="changePage(+1)">Next →</button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Side panel overlay -->
+<div id="panel-overlay" onclick="closePanel()"></div>
+
+<!-- Side panel -->
+<div id="side-panel">
+  <div class="flex items-center justify-between px-5 py-4 border-b border-slate-800">
+    <h2 class="text-sm font-semibold text-slate-100 truncate pr-4" id="panel-title">PR Details</h2>
+    <button onclick="closePanel()" class="text-slate-500 hover:text-slate-300 shrink-0">✕</button>
+  </div>
+  <div id="panel-body" class="flex-1 p-5 text-sm text-slate-300 space-y-4"></div>
+</div>
+
+<!-- Identity modal -->
+<div id="identity-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" style="display:none!important">
+  <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+    <h3 class="text-base font-semibold mb-1">Your Identity</h3>
+    <p class="text-xs text-slate-400 mb-5">Tell Guardian who you are on each platform so it can surface <em>your</em> PRs.</p>
+    <label class="block mb-4">
+      <span class="text-xs font-medium text-slate-300 block mb-1">GitHub username</span>
+      <input id="inp-gh" type="text" placeholder="e.g. octocat"
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-indigo-500">
+    </label>
+    <label class="block mb-6">
+      <span class="text-xs font-medium text-slate-300 block mb-1">Azure DevOps UPN</span>
+      <input id="inp-ado" type="text" placeholder="e.g. alice@company.com"
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-indigo-500">
+    </label>
+    <div class="flex gap-3 justify-end">
+      <button onclick="closeIdentityModal()" class="chip">Cancel</button>
+      <button onclick="saveIdentity()" class="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">Save</button>
+    </div>
+  </div>
+</div>
+
+<style>
+  .dd-opt {
+    padding: 6px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; color: #cbd5e1;
+  }
+  .dd-opt:hover { background: #334155; color: #f1f5f9; }
+</style>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let view = 'mine';           // mine | queue | stale | null
+let filters = {};            // { platform: 'github', approval_status: 'approved', … }
+let search = '';
+let offset = 0;
+const LIMIT = 50;
+let total = 0;
+let activePrId = null;
+let searchTimer = null;
+
+// ── Init ───────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  loadSummary();
+  loadPRs();
+  loadIdentityPrefill();
+
+  document.getElementById('search-input').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { search = e.target.value.trim(); offset = 0; loadPRs(); }, 300);
+  });
+
+  document.getElementById('btn-refresh').addEventListener('click', triggerSync);
+  document.getElementById('btn-identity').addEventListener('click', openIdentityModal);
+
+  // Close dropdowns on outside click
+  document.addEventListener('click', e => {
+    if (!e.target.closest('[id^="dd-"]')) closeAllDropdowns();
+  });
+
+  // Dropdown option click
+  document.querySelectorAll('.dd-opt').forEach(el => {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      const f = el.dataset.filter, v = el.dataset.val;
+      if (filters[f] === v) delete filters[f]; else filters[f] = v;
+      offset = 0;
+      closeAllDropdowns();
+      renderChips();
+      loadPRs();
+    });
+  });
+});
+
+// ── View / filters ─────────────────────────────────────────────────────────
+function setView(v) {
+  view = v;
+  offset = 0;
+  document.querySelectorAll('.summary-card').forEach(c => c.classList.remove('active'));
+  const map = { mine: 'card-mine', queue: 'card-queue', stale: 'card-stale', null: 'card-all' };
+  const cardId = map[v] ?? 'card-all';
+  document.getElementById(cardId)?.classList.add('active');
+  loadPRs();
+}
+
+function renderChips() {
+  const wrap = document.getElementById('active-chips');
+  wrap.innerHTML = '';
+  const labels = { platform: 'Source', approval_status: 'Status' };
+  const vals = { github: 'GitHub', ado: 'Azure DevOps', approved: 'Approved', changes_requested: 'Changes req.', pending: 'Pending', draft: 'Draft' };
+  Object.entries(filters).forEach(([k, v]) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip active';
+    chip.innerHTML = `${labels[k] || k}: ${vals[v] || v} <span class="remove" onclick="removeFilter('${k}')">×</span>`;
+    wrap.appendChild(chip);
+  });
+}
+
+function removeFilter(key) {
+  delete filters[key];
+  offset = 0;
+  renderChips();
+  loadPRs();
+}
+
+function toggleDropdown(id) {
+  const el = document.getElementById(id);
+  const wasHidden = el.classList.contains('hidden');
+  closeAllDropdowns();
+  if (wasHidden) el.classList.remove('hidden');
+}
+
+function closeAllDropdowns() {
+  document.querySelectorAll('[id^="dd-source"],[id^="dd-status"]').forEach(el => {
+    if (!el.id.includes('wrap')) el.classList.add('hidden');
+  });
+}
+
+// ── Summary ────────────────────────────────────────────────────────────────
+async function loadSummary() {
+  try {
+    const r = await fetch('/api/prs/summary');
+    const d = await r.json();
+    document.getElementById('val-mine').textContent  = d.mine?.total ?? 0;
+    document.getElementById('sub-mine').textContent  = d.mine?.needs_attention ? `${d.mine.needs_attention} need attention` : 'all good';
+    document.getElementById('val-queue').textContent = d.queue?.total ?? 0;
+    document.getElementById('sub-queue').textContent = 'awaiting your review';
+    document.getElementById('val-stale').textContent = d.stale?.total ?? 0;
+    document.getElementById('sub-stale').textContent = d.stale?.oldest_days ? `oldest: ${d.stale.oldest_days}d` : 'none stale';
+    document.getElementById('val-all').textContent   = d.all?.total ?? 0;
+    document.getElementById('sub-all').textContent   = `across ${d.all?.repo_count ?? 0} repos`;
+  } catch(e) {
+    console.warn('summary failed', e);
+  }
+}
+
+// ── PR list ────────────────────────────────────────────────────────────────
+async function loadPRs() {
+  const list = document.getElementById('pr-list');
+  const empty = document.getElementById('pr-empty');
+  const loading = document.getElementById('pr-loading');
+  list.innerHTML = '';
+  empty.classList.add('hidden');
+  loading.classList.remove('hidden');
+
+  const params = new URLSearchParams({ offset, limit: LIMIT });
+  if (view) params.set('view', view);
+  if (search) params.set('search', search);
+  Object.entries(filters).forEach(([k,v]) => params.set(k, v));
+
+  try {
+    const r = await fetch('/api/prs?' + params);
+    const d = await r.json();
+    total = d.total;
+    loading.classList.add('hidden');
+
+    if (!d.items?.length) {
+      empty.classList.remove('hidden');
+      updatePagination();
+      return;
+    }
+
+    d.items.forEach(pr => list.appendChild(buildPRRow(pr)));
+    updatePagination();
+  } catch(e) {
+    loading.textContent = 'Failed to load PRs.';
+  }
+}
+
+function buildPRRow(pr) {
+  const div = document.createElement('div');
+  div.className = 'pr-row' + (pr.id === activePrId ? ' active' : '');
+  div.dataset.id = pr.id;
+  div.onclick = () => openPanel(pr);
+
+  const ago = relativeTime(pr.pr_updated_at);
+  const isStale = pr.pr_updated_at && (Date.now() - new Date(pr.pr_updated_at)) > 5 * 86400000;
+  const srcClass = pr.platform === 'github' ? 'src-gh' : 'src-ado';
+  const srcLabel = pr.platform === 'github' ? 'GH' : 'ADO';
+  const approval = approvalBadge(pr);
+  const drafLabel = pr.is_draft ? '<span class="badge-draft text-xs">DRAFT</span> ' : '';
+  const staleLabel = isStale ? '<span class="badge-stale text-xs">stale</span> ' : '';
+  const conflictLabel = pr.has_conflicts ? '<span class="text-red-400 text-xs">⚠ conflicts</span> ' : '';
+
+  const repoShort = pr.project ? `${pr.project}/${pr.repo}` : pr.repo;
+  const reviewers = pr.reviewers?.length ? `→ ${pr.reviewers.slice(0,3).join(', ')}${pr.reviewers.length > 3 ? ` +${pr.reviewers.length-3}` : ''}` : '';
+
+  div.innerHTML = `
+    <div class="flex items-start gap-2">
+      <span class="mt-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+      <div class="flex-1 min-w-0">
+        <div class="text-sm font-medium text-slate-100 truncate">${esc(pr.title)}</div>
+        <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-xs text-slate-400">
+          <span class="${srcClass}">${srcLabel}</span>
+          <span class="truncate max-w-48" title="${esc(repoShort)}">${esc(repoShort)}</span>
+          <span class="text-slate-600">•</span>
+          <span>${esc(ago)}</span>
+          ${reviewers ? `<span class="text-slate-500 truncate max-w-40" title="${esc(pr.reviewers?.join(', ')??'')}">${esc(reviewers)}</span>` : ''}
+        </div>
+        <div class="flex items-center gap-2 mt-1 text-xs">
+          ${drafLabel}${staleLabel}${conflictLabel}${approval}
+          ${pr.comment_count ? `<span class="text-slate-500">💬 ${pr.comment_count}</span>` : ''}
+        </div>
+      </div>
+    </div>`;
+  return div;
+}
+
+function approvalBadge(pr) {
+  const map = {
+    approved: '<span class="badge-approved">✅ approved</span>',
+    changes_requested: '<span class="badge-changes">🔴 changes req.</span>',
+    draft: '<span class="badge-draft">✏ draft</span>',
+    pending: '<span class="badge-pending">⏳ pending</span>',
+  };
+  return map[pr.approval_status] || map.pending;
+}
+
+// ── Side panel ─────────────────────────────────────────────────────────────
+function openPanel(pr) {
+  activePrId = pr.id;
+  document.querySelectorAll('.pr-row').forEach(r => r.classList.toggle('active', r.dataset.id === pr.id));
+  document.getElementById('panel-title').textContent = pr.title;
+
+  const repoLabel = pr.project ? `${pr.project} › ${pr.repo}` : pr.repo;
+  const orgLabel = pr.platform === 'github' ? `github › ${pr.org}` : `azdo › ${pr.org?.split('/').pop() || pr.org}`;
+  const ago = relativeTime(pr.pr_updated_at);
+  const created = pr.pr_created_at ? new Date(pr.pr_created_at).toLocaleDateString() : '—';
+  const reviewerList = pr.reviewers?.join(', ') || '—';
+
+  const guardianUrl = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}`;
+  const wizardUrl = pr.pr_url ? `/browse-pr?url=${encodeURIComponent(pr.pr_url)}&mode=wizard` : null;
+
+  document.getElementById('panel-body').innerHTML = `
+    <div class="space-y-3">
+      <div>
+        <div class="text-xs text-slate-500 mb-0.5">Repository</div>
+        <div class="font-medium text-slate-200">${esc(orgLabel)} › ${esc(repoLabel)}</div>
+      </div>
+      <div class="grid grid-cols-2 gap-3 text-sm">
+        <div><div class="text-xs text-slate-500 mb-0.5">Author</div><div class="text-slate-200">${esc(pr.author_display || pr.author)}</div></div>
+        <div><div class="text-xs text-slate-500 mb-0.5">Updated</div><div class="text-slate-200">${esc(ago)}</div></div>
+        <div><div class="text-xs text-slate-500 mb-0.5">Created</div><div class="text-slate-200">${esc(created)}</div></div>
+        <div><div class="text-xs text-slate-500 mb-0.5">Comments</div><div class="text-slate-200">${pr.comment_count ?? 0}</div></div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-0.5">Branches</div>
+        <div class="text-xs font-mono text-slate-300">${esc(pr.source_branch)} → ${esc(pr.target_branch)}</div>
+      </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-0.5">Reviewers</div>
+        <div class="text-slate-300">${esc(reviewerList)}</div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <div>${approvalBadge(pr)}</div>
+        ${pr.is_draft ? '<div class="badge-draft text-xs">DRAFT</div>' : ''}
+        ${pr.has_conflicts ? '<div class="text-red-400 text-xs">⚠ conflicts</div>' : ''}
+      </div>
+    </div>
+    <div class="space-y-2 pt-2 border-t border-slate-800">
+      <a href="${esc(pr.pr_url)}" target="_blank" rel="noopener"
+         class="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg border border-slate-700 hover:border-slate-500 text-sm text-slate-300 hover:text-slate-100 transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
+        </svg>
+        Open in ${pr.platform === 'github' ? 'GitHub' : 'Azure DevOps'}
+      </a>
+      <a href="${esc(guardianUrl)}"
+         class="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg border border-indigo-700 hover:border-indigo-500 bg-indigo-900/30 hover:bg-indigo-900/50 text-sm text-indigo-300 hover:text-indigo-100 transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347c-.75.412-1.667-.13-1.667-.986V5.653Z"/>
+        </svg>
+        Start Review
+      </a>
+      ${wizardUrl ? `<a href="${esc(wizardUrl)}"
+         class="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg border border-emerald-800 hover:border-emerald-600 bg-emerald-900/20 hover:bg-emerald-900/40 text-sm text-emerald-400 hover:text-emerald-200 transition-colors">
+        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"/>
+        </svg>
+        🧙 Wizard Review
+      </a>` : ''}
+    </div>`;
+
+  document.getElementById('panel-overlay').style.display = 'block';
+  document.getElementById('side-panel').classList.add('open');
+}
+
+function closePanel() {
+  activePrId = null;
+  document.querySelectorAll('.pr-row').forEach(r => r.classList.remove('active'));
+  document.getElementById('panel-overlay').style.display = 'none';
+  document.getElementById('side-panel').classList.remove('open');
+}
+
+// ── Pagination ─────────────────────────────────────────────────────────────
+function updatePagination() {
+  const pag = document.getElementById('pagination');
+  const info = document.getElementById('page-info');
+  const prev = document.getElementById('btn-prev');
+  const next = document.getElementById('btn-next');
+  if (total > LIMIT) {
+    pag.style.removeProperty('display');
+    info.textContent = `${offset + 1}–${Math.min(offset + LIMIT, total)} of ${total}`;
+    prev.disabled = offset === 0;
+    next.disabled = offset + LIMIT >= total;
+  } else {
+    pag.style.display = 'none';
+  }
+}
+
+function changePage(dir) {
+  offset = Math.max(0, offset + dir * LIMIT);
+  loadPRs();
+}
+
+// ── Identity modal ─────────────────────────────────────────────────────────
+async function loadIdentityPrefill() {
+  try {
+    const r = await fetch('/api/user/identity');
+    const d = await r.json();
+    document.getElementById('inp-gh').value  = d.github_handle || '';
+    document.getElementById('inp-ado').value = d.ado_upn || '';
+  } catch(e) {}
+}
+
+function openIdentityModal() {
+  document.getElementById('identity-modal').style.removeProperty('display');
+}
+function closeIdentityModal() {
+  document.getElementById('identity-modal').style.display = 'none';
+}
+
+async function saveIdentity() {
+  const gh  = document.getElementById('inp-gh').value.trim();
+  const ado = document.getElementById('inp-ado').value.trim();
+  try {
+    await fetch('/api/user/identity', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ github_handle: gh || null, ado_upn: ado || null }),
+    });
+    closeIdentityModal();
+    loadSummary();
+    loadPRs();
+  } catch(e) {
+    alert('Failed to save identity. Make sure the database is connected.');
+  }
+}
+
+// ── Sync trigger ───────────────────────────────────────────────────────────
+async function triggerSync() {
+  const btn = document.getElementById('btn-refresh');
+  btn.textContent = '↻ Syncing…';
+  btn.disabled = true;
+  try {
+    await fetch('/api/prs/sync', { method: 'POST' });
+    setTimeout(() => { loadSummary(); loadPRs(); btn.textContent = '↻ Sync'; btn.disabled = false; }, 3000);
+  } catch(e) {
+    btn.textContent = '↻ Sync'; btn.disabled = false;
+  }
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function relativeTime(iso) {
+  if (!iso) return '—';
+  const diff = Date.now() - new Date(iso);
+  const m = Math.floor(diff / 60000);
+  if (m < 1)  return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  if (d < 30) return `${d}d ago`;
+  return `${Math.floor(d / 30)}mo ago`;
+}
+</script>
+</body>
+</html>
