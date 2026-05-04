@@ -166,6 +166,28 @@
   </div>
 </div>
 
+<!-- Edit PAT Modal -->
+<div id="edit-pat-overlay" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center">
+  <div class="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
+    <h3 class="text-sm font-semibold mb-4">Edit PAT: <span id="edit-pat-name-label" class="text-slate-300 font-mono"></span></h3>
+    <input type="hidden" id="edit-pat-id">
+    <div class="space-y-4">
+      <div>
+        <label class="text-xs font-medium text-slate-300 block mb-1">Description <span class="text-slate-500 font-normal">(optional)</span></label>
+        <input type="text" id="edit-pat-description" class="form-input w-full" placeholder="e.g. Acme org read access">
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-300 block mb-1">New Token <span class="text-slate-500 font-normal">(leave blank to keep existing)</span></label>
+        <input type="password" id="edit-pat-token" class="form-input w-full font-mono" placeholder="ghp_xxxx...">
+      </div>
+    </div>
+    <div class="flex gap-3 justify-end mt-6">
+      <button class="btn btn-secondary btn-sm" onclick="closeEditPatModal()">Cancel</button>
+      <button class="btn btn-primary btn-sm" onclick="saveEditPat()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
   <div class="px-4 py-2 rounded-lg text-sm shadow-lg" id="toast-inner"></div>
@@ -379,6 +401,8 @@ document.addEventListener('click', e => {
   if (delBtn) { deletePat(delBtn.dataset.id, delBtn.dataset.name); return; }
   const defBtn = e.target.closest('.pat-set-default');
   if (defBtn) { setPatDefault(defBtn.dataset.id, defBtn.dataset.name); return; }
+  const editBtn = e.target.closest('.pat-edit');
+  if (editBtn) { showEditPatModal(editBtn.dataset.id, editBtn.dataset.name, editBtn.dataset.description); return; }
 });
 
 async function loadPats() {
@@ -403,7 +427,8 @@ async function loadPats() {
         <td class="py-2 font-mono text-slate-400">${esc(p.token_prefix)}</td>
         <td class="py-2">${p.is_default ? '<span class="text-emerald-400 font-semibold">default</span>' : `<button class="pat-set-default text-slate-400 hover:text-slate-200 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Set default</button>`}</td>
         <td class="py-2 text-slate-400">${fmtDate(p.created_at)}</td>
-        <td class="py-2 text-right">
+        <td class="py-2 text-right space-x-3">
+          <button class="pat-edit text-slate-400 hover:text-slate-200 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}" data-description="${esc(p.description || '')}">Edit</button>
           <button class="pat-delete text-red-400 hover:text-red-300 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Delete</button>
         </td>
       </tr>`).join('');
@@ -469,6 +494,42 @@ async function deletePat(id, name) {
       throw new Error(err.detail || `HTTP ${r.status}`);
     }
     showToast(`PAT "${name}" deleted`);
+    loadPats();
+  } catch (e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
+function showEditPatModal(id, name, description) {
+  document.getElementById('edit-pat-id').value = id;
+  document.getElementById('edit-pat-name-label').textContent = name;
+  document.getElementById('edit-pat-description').value = description;
+  document.getElementById('edit-pat-token').value = '';
+  document.getElementById('edit-pat-overlay').classList.remove('hidden');
+}
+
+function closeEditPatModal() {
+  document.getElementById('edit-pat-overlay').classList.add('hidden');
+}
+
+async function saveEditPat() {
+  const id = document.getElementById('edit-pat-id').value;
+  const description = document.getElementById('edit-pat-description').value.trim();
+  const token = document.getElementById('edit-pat-token').value.trim();
+  const body = { description };
+  if (token) body.token = token;
+  try {
+    const r = await fetch(`${API}/github-pats/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    closeEditPatModal();
+    showToast('PAT updated');
     loadPats();
   } catch (e) {
     showToast(`Failed: ${e.message}`, 'error');

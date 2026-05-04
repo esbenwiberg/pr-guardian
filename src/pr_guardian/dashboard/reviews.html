@@ -344,17 +344,18 @@ async function loadPatOptions() {
   _loadedPats = [];
   try {
     const r = await fetch('/api/admin/github-pats');
-    if (!r.ok) return;
-    const pats = await r.json();
-    _loadedPats = pats;
-    sel.innerHTML = '<option value="">Default (env var or configured default)</option>';
-    pats.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.name;
-      opt.textContent = p.name + (p.description ? ` — ${p.description}` : '') + (p.is_default ? ' ★' : '');
-      if (p.is_default) opt.selected = true;
-      sel.appendChild(opt);
-    });
+    if (r.ok) {
+      const pats = await r.json();
+      _loadedPats = pats;
+      sel.innerHTML = '<option value="">Default (env var or configured default)</option>';
+      pats.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.name;
+        opt.textContent = p.name + (p.description ? ` — ${p.description}` : '') + (p.is_default ? ' ★' : '');
+        if (p.is_default) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
   } catch (_) {
     // Non-admin or no DB — PAT row stays hidden
   }
