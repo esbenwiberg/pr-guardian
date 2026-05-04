@@ -33,7 +33,7 @@ def upgrade() -> None:
         op.create_table(
             "github_pats",
             sa.Column("id", UUID(as_uuid=True), primary_key=True),
-            sa.Column("name", sa.String(128), nullable=False, unique=True),
+            sa.Column("name", sa.String(128), nullable=False),
             sa.Column("description", sa.String(256), nullable=False, server_default=""),
             sa.Column("encrypted_token", sa.Text, nullable=False),
             sa.Column("token_prefix", sa.String(20), nullable=False, server_default=""),

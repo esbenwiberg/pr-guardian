@@ -561,7 +561,10 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
                 ).first()
                 if not row:
                     raise LookupError(f"GitHub PAT not found: {pat_name!r}")
-                decrypted = decrypt(row.encrypted_token)
+                try:
+                    decrypted = decrypt(row.encrypted_token)
+                except Exception:
+                    raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
                 if not decrypted:
                     raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
                 return decrypted
