@@ -480,7 +480,7 @@ async def create_github_pat(
             name=name,
             description=description,
             encrypted_token=encrypt(token),
-            token_prefix=token[:16] + "..." if len(token) > 16 else token,
+            token_prefix=token[:8] + "..." if len(token) > 8 else token,
             is_default=is_default,
         )
         session.add(row)
@@ -518,7 +518,7 @@ async def update_github_pat(
             row.description = description
         if token is not None:
             row.encrypted_token = encrypt(token)
-            row.token_prefix = token[:16] + "..." if len(token) > 16 else token
+            row.token_prefix = token[:8] + "..." if len(token) > 8 else token
         if is_default is not None:
             row.is_default = is_default
         row.updated_at = datetime.now(timezone.utc)
@@ -542,7 +542,10 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
     """Resolve the GitHub token to use for a review.
 
     Priority: named PAT (if pat_name given) > default PAT in DB > GITHUB_TOKEN env var.
-    Falls back gracefully when no DB is available.
+
+    When pat_name is explicitly provided, raises LookupError if no matching PAT is found.
+    Falls back gracefully to GITHUB_TOKEN env var only when no pat_name is given and the DB
+    has no default PAT configured (or the DB is unavailable).
     """
     import os
 
@@ -556,16 +559,24 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
                         select(GithubPatRow).where(GithubPatRow.name == pat_name)
                     )
                 ).first()
+                if not row:
+                    raise LookupError(f"GitHub PAT not found: {pat_name!r}")
+                decrypted = decrypt(row.encrypted_token)
+                if not decrypted:
+                    raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
+                return decrypted
             else:
                 row = (
                     await session.scalars(
                         select(GithubPatRow).where(GithubPatRow.is_default.is_(True))
                     )
                 ).first()
-            if row:
-                decrypted = decrypt(row.encrypted_token)
-                if decrypted:
-                    return decrypted
+                if row:
+                    decrypted = decrypt(row.encrypted_token)
+                    if decrypted:
+                        return decrypted
+    except LookupError:
+        raise
     except Exception:
         log.warning("resolve_github_token_failed", hint="DB unavailable or decrypt error; falling back to env var")
     return os.environ.get("GITHUB_TOKEN", "")

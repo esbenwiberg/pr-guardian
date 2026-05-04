@@ -34,7 +34,7 @@ def _make_pat_row(
     row.name = name
     row.description = description
     row.encrypted_token = encrypt(token)
-    row.token_prefix = token[:16] + "..." if len(token) > 16 else token
+    row.token_prefix = token[:8] + "..." if len(token) > 8 else token
     row.is_default = is_default
     row.created_at = datetime.now(timezone.utc)
     row.updated_at = datetime.now(timezone.utc)
@@ -128,7 +128,7 @@ async def test_create_github_pat_encrypts_token():
 
 
 async def test_create_github_pat_sets_token_prefix():
-    token = "ghp_abcdefghijklmnopqrstuvwxyz"  # > 16 chars
+    token = "ghp_abcdefghijklmnopqrstuvwxyz"  # > 8 chars
     session = AsyncMock()
     session.execute = AsyncMock()
     captured = None
@@ -149,7 +149,7 @@ async def test_create_github_pat_sets_token_prefix():
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
         await create_github_pat(name="pat", token=token, is_default=False)
 
-    assert captured.token_prefix == token[:16] + "..."
+    assert captured.token_prefix == token[:8] + "..."
 
 
 async def test_create_github_pat_is_default_clears_others():
@@ -219,7 +219,7 @@ async def test_update_github_pat_re_encrypts_token():
         await update_github_pat(row.id, token="new_token_abcdefghijk")
 
     assert decrypt(row.encrypted_token) == "new_token_abcdefghijk"
-    assert row.token_prefix == "new_token_abcdef..."
+    assert row.token_prefix == "new_toke..."
 
 
 async def test_update_github_pat_default_true_clears_others():
@@ -322,7 +322,7 @@ async def test_resolve_github_token_db_error_falls_back_to_env(monkeypatch):
 
 
 async def test_resolve_github_token_corrupt_ciphertext_falls_back_to_env(monkeypatch):
-    """A corrupted encrypted_token must fall back to GITHUB_TOKEN env var."""
+    """A corrupted encrypted_token on the *default* PAT falls back to GITHUB_TOKEN env var."""
     monkeypatch.setenv("GITHUB_TOKEN", "env_fallback")
     row = MagicMock()
     row.encrypted_token = "definitely-not-valid-fernet-token"
@@ -332,7 +332,35 @@ async def test_resolve_github_token_corrupt_ciphertext_falls_back_to_env(monkeyp
     session.scalars = AsyncMock(return_value=scalars_result)
 
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
-        token = await resolve_github_token()
+        token = await resolve_github_token()  # no pat_name → default PAT path
 
     # decrypt() returns "" on bad ciphertext; resolve_github_token falls back to env var
     assert token == "env_fallback"
+
+
+async def test_resolve_github_token_named_pat_not_found_raises():
+    """Requesting a specific named PAT that does not exist must raise LookupError."""
+    session = AsyncMock()
+    scalars_result = MagicMock()
+    scalars_result.first.return_value = None  # PAT not in DB
+    session.scalars = AsyncMock(return_value=scalars_result)
+
+    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+        import pytest
+        with pytest.raises(LookupError, match="GitHub PAT not found: 'missing-org'"):
+            await resolve_github_token("missing-org")
+
+
+async def test_resolve_github_token_named_pat_corrupt_token_raises():
+    """A named PAT with a corrupted ciphertext must raise LookupError, not silently use env var."""
+    row = MagicMock()
+    row.encrypted_token = "not-valid-fernet"
+    session = AsyncMock()
+    scalars_result = MagicMock()
+    scalars_result.first.return_value = row
+    session.scalars = AsyncMock(return_value=scalars_result)
+
+    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+        import pytest
+        with pytest.raises(LookupError, match="corrupted"):
+            await resolve_github_token("my-pat")

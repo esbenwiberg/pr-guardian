@@ -70,7 +70,10 @@ async def manual_review(req: ReviewRequest, request: Request):
     """
     stub, platform_name = _parse_pr_url(req.pr_url)
     if platform_name == "github":
-        adapter = await create_github_adapter(req.pat_name)
+        try:
+            adapter = await create_github_adapter(req.pat_name)
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e))
     else:
         adapter = create_adapter(platform_name)
 

@@ -326,13 +326,27 @@ function renderReviewRow(r, idx) {
 }
 
 // ---- Review Modal ----
+let _loadedPats = [];
+
+function _isGithubUrl(url) {
+  return /https?:\/\/github\.com\//i.test(url);
+}
+
+function _updatePatRowVisibility() {
+  const url = document.getElementById('review-pr-url').value.trim();
+  const isGitHub = _isGithubUrl(url) || url === '';
+  document.getElementById('review-pat-row').style.display =
+    (isGitHub && _loadedPats.length) ? '' : 'none';
+}
+
 async function loadPatOptions() {
   const sel = document.getElementById('review-pat-name');
+  _loadedPats = [];
   try {
     const r = await fetch('/api/admin/github-pats');
     if (!r.ok) return;
     const pats = await r.json();
-    // Keep the default option, rebuild the rest
+    _loadedPats = pats;
     sel.innerHTML = '<option value="">Default (env var or configured default)</option>';
     pats.forEach(p => {
       const opt = document.createElement('option');
@@ -341,23 +355,24 @@ async function loadPatOptions() {
       if (p.is_default) opt.selected = true;
       sel.appendChild(opt);
     });
-    // Only show the row if there are any PATs configured
-    document.getElementById('review-pat-row').style.display = pats.length ? '' : 'none';
   } catch (_) {
-    document.getElementById('review-pat-row').style.display = 'none';
+    // Non-admin or no DB — PAT row stays hidden
   }
+  _updatePatRowVisibility();
 }
 
 function openReviewModal() {
   document.getElementById('review-modal-overlay').classList.remove('hidden');
   document.getElementById('review-pr-url').focus();
   loadPatOptions();
+  document.getElementById('review-pr-url').addEventListener('input', _updatePatRowVisibility);
 }
 function closeReviewModal() {
   document.getElementById('review-modal-overlay').classList.add('hidden');
   document.getElementById('review-status').style.display = 'none';
   document.getElementById('review-submit-btn').disabled = false;
   document.getElementById('review-submit-btn').textContent = 'Start Review';
+  document.getElementById('review-pr-url').removeEventListener('input', _updatePatRowVisibility);
 }
 document.getElementById('review-modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('review-modal-overlay')) closeReviewModal();
