@@ -196,13 +196,16 @@ async def update_github_pat(
     token = body.token.strip() if body.token is not None else None
     if token is not None and not token:
         raise HTTPException(400, "Token cannot be empty")
-    updated = await storage.update_github_pat(
-        pat_id,
-        name=name,
-        token=token,
-        description=body.description.strip() if body.description is not None else None,
-        is_default=body.is_default,
-    )
+    try:
+        updated = await storage.update_github_pat(
+            pat_id,
+            name=name,
+            token=token,
+            description=body.description.strip() if body.description is not None else None,
+            is_default=body.is_default,
+        )
+    except IntegrityError:
+        raise HTTPException(409, "A GitHub PAT with that name already exists")
     if not updated:
         raise HTTPException(404, "GitHub PAT not found")
 
