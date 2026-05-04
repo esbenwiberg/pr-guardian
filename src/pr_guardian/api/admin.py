@@ -141,6 +141,14 @@ async def revoke_api_key(key_id: uuid.UUID, identity: Identity = Depends(require
 # ---------------------------------------------------------------------------
 
 
+def _raise_pat_integrity_error(exc: "IntegrityError") -> None:
+    """Translate a DB IntegrityError into the correct 409 detail message."""
+    err = str(exc.orig).lower() if exc.orig is not None else str(exc).lower()
+    if "uq_github_pats_single_default" in err:
+        raise HTTPException(409, "Another GitHub PAT is already set as the default")
+    raise HTTPException(409, "A GitHub PAT with that name already exists")
+
+
 class CreateGithubPatRequest(BaseModel):
     name: str
     token: str
@@ -177,8 +185,8 @@ async def create_github_pat(body: CreateGithubPatRequest, identity: Identity = D
             description=body.description.strip(),
             is_default=body.is_default,
         )
-    except IntegrityError:
-        raise HTTPException(409, "A GitHub PAT with that name already exists")
+    except IntegrityError as exc:
+        _raise_pat_integrity_error(exc)
     log.info("github_pat_created", name=name, by=identity.display_name)
     return pat
 
@@ -204,8 +212,8 @@ async def update_github_pat(
             description=body.description.strip() if body.description is not None else None,
             is_default=body.is_default,
         )
-    except IntegrityError:
-        raise HTTPException(409, "A GitHub PAT with that name already exists")
+    except IntegrityError as exc:
+        _raise_pat_integrity_error(exc)
     if not updated:
         raise HTTPException(404, "GitHub PAT not found")
 
