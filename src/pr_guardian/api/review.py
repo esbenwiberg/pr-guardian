@@ -25,7 +25,8 @@ _GITHUB_PR_RE = re.compile(
     r"https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+)/pull/(?P<number>\d+)"
 )
 _ADO_PR_RE = re.compile(
-    r"https?://dev\.azure\.com/(?P<org>[^/]+)/(?P<project>[^/]+)/_git/(?P<repo>[^/]+)/pullrequest/(?P<number>\d+)"
+    r"https?://dev\.azure\.com/(?P<org>[^/]+)/(?P<project>[^/]+)/_git/(?P<repo>[^/]+)/pullrequest/(?P<number>\d+)",
+    re.IGNORECASE,
 )
 
 
