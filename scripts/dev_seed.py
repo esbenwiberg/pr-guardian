@@ -33,6 +33,9 @@ from pr_guardian.persistence.models import (
     ScanAgentResultRow,
     ScanFindingRow,
     ScanRow,
+    SyncedPRRow,
+    SyncSourceRow,
+    UserIdentityRow,
 )
 
 DEV_ADMIN_EMAIL = "ewi@projectum.com"
@@ -56,6 +59,9 @@ async def _wipe() -> None:
             GlobalConfigRow,
             ApiKeyRow,
             AdminRow,
+            SyncedPRRow,
+            SyncSourceRow,
+            UserIdentityRow,
         ):
             await s.execute(delete(model))
         await s.commit()
@@ -345,6 +351,168 @@ async def _seed_admin() -> None:
         await s.commit()
 
 
+def _synced_pr(
+    *,
+    platform: str,
+    pr_id: str,
+    org: str,
+    repo: str,
+    project: str = "",
+    title: str,
+    author: str,
+    author_display: str = "",
+    source_branch: str,
+    target_branch: str = "main",
+    approval_status: str = "pending",
+    reviewers: list | None = None,
+    comment_count: int = 0,
+    is_draft: bool = False,
+    has_conflicts: bool = False,
+    created_days_ago: int = 0,
+    updated_hours_ago: int = 1,
+) -> SyncedPRRow:
+    if platform == "github":
+        pr_url = f"https://github.com/{org}/{repo}/pull/{pr_id}"
+    else:
+        pr_url = f"https://dev.azure.com/{org}/{project}/_git/{repo}/pullrequest/{pr_id}"
+    return SyncedPRRow(
+        id=uuid.uuid4(),
+        platform=platform,
+        pr_id=pr_id,
+        org=org,
+        project=project,
+        repo=repo,
+        title=title,
+        author=author,
+        author_display=author_display or author,
+        pr_url=pr_url,
+        source_branch=source_branch,
+        target_branch=target_branch,
+        is_draft=is_draft,
+        has_conflicts=has_conflicts,
+        approval_status=approval_status,
+        reviewers=reviewers or [],
+        comment_count=comment_count,
+        pr_created_at=_ago(days=created_days_ago),
+        pr_updated_at=_ago(hours=updated_hours_ago),
+        synced_at=NOW,
+    )
+
+
+async def _seed_pr_dashboard() -> None:
+    sources = [
+        SyncSourceRow(
+            id=uuid.uuid4(), platform="github", org="esbenwiberg",
+            repo="pr-guardian", repo_url="https://github.com/esbenwiberg/pr-guardian",
+            last_synced_at=_ago(minutes=3), is_active=True,
+        ),
+        SyncSourceRow(
+            id=uuid.uuid4(), platform="github", org="esbenwiberg",
+            repo="orcha", repo_url="https://github.com/esbenwiberg/orcha",
+            last_synced_at=_ago(minutes=3), is_active=True,
+        ),
+        SyncSourceRow(
+            id=uuid.uuid4(), platform="ado", org="contextand",
+            project="Platform", repo="infra-core",
+            repo_url="https://dev.azure.com/contextand/Platform/_git/infra-core",
+            last_synced_at=_ago(minutes=3), is_active=True,
+        ),
+    ]
+
+    prs = [
+        # My PRs (author = DEV_ADMIN_EMAIL → github handle esbenwiberg)
+        _synced_pr(
+            platform="github", pr_id="131", org="esbenwiberg", repo="pr-guardian",
+            title="Add PR dashboard sync worker", author="esbenwiberg",
+            source_branch="feat/pr-dashboard", approval_status="approved",
+            reviewers=["alice", "bob"], comment_count=4, created_days_ago=2,
+            updated_hours_ago=3,
+        ),
+        _synced_pr(
+            platform="github", pr_id="132", org="esbenwiberg", repo="pr-guardian",
+            title="Bump uvicorn to 0.30.1", author="esbenwiberg",
+            source_branch="chore/uvicorn-bump", approval_status="pending",
+            reviewers=["alice"], comment_count=0, created_days_ago=1,
+            updated_hours_ago=10,
+        ),
+        # Review queue — user is a reviewer
+        _synced_pr(
+            platform="github", pr_id="133", org="esbenwiberg", repo="orcha",
+            title="Replace polling loop with webhook receiver", author="alice",
+            source_branch="feat/webhooks", approval_status="pending",
+            reviewers=["esbenwiberg", "carol"], comment_count=7,
+            created_days_ago=3, updated_hours_ago=2,
+        ),
+        _synced_pr(
+            platform="github", pr_id="134", org="esbenwiberg", repo="pr-guardian",
+            title="Refactor triage classifier — extract scorer", author="bob",
+            source_branch="refactor/triage-scorer", approval_status="changes_requested",
+            reviewers=["esbenwiberg"], comment_count=12, created_days_ago=4,
+            updated_hours_ago=5, has_conflicts=True,
+        ),
+        _synced_pr(
+            platform="ado", pr_id="201", org="contextand", project="Platform",
+            repo="infra-core", title="Migrate Terraform state to remote backend",
+            author="carol@contextand.com", author_display="Carol Jensen",
+            source_branch="feat/tf-remote-state", approval_status="pending",
+            reviewers=["ewi@contextand.com"], comment_count=3,
+            created_days_ago=1, updated_hours_ago=4,
+        ),
+        # Stale PRs (>5 days old, low activity)
+        _synced_pr(
+            platform="github", pr_id="119", org="esbenwiberg", repo="orcha",
+            title="WIP: experiment with streaming LLM responses", author="alice",
+            source_branch="experiment/streaming", approval_status="pending",
+            reviewers=[], comment_count=1, created_days_ago=14,
+            updated_hours_ago=72, is_draft=True,
+        ),
+        _synced_pr(
+            platform="github", pr_id="122", org="esbenwiberg", repo="pr-guardian",
+            title="Add OpenTelemetry tracing spans", author="bob",
+            source_branch="feat/otel", approval_status="pending",
+            reviewers=["esbenwiberg"], comment_count=2, created_days_ago=9,
+            updated_hours_ago=48,
+        ),
+        _synced_pr(
+            platform="ado", pr_id="188", org="contextand", project="Platform",
+            repo="infra-core", title="Upgrade PostgreSQL 15 → 16",
+            author="dave@contextand.com", author_display="Dave Olsen",
+            source_branch="chore/pg16", approval_status="approved",
+            reviewers=["ewi@contextand.com", "carol@contextand.com"],
+            comment_count=5, created_days_ago=7, updated_hours_ago=30,
+        ),
+        # A couple more active PRs
+        _synced_pr(
+            platform="github", pr_id="135", org="esbenwiberg", repo="pr-guardian",
+            title="Add inline comment posting to GitHub reviews", author="carol",
+            source_branch="feat/inline-comments", approval_status="approved",
+            reviewers=["esbenwiberg", "alice"], comment_count=8,
+            created_days_ago=0, updated_hours_ago=1,
+        ),
+        _synced_pr(
+            platform="ado", pr_id="205", org="contextand", project="Platform",
+            repo="infra-core", title="Add alerting rules for sync worker lag",
+            author="ewi@contextand.com", author_display="Esben Wiberg",
+            source_branch="feat/sync-alerts", approval_status="pending",
+            reviewers=["dave@contextand.com"], comment_count=0,
+            created_days_ago=0, updated_hours_ago=0,
+        ),
+    ]
+
+    identity = UserIdentityRow(
+        email=DEV_ADMIN_EMAIL,
+        github_handle="esbenwiberg",
+        ado_upn="ewi@contextand.com",
+        updated_at=NOW,
+    )
+
+    async with async_session() as s:
+        s.add_all(sources)
+        s.add_all(prs)
+        s.add(identity)
+        await s.commit()
+
+
 async def main() -> None:
     if not os.environ.get("DATABASE_URL"):
         raise SystemExit("DATABASE_URL not set — refusing to seed.")
@@ -357,6 +525,7 @@ async def main() -> None:
     await _seed_reviews()
     await _seed_dismissals()
     await _seed_admin()
+    await _seed_pr_dashboard()
 
     # Dispose engine so uvicorn worker starts clean.
     await close_db()
@@ -365,7 +534,7 @@ async def main() -> None:
     _db._engine = None
     _db._session_factory = None
 
-    print("[dev_seed] seeded 7 reviews, 1 dismissal, 1 admin")
+    print("[dev_seed] seeded 7 reviews, 1 dismissal, 1 admin, 10 synced PRs, 3 sync sources, 1 identity")
 
 
 if __name__ == "__main__":
