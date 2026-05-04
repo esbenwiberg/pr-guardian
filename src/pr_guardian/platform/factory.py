@@ -9,10 +9,14 @@ from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.models.pr import PlatformPR
 
 
-def create_adapter(platform: str) -> PlatformAdapter:
-    """Create the appropriate platform adapter."""
+def create_adapter(platform: str, *, token_override: str | None = None) -> PlatformAdapter:
+    """Create the appropriate platform adapter.
+
+    For GitHub, pass token_override to use a specific token instead of GITHUB_TOKEN.
+    Use create_github_adapter() when you need async PAT resolution from the database.
+    """
     if platform == "github":
-        token = os.environ.get("GITHUB_TOKEN", "")
+        token = token_override if token_override is not None else os.environ.get("GITHUB_TOKEN", "")
         return GitHubAdapter(token=token)
 
     if platform == "ado":
@@ -21,6 +25,17 @@ def create_adapter(platform: str) -> PlatformAdapter:
         return ADOAdapter(pat=pat, org_url=org_url)
 
     raise ValueError(f"Unknown platform: {platform}")
+
+
+async def create_github_adapter(pat_name: str | None = None) -> GitHubAdapter:
+    """Create a GitHubAdapter, resolving the token from DB or env var.
+
+    Priority: named PAT by pat_name > default PAT in DB > GITHUB_TOKEN env var.
+    """
+    from pr_guardian.persistence import storage
+
+    token = await storage.resolve_github_token(pat_name)
+    return GitHubAdapter(token=token)
 
 
 def normalize_webhook(payload: WebhookPayload) -> PlatformPR | None:

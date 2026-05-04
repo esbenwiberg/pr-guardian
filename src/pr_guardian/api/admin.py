@@ -133,3 +133,79 @@ async def revoke_api_key(key_id: uuid.UUID, identity: Identity = Depends(require
 
     log.info("api_key_revoked", key_id=str(key_id), by=identity.display_name)
     return {"status": "revoked", "id": str(key_id)}
+
+
+# ---------------------------------------------------------------------------
+# GitHub PAT management
+# ---------------------------------------------------------------------------
+
+
+class CreateGithubPatRequest(BaseModel):
+    name: str
+    token: str
+    description: str = ""
+    is_default: bool = False
+
+
+class UpdateGithubPatRequest(BaseModel):
+    name: str | None = None
+    token: str | None = None
+    description: str | None = None
+    is_default: bool | None = None
+
+
+@router.get("/github-pats")
+async def list_github_pats(identity: Identity = Depends(require_admin)):
+    """List all configured GitHub PATs (token is never returned)."""
+    return await storage.list_github_pats()
+
+
+@router.post("/github-pats", status_code=201)
+async def create_github_pat(body: CreateGithubPatRequest, identity: Identity = Depends(require_admin)):
+    """Store a new named GitHub PAT."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "PAT name is required")
+    if not body.token.strip():
+        raise HTTPException(400, "Token is required")
+
+    pat = await storage.create_github_pat(
+        name=name,
+        token=body.token.strip(),
+        description=body.description.strip(),
+        is_default=body.is_default,
+    )
+    log.info("github_pat_created", name=name, by=identity.display_name)
+    return pat
+
+
+@router.put("/github-pats/{pat_id}")
+async def update_github_pat(
+    pat_id: uuid.UUID,
+    body: UpdateGithubPatRequest,
+    identity: Identity = Depends(require_admin),
+):
+    """Update a GitHub PAT (name, description, token, or default flag)."""
+    updated = await storage.update_github_pat(
+        pat_id,
+        name=body.name.strip() if body.name is not None else None,
+        token=body.token.strip() if body.token is not None else None,
+        description=body.description.strip() if body.description is not None else None,
+        is_default=body.is_default,
+    )
+    if not updated:
+        raise HTTPException(404, "GitHub PAT not found")
+
+    log.info("github_pat_updated", pat_id=str(pat_id), by=identity.display_name)
+    return updated
+
+
+@router.delete("/github-pats/{pat_id}")
+async def delete_github_pat(pat_id: uuid.UUID, identity: Identity = Depends(require_admin)):
+    """Delete a GitHub PAT."""
+    deleted = await storage.delete_github_pat(pat_id)
+    if not deleted:
+        raise HTTPException(404, "GitHub PAT not found")
+
+    log.info("github_pat_deleted", pat_id=str(pat_id), by=identity.display_name)
+    return {"status": "deleted", "id": str(pat_id)}

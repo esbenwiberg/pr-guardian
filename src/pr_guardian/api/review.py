@@ -16,7 +16,7 @@ from pr_guardian.core.repo_review import (
     build_repo_diff,
 )
 from pr_guardian.models.pr import Platform, PlatformPR
-from pr_guardian.platform.factory import create_adapter
+from pr_guardian.platform.factory import create_adapter, create_github_adapter
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/api", tags=["review"])
@@ -35,6 +35,7 @@ class ReviewRequest(BaseModel):
     pr_url: str
     dry_run: bool = False
     comment_mode: Literal["none", "summary", "inline"] = "none"
+    pat_name: str | None = None
 
 
 class ReviewResponse(BaseModel):
@@ -68,7 +69,10 @@ async def manual_review(req: ReviewRequest, request: Request):
     Returns immediately so the caller can track progress via the active reviews panel.
     """
     stub, platform_name = _parse_pr_url(req.pr_url)
-    adapter = create_adapter(platform_name)
+    if platform_name == "github":
+        adapter = await create_github_adapter(req.pat_name)
+    else:
+        adapter = create_adapter(platform_name)
 
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)

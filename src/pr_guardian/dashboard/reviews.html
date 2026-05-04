@@ -173,6 +173,12 @@
               <option value="inline">Inline comments</option>
             </select>
           </div>
+          <div id="review-pat-row">
+            <label class="form-label" for="review-pat-name">GitHub PAT <span class="text-slate-500 font-normal text-xs">(optional)</span></label>
+            <select id="review-pat-name" class="form-input w-full">
+              <option value="">Default (env var or configured default)</option>
+            </select>
+          </div>
         </div>
         <div class="dialog-footer">
           <div id="review-status" class="text-sm hidden mr-auto"></div>
@@ -320,9 +326,32 @@ function renderReviewRow(r, idx) {
 }
 
 // ---- Review Modal ----
+async function loadPatOptions() {
+  const sel = document.getElementById('review-pat-name');
+  try {
+    const r = await fetch('/api/admin/github-pats');
+    if (!r.ok) return;
+    const pats = await r.json();
+    // Keep the default option, rebuild the rest
+    sel.innerHTML = '<option value="">Default (env var or configured default)</option>';
+    pats.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.textContent = p.name + (p.description ? ` — ${p.description}` : '') + (p.is_default ? ' ★' : '');
+      if (p.is_default) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    // Only show the row if there are any PATs configured
+    document.getElementById('review-pat-row').style.display = pats.length ? '' : 'none';
+  } catch (_) {
+    document.getElementById('review-pat-row').style.display = 'none';
+  }
+}
+
 function openReviewModal() {
   document.getElementById('review-modal-overlay').classList.remove('hidden');
   document.getElementById('review-pr-url').focus();
+  loadPatOptions();
 }
 function closeReviewModal() {
   document.getElementById('review-modal-overlay').classList.add('hidden');
@@ -406,6 +435,7 @@ async function submitReview(e) {
   e.preventDefault();
   const url = document.getElementById('review-pr-url').value.trim();
   const commentMode = document.getElementById('review-comment-mode').value;
+  const patName = document.getElementById('review-pat-name').value || null;
   const btn = document.getElementById('review-submit-btn');
   const status = document.getElementById('review-status');
 
@@ -416,10 +446,12 @@ async function submitReview(e) {
   status.textContent = 'Submitting review request...';
 
   try {
+    const body = { pr_url: url, comment_mode: commentMode };
+    if (patName) body.pat_name = patName;
     const resp = await fetch('/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pr_url: url, comment_mode: commentMode }),
+      body: JSON.stringify(body),
     });
     const data = await resp.json();
     if (!resp.ok) {
