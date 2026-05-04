@@ -21,6 +21,7 @@ from pr_guardian.persistence.models import (
     ApiKeyRow,
     FindingDismissalRow,
     FindingRow,
+    GithubPatRow,
     GlobalConfigRow,
     MechanicalResultRow,
     PostedInlineCommentRow,
@@ -429,6 +430,159 @@ async def delete_global_config(key: str) -> bool:
         await session.delete(row)
         await session.commit()
         return True
+
+
+# ---------------------------------------------------------------------------
+# GitHub PAT management
+# ---------------------------------------------------------------------------
+
+
+def _pat_to_dict(row: GithubPatRow) -> dict:
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "description": row.description,
+        "token_prefix": row.token_prefix,
+        "is_default": row.is_default,
+        "created_at": row.created_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+    }
+
+
+async def list_github_pats() -> list[dict]:
+    """Return all configured GitHub PATs (token never included)."""
+    try:
+        async with async_session() as session:
+            rows = (
+                await session.scalars(select(GithubPatRow).order_by(GithubPatRow.created_at))
+            ).all()
+            return [_pat_to_dict(r) for r in rows]
+    except Exception:
+        log.warning("list_github_pats_failed", hint="DB unavailable; returning empty list")
+        return []
+
+
+async def create_github_pat(
+    name: str,
+    token: str,
+    description: str = "",
+    is_default: bool = False,
+) -> dict:
+    """Store a new named GitHub PAT (token is encrypted)."""
+    from sqlalchemy import update as sa_update
+
+    from pr_guardian.persistence.crypto import encrypt
+
+    async with async_session() as session:
+        if is_default:
+            await session.execute(sa_update(GithubPatRow).values(is_default=False))
+        row = GithubPatRow(
+            name=name,
+            description=description,
+            encrypted_token=encrypt(token),
+            token_prefix=token[:8] + "..." if len(token) > 8 else token,
+            is_default=is_default,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _pat_to_dict(row)
+
+
+async def update_github_pat(
+    pat_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    token: str | None = None,
+    description: str | None = None,
+    is_default: bool | None = None,
+) -> dict | None:
+    """Update fields on an existing PAT. Returns updated dict or None if not found."""
+    from sqlalchemy import update as sa_update
+
+    from pr_guardian.persistence.crypto import encrypt
+
+    async with async_session() as session:
+        row = await session.get(GithubPatRow, pat_id)
+        if not row:
+            return None
+        if is_default is True:
+            await session.execute(
+                sa_update(GithubPatRow)
+                .where(GithubPatRow.id != pat_id)
+                .values(is_default=False)
+            )
+        if name is not None:
+            row.name = name
+        if description is not None:
+            row.description = description
+        if token is not None:
+            row.encrypted_token = encrypt(token)
+            row.token_prefix = token[:8] + "..." if len(token) > 8 else token
+        if is_default is not None:
+            row.is_default = is_default
+        row.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        await session.refresh(row)
+        return _pat_to_dict(row)
+
+
+async def delete_github_pat(pat_id: uuid.UUID) -> bool:
+    """Delete a PAT by id. Returns True if deleted."""
+    async with async_session() as session:
+        row = await session.get(GithubPatRow, pat_id)
+        if not row:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+async def resolve_github_token(pat_name: str | None = None) -> str:
+    """Resolve the GitHub token to use for a review.
+
+    Priority: named PAT (if pat_name given) > default PAT in DB > GITHUB_TOKEN env var.
+
+    When pat_name is explicitly provided, raises LookupError if no matching PAT is found.
+    Falls back gracefully to GITHUB_TOKEN env var only when no pat_name is given and the DB
+    has no default PAT configured (or the DB is unavailable).
+    """
+    import os
+
+    from pr_guardian.persistence.crypto import decrypt
+
+    try:
+        async with async_session() as session:
+            if pat_name:
+                row = (
+                    await session.scalars(
+                        select(GithubPatRow).where(GithubPatRow.name == pat_name)
+                    )
+                ).first()
+                if not row:
+                    raise LookupError(f"GitHub PAT not found: {pat_name!r}")
+                try:
+                    decrypted = decrypt(row.encrypted_token)
+                except Exception:
+                    raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
+                if not decrypted:
+                    raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
+                return decrypted
+            else:
+                row = (
+                    await session.scalars(
+                        select(GithubPatRow).where(GithubPatRow.is_default.is_(True))
+                    )
+                ).first()
+                if row:
+                    decrypted = decrypt(row.encrypted_token)
+                    if decrypted:
+                        return decrypted
+    except LookupError:
+        raise
+    except Exception:
+        log.warning("resolve_github_token_failed", hint="DB unavailable or decrypt error; falling back to env var")
+    return os.environ.get("GITHUB_TOKEN", "")
 
 
 # ---------------------------------------------------------------------------

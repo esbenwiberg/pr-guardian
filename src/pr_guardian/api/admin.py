@@ -6,6 +6,7 @@ import uuid
 import structlog
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy.exc import IntegrityError
 
 from pr_guardian.auth.dependencies import require_admin
 from pr_guardian.auth.identity import Identity
@@ -133,3 +134,99 @@ async def revoke_api_key(key_id: uuid.UUID, identity: Identity = Depends(require
 
     log.info("api_key_revoked", key_id=str(key_id), by=identity.display_name)
     return {"status": "revoked", "id": str(key_id)}
+
+
+# ---------------------------------------------------------------------------
+# GitHub PAT management
+# ---------------------------------------------------------------------------
+
+
+def _raise_pat_integrity_error(exc: "IntegrityError") -> None:
+    """Translate a DB IntegrityError into the correct 409 detail message."""
+    err = str(exc.orig).lower() if exc.orig is not None else str(exc).lower()
+    if "uq_github_pats_single_default" in err:
+        raise HTTPException(409, "Another GitHub PAT is already set as the default")
+    raise HTTPException(409, "A GitHub PAT with that name already exists")
+
+
+class CreateGithubPatRequest(BaseModel):
+    name: str
+    token: str
+    description: str = ""
+    is_default: bool = False
+
+
+class UpdateGithubPatRequest(BaseModel):
+    name: str | None = None
+    token: str | None = None
+    description: str | None = None
+    is_default: bool | None = None
+
+
+@router.get("/github-pats")
+async def list_github_pats(identity: Identity = Depends(require_admin)):
+    """List all configured GitHub PATs (token is never returned)."""
+    return await storage.list_github_pats()
+
+
+@router.post("/github-pats", status_code=201)
+async def create_github_pat(body: CreateGithubPatRequest, identity: Identity = Depends(require_admin)):
+    """Store a new named GitHub PAT."""
+    name = body.name.strip()
+    if not name:
+        raise HTTPException(400, "PAT name is required")
+    if not body.token.strip():
+        raise HTTPException(400, "Token is required")
+
+    try:
+        pat = await storage.create_github_pat(
+            name=name,
+            token=body.token.strip(),
+            description=body.description.strip(),
+            is_default=body.is_default,
+        )
+    except IntegrityError as exc:
+        _raise_pat_integrity_error(exc)
+    log.info("github_pat_created", name=name, by=identity.display_name)
+    return pat
+
+
+@router.put("/github-pats/{pat_id}")
+async def update_github_pat(
+    pat_id: uuid.UUID,
+    body: UpdateGithubPatRequest,
+    identity: Identity = Depends(require_admin),
+):
+    """Update a GitHub PAT (name, description, token, or default flag)."""
+    name = body.name.strip() if body.name is not None else None
+    if name is not None and not name:
+        raise HTTPException(400, "PAT name cannot be empty")
+    token = body.token.strip() if body.token is not None else None
+    if token is not None and not token:
+        raise HTTPException(400, "Token cannot be empty")
+    try:
+        updated = await storage.update_github_pat(
+            pat_id,
+            name=name,
+            token=token,
+            description=body.description.strip() if body.description is not None else None,
+            is_default=body.is_default,
+        )
+    except IntegrityError as exc:
+        _raise_pat_integrity_error(exc)
+    if not updated:
+        raise HTTPException(404, "GitHub PAT not found")
+
+    log.info("github_pat_updated", pat_id=str(pat_id), by=identity.display_name)
+    return updated
+
+
+@router.delete("/github-pats/{pat_id}")
+async def delete_github_pat(pat_id: uuid.UUID, identity: Identity = Depends(require_admin)):
+    """Delete a GitHub PAT."""
+    deleted = await storage.delete_github_pat(pat_id)
+    if not deleted:
+        raise HTTPException(404, "GitHub PAT not found")
+
+    log.info("github_pat_deleted", pat_id=str(pat_id), by=identity.display_name)
+    return {"status": "deleted", "id": str(pat_id)}
