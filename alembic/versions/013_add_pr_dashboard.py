@@ -1,7 +1,7 @@
 """Add PR dashboard tables: user_identities, sync_sources, synced_prs.
 
-Revision ID: 011
-Revises: 010
+Revision ID: 013
+Revises: 012
 Create Date: 2026-05-04
 """
 from typing import Sequence, Union
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
-revision: str = "011"
-down_revision: Union[str, None] = "010"
+revision: str = "013"
+down_revision: Union[str, None] = "012"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
