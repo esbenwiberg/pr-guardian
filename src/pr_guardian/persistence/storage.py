@@ -29,6 +29,9 @@ from pr_guardian.persistence.models import (
     ScanAgentResultRow,
     ScanFindingRow,
     ScanRow,
+    SyncSourceRow,
+    SyncedPRRow,
+    UserIdentityRow,
 )
 
 log = structlog.get_logger()
@@ -1095,3 +1098,321 @@ async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
             )
         )).all()
         return [r.platform_comment_id for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# PR Dashboard: user identity, sync sources, cached open PRs
+# ---------------------------------------------------------------------------
+
+_STALE_DAYS = 5
+
+
+async def get_user_identity(email: str) -> dict[str, Any] | None:
+    """Return the GitHub handle + ADO UPN for a user, or None if not configured."""
+    async with async_session() as session:
+        row = await session.get(UserIdentityRow, email.lower())
+        if not row:
+            return None
+        return {
+            "email": row.email,
+            "github_handle": row.github_handle,
+            "ado_upn": row.ado_upn,
+            "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+        }
+
+
+async def upsert_user_identity(
+    email: str,
+    github_handle: str | None,
+    ado_upn: str | None,
+) -> None:
+    """Create or update the identity mapping for a user."""
+    email = email.lower().strip()
+    async with async_session() as session:
+        row = await session.get(UserIdentityRow, email)
+        if row:
+            row.github_handle = github_handle or None
+            row.ado_upn = ado_upn or None
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(UserIdentityRow(
+                email=email,
+                github_handle=github_handle or None,
+                ado_upn=ado_upn or None,
+            ))
+        await session.commit()
+
+
+async def upsert_sync_source(
+    platform: str,
+    org: str,
+    project: str,
+    repo: str,
+    repo_url: str,
+) -> None:
+    """Register a repo as an active sync source."""
+    async with async_session() as session:
+        q = (
+            select(SyncSourceRow)
+            .where(SyncSourceRow.platform == platform)
+            .where(SyncSourceRow.repo == repo)
+            .where(SyncSourceRow.project == project)
+        )
+        row = (await session.scalars(q)).first()
+        if row:
+            row.is_active = True
+            row.org = org
+            row.repo_url = repo_url
+        else:
+            session.add(SyncSourceRow(
+                platform=platform,
+                org=org,
+                project=project,
+                repo=repo,
+                repo_url=repo_url,
+                is_active=True,
+            ))
+        await session.commit()
+
+
+async def mark_sync_source_synced(platform: str, repo: str, project: str = "") -> None:
+    """Update last_synced_at for a sync source."""
+    async with async_session() as session:
+        q = (
+            select(SyncSourceRow)
+            .where(SyncSourceRow.platform == platform)
+            .where(SyncSourceRow.repo == repo)
+            .where(SyncSourceRow.project == project)
+        )
+        row = (await session.scalars(q)).first()
+        if row:
+            row.last_synced_at = datetime.now(timezone.utc)
+            await session.commit()
+
+
+async def upsert_synced_pr(data: dict[str, Any]) -> None:
+    """Create or update a cached PR record."""
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    now = datetime.now(timezone.utc)
+    pr_created_at = _parse_dt(data.get("pr_created_at"))
+    pr_updated_at = _parse_dt(data.get("pr_updated_at"))
+
+    values = {
+        "platform": data["platform"],
+        "pr_id": str(data["pr_id"]),
+        "org": data.get("org", ""),
+        "project": data.get("project", ""),
+        "repo": data.get("repo", ""),
+        "title": data.get("title", ""),
+        "author": data.get("author", ""),
+        "author_display": data.get("author_display") or data.get("author", ""),
+        "pr_url": data.get("pr_url", ""),
+        "source_branch": data.get("source_branch", ""),
+        "target_branch": data.get("target_branch", ""),
+        "is_draft": bool(data.get("is_draft", False)),
+        "has_conflicts": bool(data.get("has_conflicts", False)),
+        "approval_status": data.get("approval_status", "pending"),
+        "reviewers": data.get("reviewers") or [],
+        "comment_count": int(data.get("comment_count", 0)),
+        "pr_created_at": pr_created_at,
+        "pr_updated_at": pr_updated_at,
+        "synced_at": now,
+    }
+
+    async with async_session() as session:
+        stmt = pg_insert(SyncedPRRow).values(id=uuid.uuid4(), **values)
+        stmt = stmt.on_conflict_do_update(
+            constraint="uq_synced_pr",
+            set_={k: v for k, v in values.items() if k not in ("platform", "pr_id", "repo", "project")},
+        )
+        await session.execute(stmt)
+        await session.commit()
+
+
+async def delete_closed_prs(platform: str, repo: str, project: str, open_pr_ids: list[str]) -> None:
+    """Remove PRs that are no longer open in the given repo."""
+    from sqlalchemy import delete
+
+    async with async_session() as session:
+        q = (
+            delete(SyncedPRRow)
+            .where(SyncedPRRow.platform == platform)
+            .where(SyncedPRRow.repo == repo)
+            .where(SyncedPRRow.project == project)
+        )
+        if open_pr_ids:
+            q = q.where(SyncedPRRow.pr_id.notin_(open_pr_ids))
+        await session.execute(q)
+        await session.commit()
+
+
+async def get_synced_pr(pr_uuid: str) -> dict[str, Any] | None:
+    """Fetch a single synced PR by its UUID."""
+    async with async_session() as session:
+        try:
+            row = await session.get(SyncedPRRow, uuid.UUID(pr_uuid))
+        except ValueError:
+            return None
+        if not row:
+            return None
+        return _synced_pr_to_dict(row)
+
+
+async def list_synced_prs(
+    *,
+    view: str | None = None,
+    github_handle: str | None = None,
+    ado_upn: str | None = None,
+    platform: str | None = None,
+    org: str | None = None,
+    repo: str | None = None,
+    author: str | None = None,
+    search: str | None = None,
+    offset: int = 0,
+    limit: int = 50,
+) -> tuple[list[dict[str, Any]], int]:
+    """List cached open PRs with filters. Returns (items, total_count)."""
+    import json
+    from sqlalchemy import cast, or_
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
+    user_handles = [h for h in [github_handle, ado_upn] if h]
+
+    async with async_session() as session:
+        q = select(SyncedPRRow)
+
+        # View filters
+        if view == "mine" and user_handles:
+            q = q.where(SyncedPRRow.author.in_(user_handles))
+        elif view == "queue" and user_handles:
+            conditions = [
+                SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB))
+                for h in user_handles
+            ]
+            q = q.where(or_(*conditions))
+        elif view == "stale":
+            q = q.where(SyncedPRRow.pr_updated_at < stale_cutoff)
+
+        # Extra filters
+        if platform:
+            q = q.where(SyncedPRRow.platform == platform)
+        if org:
+            q = q.where(SyncedPRRow.org == org)
+        if repo:
+            q = q.where(SyncedPRRow.repo == repo)
+        if author:
+            q = q.where(SyncedPRRow.author == author)
+        if search:
+            q = q.where(SyncedPRRow.title.ilike(f"%{search}%"))
+
+        total = await session.scalar(select(func.count()).select_from(q.subquery()))
+        q = q.order_by(SyncedPRRow.pr_updated_at.desc().nullslast()).offset(offset).limit(limit)
+        rows = (await session.scalars(q)).all()
+        return [_synced_pr_to_dict(r) for r in rows], int(total or 0)
+
+
+async def get_pr_dashboard_summary(
+    github_handle: str | None = None,
+    ado_upn: str | None = None,
+) -> dict[str, Any]:
+    """Compute counts for the 4 dashboard summary cards."""
+    import json
+    from sqlalchemy import cast, or_
+    from sqlalchemy.dialects.postgresql import JSONB
+
+    stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
+    user_handles = [h for h in [github_handle, ado_upn] if h]
+
+    async with async_session() as session:
+        total_open = await session.scalar(select(func.count(SyncedPRRow.id))) or 0
+
+        if user_handles:
+            mine_q = select(func.count(SyncedPRRow.id)).where(
+                SyncedPRRow.author.in_(user_handles)
+            )
+            mine_total = await session.scalar(mine_q) or 0
+
+            attention_q = select(func.count(SyncedPRRow.id)).where(
+                SyncedPRRow.author.in_(user_handles)
+            ).where(
+                or_(
+                    SyncedPRRow.approval_status == "changes_requested",
+                    SyncedPRRow.pr_updated_at < stale_cutoff,
+                    SyncedPRRow.approval_status == "approved",
+                )
+            )
+            mine_attention = await session.scalar(attention_q) or 0
+
+            queue_conditions = [
+                SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB))
+                for h in user_handles
+            ]
+            queue_q = select(func.count(SyncedPRRow.id)).where(or_(*queue_conditions))
+            queue_total = await session.scalar(queue_q) or 0
+        else:
+            mine_total = mine_attention = queue_total = 0
+
+        stale_total = await session.scalar(
+            select(func.count(SyncedPRRow.id)).where(
+                SyncedPRRow.pr_updated_at < stale_cutoff
+            )
+        ) or 0
+
+        repo_count = await session.scalar(
+            select(func.count(func.distinct(SyncedPRRow.repo)))
+        ) or 0
+
+        oldest_stale = await session.scalar(
+            select(func.min(SyncedPRRow.pr_updated_at)).where(
+                SyncedPRRow.pr_updated_at < stale_cutoff
+            )
+        )
+        oldest_days = None
+        if oldest_stale:
+            oldest_days = (datetime.now(timezone.utc) - oldest_stale).days
+
+        return {
+            "mine": {"total": mine_total, "needs_attention": mine_attention},
+            "queue": {"total": queue_total},
+            "stale": {"total": stale_total, "oldest_days": oldest_days},
+            "all": {"total": total_open, "repo_count": repo_count},
+        }
+
+
+def _parse_dt(value: Any) -> datetime | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    try:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+
+def _synced_pr_to_dict(row: SyncedPRRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "platform": row.platform,
+        "pr_id": row.pr_id,
+        "org": row.org,
+        "project": row.project,
+        "repo": row.repo,
+        "title": row.title,
+        "author": row.author,
+        "author_display": row.author_display,
+        "pr_url": row.pr_url,
+        "source_branch": row.source_branch,
+        "target_branch": row.target_branch,
+        "is_draft": row.is_draft,
+        "has_conflicts": row.has_conflicts,
+        "approval_status": row.approval_status,
+        "reviewers": row.reviewers or [],
+        "comment_count": row.comment_count,
+        "pr_created_at": row.pr_created_at.isoformat() if row.pr_created_at else None,
+        "pr_updated_at": row.pr_updated_at.isoformat() if row.pr_updated_at else None,
+        "synced_at": row.synced_at.isoformat() if row.synced_at else None,
+    }

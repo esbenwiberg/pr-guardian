@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(tags=["dashboard"])
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
+_PR_DASHBOARD_HTML = _DASHBOARD_DIR / "pr_dashboard.html"
 _DASHBOARD_HTML = _DASHBOARD_DIR / "index.html"
 _REVIEWS_HTML = _DASHBOARD_DIR / "reviews.html"
 _REVIEW_DETAIL_HTML = _DASHBOARD_DIR / "review_detail.html"
@@ -22,6 +23,12 @@ _HUMAN_WIZARD_HTML = _DASHBOARD_DIR / "human_wizard.html"
 _BROWSE_PR_HTML = _DASHBOARD_DIR / "browse_pr.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
+
+
+@router.get("/pr-dashboard", response_class=HTMLResponse)
+async def pr_dashboard():
+    """Serve the unified PR dashboard page."""
+    return _PR_DASHBOARD_HTML.read_text()
 
 
 @router.get("/dashboard", response_class=HTMLResponse)

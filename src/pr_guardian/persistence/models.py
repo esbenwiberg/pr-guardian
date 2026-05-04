@@ -349,3 +349,85 @@ class ApiKeyRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+# ---------------------------------------------------------------------------
+# PR Dashboard: user identity + sync sources + cached open PRs
+# ---------------------------------------------------------------------------
+
+
+class UserIdentityRow(Base):
+    """Per-user mapping of email → GitHub handle + ADO UPN."""
+
+    __tablename__ = "user_identities"
+
+    email: Mapped[str] = mapped_column(String(256), primary_key=True)
+    github_handle: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    ado_upn: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class SyncSourceRow(Base):
+    """A repo being actively tracked by the PR sync worker."""
+
+    __tablename__ = "sync_sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    platform: Mapped[str] = mapped_column(String(16), index=True)  # github | ado
+    org: Mapped[str] = mapped_column(String(256))
+    project: Mapped[str] = mapped_column(String(256), default="")  # ADO only
+    repo: Mapped[str] = mapped_column(String(256))  # "owner/name" for GH, "name" for ADO
+    repo_url: Mapped[str] = mapped_column(Text, default="")
+    last_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class SyncedPRRow(Base):
+    """Cached open PR from GitHub or ADO."""
+
+    __tablename__ = "synced_prs"
+    __table_args__ = (
+        # Used for upserts — uniquely identifies a PR across platforms
+        __import__("sqlalchemy").UniqueConstraint(
+            "platform", "pr_id", "repo", "project", name="uq_synced_pr"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    pr_id: Mapped[str] = mapped_column(String(64))
+    org: Mapped[str] = mapped_column(String(256), index=True)
+    project: Mapped[str] = mapped_column(String(256), default="")  # ADO only
+    repo: Mapped[str] = mapped_column(String(256), index=True)
+    title: Mapped[str] = mapped_column(Text, default="")
+    author: Mapped[str] = mapped_column(String(256), index=True)  # login or UPN
+    author_display: Mapped[str] = mapped_column(String(256), default="")
+    pr_url: Mapped[str] = mapped_column(Text, default="")
+    source_branch: Mapped[str] = mapped_column(String(256), default="")
+    target_branch: Mapped[str] = mapped_column(String(256), default="")
+    is_draft: Mapped[bool] = mapped_column(Boolean, default=False)
+    has_conflicts: Mapped[bool] = mapped_column(Boolean, default=False)
+    # approved | changes_requested | pending
+    approval_status: Mapped[str] = mapped_column(String(32), default="pending")
+    reviewers: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
+    comment_count: Mapped[int] = mapped_column(Integer, default=0)
+    pr_created_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    pr_updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
