@@ -6,6 +6,8 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from pr_guardian.persistence.crypto import decrypt, encrypt
 from pr_guardian.persistence.storage import (
     create_github_pat,
@@ -14,6 +16,8 @@ from pr_guardian.persistence.storage import (
     resolve_github_token,
     update_github_pat,
 )
+
+pytestmark = pytest.mark.asyncio
 
 
 # ---------------------------------------------------------------------------
@@ -346,7 +350,6 @@ async def test_resolve_github_token_named_pat_not_found_raises():
     session.scalars = AsyncMock(return_value=scalars_result)
 
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
-        import pytest
         with pytest.raises(LookupError, match="GitHub PAT not found: 'missing-org'"):
             await resolve_github_token("missing-org")
 
@@ -361,6 +364,5 @@ async def test_resolve_github_token_named_pat_corrupt_token_raises():
     session.scalars = AsyncMock(return_value=scalars_result)
 
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
-        import pytest
         with pytest.raises(LookupError, match="corrupted"):
             await resolve_github_token("my-pat")
