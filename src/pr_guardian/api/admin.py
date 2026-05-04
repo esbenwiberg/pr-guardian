@@ -186,10 +186,16 @@ async def update_github_pat(
     identity: Identity = Depends(require_admin),
 ):
     """Update a GitHub PAT (name, description, token, or default flag)."""
+    name = body.name.strip() if body.name is not None else None
+    if name is not None and not name:
+        raise HTTPException(400, "PAT name cannot be empty")
+    token = body.token.strip() if body.token is not None else None
+    if token is not None and not token:
+        raise HTTPException(400, "Token cannot be empty")
     updated = await storage.update_github_pat(
         pat_id,
-        name=body.name.strip() if body.name is not None else None,
-        token=body.token.strip() if body.token is not None else None,
+        name=name,
+        token=token,
         description=body.description.strip() if body.description is not None else None,
         is_default=body.is_default,
     )

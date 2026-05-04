@@ -372,6 +372,15 @@ async function removeAdmin(email) {
 }
 
 // --- GitHub PATs ---
+// Use event delegation so dynamically rendered rows work without inline handlers.
+// data-id / data-name attributes are HTML-escaped, so any character in a PAT name is safe.
+document.addEventListener('click', e => {
+  const delBtn = e.target.closest('.pat-delete');
+  if (delBtn) { deletePat(delBtn.dataset.id, delBtn.dataset.name); return; }
+  const defBtn = e.target.closest('.pat-set-default');
+  if (defBtn) { setPatDefault(defBtn.dataset.id, defBtn.dataset.name); return; }
+});
+
 async function loadPats() {
   try {
     const r = await fetch(`${API}/github-pats`);
@@ -392,10 +401,10 @@ async function loadPats() {
         <td class="py-2 font-medium text-slate-200">${esc(p.name)}</td>
         <td class="py-2 text-slate-400">${esc(p.description || '—')}</td>
         <td class="py-2 font-mono text-slate-400">${esc(p.token_prefix)}</td>
-        <td class="py-2">${p.is_default ? '<span class="text-emerald-400 font-semibold">default</span>' : `<button class="text-slate-400 hover:text-slate-200 transition-colors" onclick="setPatDefault('${p.id}', '${esc(p.name)}')">Set default</button>`}</td>
+        <td class="py-2">${p.is_default ? '<span class="text-emerald-400 font-semibold">default</span>' : `<button class="pat-set-default text-slate-400 hover:text-slate-200 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Set default</button>`}</td>
         <td class="py-2 text-slate-400">${fmtDate(p.created_at)}</td>
         <td class="py-2 text-right">
-          <button class="text-red-400 hover:text-red-300 transition-colors" onclick="deletePat('${p.id}', '${esc(p.name)}')">Delete</button>
+          <button class="pat-delete text-red-400 hover:text-red-300 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Delete</button>
         </td>
       </tr>`).join('');
   } catch (e) {

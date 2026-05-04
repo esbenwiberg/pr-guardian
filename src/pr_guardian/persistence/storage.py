@@ -458,6 +458,7 @@ async def list_github_pats() -> list[dict]:
             ).all()
             return [_pat_to_dict(r) for r in rows]
     except Exception:
+        log.warning("list_github_pats_failed", hint="DB unavailable; returning empty list")
         return []
 
 
@@ -564,7 +565,7 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
             if row:
                 return decrypt(row.encrypted_token)
     except Exception:
-        pass
+        log.warning("resolve_github_token_failed", hint="DB unavailable or decrypt error; falling back to env var")
     return os.environ.get("GITHUB_TOKEN", "")
 
 
