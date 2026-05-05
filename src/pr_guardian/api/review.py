@@ -163,6 +163,7 @@ class RepoReviewRequest(BaseModel):
     platform: str = "github"
     ref: str = "HEAD"
     max_files: int = REPO_REVIEW_MAX_FILES
+    pat_name: str | None = None
 
 
 class RepoReviewResponse(BaseModel):
@@ -265,10 +266,16 @@ async def manual_repo_review(req: RepoReviewRequest):
             detail="Repo must be in owner/repo (GitHub) or project/repo (ADO) format.",
         )
 
-    try:
-        adapter = create_adapter(req.platform)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    if req.platform == "github":
+        try:
+            adapter = await create_github_adapter(req.pat_name)
+        except LookupError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    else:
+        try:
+            adapter = create_adapter(req.platform)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
 
