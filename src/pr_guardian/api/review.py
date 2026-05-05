@@ -51,11 +51,25 @@ class ReviewResponse(BaseModel):
 
 
 async def _run_review_background(
-    pr: PlatformPR, adapter, comment_mode: str, base_url: str,
-    dismissals: list[dict] | None = None,
+    stub: PlatformPR, adapter, comment_mode: str, base_url: str,
+    *,
+    platform_name: str,
 ) -> None:
-    """Run the review pipeline in the background, logging any errors."""
+    """Hydrate the PR stub and run the full review pipeline in the background."""
     import traceback
+    try:
+        pr = await _hydrate_pr(adapter, stub, platform_name)
+    except Exception as e:
+        log.error("background_review_hydrate_failed", pr_id=stub.pr_id, repo=stub.repo, error=str(e))
+        return
+
+    dismissals: list[dict] | None = None
+    try:
+        from pr_guardian.persistence import storage
+        dismissals = await storage.get_active_dismissals(pr.pr_id, pr.repo, pr.platform.value)
+    except Exception:
+        pass
+
     try:
         await run_review(pr, adapter, comment_mode=comment_mode, base_url=base_url, dismissals=dismissals)
     except Exception as e:
@@ -66,7 +80,7 @@ async def _run_review_background(
 async def manual_review(req: ReviewRequest, request: Request):
     """Trigger a review for a PR by URL.
 
-    Validates the PR and starts the review pipeline in the background.
+    Validates the PR URL and queues the review; hydration runs in the background.
     Returns immediately so the caller can track progress via the active reviews panel.
     """
     stub, platform_name = _parse_pr_url(req.pr_url)
@@ -78,38 +92,22 @@ async def manual_review(req: ReviewRequest, request: Request):
     else:
         adapter = create_adapter(platform_name)
 
-    try:
-        pr = await _hydrate_pr(adapter, stub, platform_name)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Failed to fetch PR info: {e}")
-
     if req.dry_run:
         return ReviewResponse(
             status="dry_run_accepted",
-            pr_id=pr.pr_id,
-            repo=pr.repo,
+            pr_id=stub.pr_id,
+            repo=stub.repo,
             platform=platform_name,
         )
 
-    log.info("manual_review_started", platform=platform_name, pr_id=pr.pr_id, repo=pr.repo)
-
-    # Load dismissals from previous reviews so agents respect them
-    dismissals: list[dict] | None = None
-    try:
-        from pr_guardian.persistence import storage
-        dismissals = await storage.get_active_dismissals(
-            pr.pr_id, pr.repo, pr.platform.value,
-        )
-    except Exception:
-        pass
-
+    log.info("manual_review_started", platform=platform_name, pr_id=stub.pr_id, repo=stub.repo)
     base_url = str(request.base_url).rstrip("/")
-    asyncio.create_task(_run_review_background(pr, adapter, req.comment_mode, base_url, dismissals=dismissals))
+    asyncio.create_task(_run_review_background(stub, adapter, req.comment_mode, base_url, platform_name=platform_name))
 
     return ReviewResponse(
         status="queued",
-        pr_id=pr.pr_id,
-        repo=pr.repo,
+        pr_id=stub.pr_id,
+        repo=stub.repo,
         platform=platform_name,
     )
 
