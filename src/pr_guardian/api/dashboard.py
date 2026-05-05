@@ -42,7 +42,18 @@ async def dashboard_stats():
     try:
         return await storage.get_stats()
     except Exception:
-        return {"total_reviews": 0, "decisions": {}, "avg_score": 0, "total_cost_usd": 0}
+        return {
+            "total_reviews": 0,
+            "active_reviews": 0,
+            "decision_counts": {"auto_approve": 0, "human_review": 0, "reject": 0, "hard_block": 0},
+            "risk_tier_counts": {},
+            "severity_counts": {},
+            "avg_score": 0,
+            "avg_duration_ms": 0,
+            "avg_cost_usd": 0.0,
+            "total_cost_usd": 0,
+            "top_repos": [],
+        }
 
 
 @router.get("/reviews")

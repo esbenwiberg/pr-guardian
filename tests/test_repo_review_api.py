@@ -49,8 +49,7 @@ class TestManualRepoReviewQueueing:
         """Happy path: credentials set → 200 with status=queued and task is scheduled."""
         mock_adapter = _mock_adapter()
         with (
-            patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}),
-            patch("pr_guardian.api.review.create_adapter", return_value=mock_adapter),
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -69,8 +68,7 @@ class TestManualRepoReviewQueueing:
         """Verify that create_task is invoked, not just fire-and-forget ignored."""
         mock_adapter = _mock_adapter()
         with (
-            patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}),
-            patch("pr_guardian.api.review.create_adapter", return_value=mock_adapter),
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -86,8 +84,7 @@ class TestManualRepoReviewQueueing:
 
     def test_queued_response_includes_ref(self, client):
         with (
-            patch.dict(os.environ, {"GITHUB_TOKEN": "fake-token"}),
-            patch("pr_guardian.api.review.create_adapter", return_value=_mock_adapter()),
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=_mock_adapter()),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
