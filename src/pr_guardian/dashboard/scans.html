@@ -369,7 +369,6 @@ async function loadScanIssues(id) {
 function renderDetail(d) {
   scanData = d;
   selectedFindings.clear();
-  scanIssuesByFindingId = {};
 
   document.getElementById('list-view').classList.add('hidden');
   document.getElementById('detail-view').classList.remove('hidden');
@@ -910,11 +909,18 @@ async function submitCreateIssues() {
       body: JSON.stringify({ mode, finding_ids: findingIds }),
     });
     const result = await resp.json();
-    if (!resp.ok) throw new Error(result.detail || `HTTP ${resp.status}`);
+    if (!resp.ok) {
+      const msg = typeof result.detail === 'object' ? result.detail.message : (result.detail || `HTTP ${resp.status}`);
+      throw new Error(msg);
+    }
 
     closeCreateIssues();
     const n = result.created?.length || 0;
-    showToast(`${n} issue${n !== 1 ? 's' : ''} created successfully`);
+    const errCount = result.errors?.length || 0;
+    const toastMsg = errCount > 0
+      ? `${n} issue${n !== 1 ? 's' : ''} created (${errCount} failed)`
+      : `${n} issue${n !== 1 ? 's' : ''} created successfully`;
+    showToast(toastMsg, errCount > 0 ? 'error' : 'success');
     // Reload scan issues and re-render findings to show badges
     if (scanData?.id) {
       await loadScanIssues(scanData.id);
@@ -941,6 +947,9 @@ async function submitCreateIssues() {
             </div>
           </div>`;
       }).join('');
+      // Re-render clears checkboxes — sync selection state to match
+      selectedFindings.clear();
+      updateSelectionCount();
       applyCertaintyFilter();
     }
   } catch (e) {

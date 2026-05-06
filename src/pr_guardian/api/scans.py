@@ -323,8 +323,6 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Platform adapter error: {e}")
 
-    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
-
     repo = scan["repo"]
 
     def _issue_title(findings: list[dict], label: str = "") -> str:
@@ -404,6 +402,11 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
     if hasattr(adapter, "close"):
         await adapter.close()
 
+    if not created and errors:
+        raise HTTPException(
+            status_code=500,
+            detail={"message": "All issue creations failed", "errors": errors},
+        )
     return {"created": created, "errors": errors}
 
 
