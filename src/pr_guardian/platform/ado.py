@@ -830,6 +830,30 @@ class ADOAdapter:
         resp.raise_for_status()
         return resp.json().get("value", [])
 
+    async def create_work_item(
+        self,
+        project: str,
+        title: str,
+        body: str,
+        work_item_type: str = "Bug",
+    ) -> dict:
+        """Create an ADO work item. Returns dict with 'id' and 'url'."""
+        client = self._get_client()
+        patch_doc = [
+            {"op": "add", "path": "/fields/System.Title", "value": title},
+            {"op": "add", "path": "/fields/System.Description", "value": body},
+        ]
+        resp = await client.post(
+            f"{self._org_url}/{project}/_apis/wit/workitems/${work_item_type}",
+            content=json.dumps(patch_doc),
+            headers={"Content-Type": "application/json-patch+json"},
+            params={"api-version": "7.1"},
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        url = data.get("_links", {}).get("html", {}).get("href", "")
+        return {"id": data.get("id"), "url": url}
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

@@ -29,6 +29,7 @@ from pr_guardian.persistence.models import (
     ReviewRow,
     ScanAgentResultRow,
     ScanFindingRow,
+    ScanIssueRow,
     ScanRow,
     SyncSourceRow,
     SyncedPRRow,
@@ -936,6 +937,52 @@ async def get_scan_stats() -> dict[str, Any]:
         }
 
 
+async def create_scan_issue(
+    scan_id: uuid.UUID,
+    finding_ids: list[str],
+    issue_url: str,
+    issue_number: str,
+    title: str,
+    platform: str,
+    repo: str,
+) -> uuid.UUID:
+    """Persist a platform issue that was created from scan findings."""
+    row = ScanIssueRow(
+        scan_id=scan_id,
+        finding_ids=finding_ids,
+        issue_url=issue_url,
+        issue_number=str(issue_number),
+        title=title,
+        platform=platform,
+        repo=repo,
+    )
+    async with async_session() as session:
+        session.add(row)
+        await session.commit()
+        return row.id
+
+
+async def get_scan_issues(scan_id: uuid.UUID) -> list[dict[str, Any]]:
+    """Return all issues created for a given scan."""
+    async with async_session() as session:
+        q = select(ScanIssueRow).where(ScanIssueRow.scan_id == scan_id)
+        rows = (await session.scalars(q)).all()
+        return [
+            {
+                "id": str(r.id),
+                "scan_id": str(r.scan_id),
+                "finding_ids": r.finding_ids or [],
+                "issue_url": r.issue_url,
+                "issue_number": r.issue_number,
+                "title": r.title,
+                "platform": r.platform,
+                "repo": r.repo,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+
 def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
     return {
         "id": str(row.id),
@@ -963,6 +1010,7 @@ def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
                 "error": a.error,
                 "findings": [
                     {
+                        "id": str(f.id),
                         "severity": f.severity,
                         "certainty": f.certainty,
                         "category": f.category,

@@ -93,6 +93,7 @@
       <button class="btn btn-sm btn-secondary" onclick="selectAll()">Select All</button>
       <button class="btn btn-sm btn-secondary" onclick="deselectAll()">Deselect All</button>
       <button class="btn btn-sm btn-primary" id="export-btn" onclick="openExport()" disabled>Export for Agent Fix</button>
+      <button class="btn btn-sm btn-secondary" id="create-issues-btn" onclick="openCreateIssues()" disabled style="border-color:rgba(99,102,241,0.4);color:#818cf8">Create Issues</button>
     </div>
 
     <div id="detail-agents"></div>
@@ -198,6 +199,55 @@
 </div>
 
 
+<!-- Create Issues modal -->
+<div id="create-issues-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeCreateIssues()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-md">
+      <div class="dialog-header">
+        <h2 class="text-base font-semibold">Create Issues from Findings</h2>
+        <button class="btn btn-ghost btn-sm" onclick="closeCreateIssues()">&times;</button>
+      </div>
+      <div class="dialog-body space-y-4">
+        <p class="text-sm text-slate-400" id="ci-summary"></p>
+        <div>
+          <label class="form-label">Issue grouping</label>
+          <div class="space-y-2 mt-1">
+            <label class="flex items-start gap-3 cursor-pointer group">
+              <input type="radio" name="ci-mode" value="single" class="form-radio mt-0.5" checked>
+              <div>
+                <div class="text-sm font-medium text-slate-200">Single issue</div>
+                <div class="text-xs text-slate-400">One issue summarising all selected findings</div>
+              </div>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer group">
+              <input type="radio" name="ci-mode" value="per_group" class="form-radio mt-0.5">
+              <div>
+                <div class="text-sm font-medium text-slate-200">One issue per agent group</div>
+                <div class="text-xs text-slate-400">Groups findings by analysis category (e.g. Security, Tech Debt)</div>
+              </div>
+            </label>
+            <label class="flex items-start gap-3 cursor-pointer group">
+              <input type="radio" name="ci-mode" value="per_finding" class="form-radio mt-0.5">
+              <div>
+                <div class="text-sm font-medium text-slate-200">One issue per finding</div>
+                <div class="text-xs text-slate-400">Creates a separate issue for each selected finding</div>
+              </div>
+            </label>
+          </div>
+        </div>
+        <div id="ci-error" class="hidden rounded bg-red-500/10 border border-red-500/30 px-3 py-2">
+          <p class="text-xs text-red-300 break-words" id="ci-error-msg"></p>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary btn-sm" onclick="closeCreateIssues()">Cancel</button>
+        <button class="btn btn-sm" id="ci-submit-btn" onclick="submitCreateIssues()" style="background:rgba(99,102,241,0.15);border-color:rgba(99,102,241,0.4);color:#818cf8">Create Issues</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script>
 const SCAN_ID = location.pathname.match(/\/scans\/([0-9a-f-]+)/)?.[1] || '';
 const AGENT_LABELS = {
@@ -215,6 +265,8 @@ const TYPE_LABELS = { recent_changes: 'Recent Changes', maintenance: 'Maintenanc
 let scanData = null;
 let selectedFindings = new Set(); // "agentIdx-findingIdx"
 let certaintyFilter = 'detected,suspected'; // default: hide uncertain
+// Map from finding UUID → scan issue object (for badge rendering)
+let scanIssuesByFindingId = {};
 
 function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 
@@ -282,7 +334,10 @@ async function loadScans() {
 // --- Detail ---
 async function loadDetail(id) {
   try {
-    const resp = await fetch(`/api/dashboard/scans/${id}`);
+    const [resp] = await Promise.all([
+      fetch(`/api/dashboard/scans/${id}`),
+      loadScanIssues(id),
+    ]);
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
     if (data.error) throw new Error(data.error);
@@ -290,6 +345,24 @@ async function loadDetail(id) {
     history.pushState(null, '', `/scans/${id}`);
   } catch (e) {
     showToast('Failed to load scan: ' + e.message, 'error');
+  }
+}
+
+async function loadScanIssues(id) {
+  try {
+    const resp = await fetch(`/api/scans/${id}/issues`);
+    if (!resp.ok) return;
+    const issues = await resp.json();
+    scanIssuesByFindingId = {};
+    for (const issue of issues) {
+      for (const fid of (issue.finding_ids || [])) {
+        // Store only the first issue per finding (in case of multiple)
+        if (!scanIssuesByFindingId[fid]) scanIssuesByFindingId[fid] = issue;
+      }
+    }
+  } catch (e) {
+    console.warn('Failed to load scan issues:', e);
+    scanIssuesByFindingId = {};
   }
 }
 
@@ -358,8 +431,11 @@ function renderFinding(ai, fi, f) {
   const key = `${ai}-${fi}`;
   const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
   const effortClass = f.effort_estimate ? `effort-${f.effort_estimate}` : '';
+  const findingId = f.id || '';
+  // Check if this finding has a linked issue
+  const linkedIssue = findingId ? (scanIssuesByFindingId[findingId] || null) : null;
   return `
-    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0" data-key="${key}">
+    <div class="flex items-start gap-3 px-5 py-3 border-b border-slate-700/30 last:border-b-0" data-key="${key}" data-finding-id="${esc(findingId)}">
       <input type="checkbox" class="form-checkbox f-check mt-0.5 shrink-0" data-key="${key}" onchange="toggleFinding('${key}')">
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
@@ -367,6 +443,7 @@ function renderFinding(ai, fi, f) {
           <span class="cert-badge">${f.certainty}</span>
           ${loc ? `<span class="text-xs text-emerald-400 font-mono">${esc(loc)}</span>` : ''}
           ${f.category ? `<span class="text-xs text-slate-400">${esc(f.category)}</span>` : ''}
+          ${linkedIssue && /^https?:\/\//i.test(linkedIssue.issue_url) ? `<a href="${esc(linkedIssue.issue_url)}" target="_blank" rel="noopener noreferrer" class="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded bg-indigo-900/40 text-indigo-400 border border-indigo-400/20 hover:brightness-125 transition-all">#${esc(linkedIssue.issue_number)} Issue &#8599;</a>` : ''}
         </div>
         <div class="text-sm mt-1.5 leading-relaxed">${esc(f.description || '')}</div>
         ${f.suggestion ? `<div class="mt-1.5"><button class="text-2xs text-emerald-400/60 hover:text-emerald-400 transition-colors font-medium tracking-wide uppercase" onclick="event.stopPropagation(); const b=this.nextElementSibling; const h=b.classList.toggle('hidden'); this.innerHTML=h?'Show suggestion &#9656;':'Hide suggestion &#9662;'">Show suggestion &#9656;</button><div class="hidden mt-1.5 text-xs text-emerald-400 pl-3 border-l-2 border-emerald-400">${esc(f.suggestion)}</div></div>` : ''}
@@ -505,6 +582,7 @@ function updateSelectionCount() {
   const n = selectedFindings.size;
   document.getElementById('selection-count').textContent = `${n} selected`;
   document.getElementById('export-btn').disabled = n === 0;
+  document.getElementById('create-issues-btn').disabled = n === 0;
 }
 
 // --- Export ---
@@ -783,9 +861,82 @@ async function startScan() {
   }
 }
 
+// --- Create Issues ---
+
+function openCreateIssues() {
+  if (!selectedFindings.size) return;
+  const n = selectedFindings.size;
+  document.getElementById('ci-summary').textContent = `${n} finding${n !== 1 ? 's' : ''} selected from "${scanData?.repo || ''}"`;
+  document.getElementById('ci-error').classList.add('hidden');
+  document.getElementById('ci-submit-btn').disabled = false;
+  document.getElementById('ci-submit-btn').textContent = 'Create Issues';
+  document.querySelector('input[name="ci-mode"][value="single"]').checked = true;
+  document.getElementById('create-issues-modal').classList.remove('hidden');
+}
+
+function closeCreateIssues() {
+  document.getElementById('create-issues-modal').classList.add('hidden');
+}
+
+async function submitCreateIssues() {
+  const mode = document.querySelector('input[name="ci-mode"]:checked')?.value;
+  if (!mode) return;
+
+  // Collect finding IDs from selection
+  const findingIds = [];
+  const agents = scanData.agent_results || [];
+  selectedFindings.forEach(key => {
+    const [ai, fi] = key.split('-').map(Number);
+    const f = agents[ai]?.findings?.[fi];
+    if (f?.id) findingIds.push(f.id);
+  });
+
+  if (!findingIds.length) {
+    document.getElementById('ci-error-msg').textContent = 'No findings with IDs found in selection.';
+    document.getElementById('ci-error').classList.remove('hidden');
+    return;
+  }
+
+  const btn = document.getElementById('ci-submit-btn');
+  btn.disabled = true;
+  btn.textContent = 'Creating...';
+  document.getElementById('ci-error').classList.add('hidden');
+
+  try {
+    const resp = await fetch(`/api/scans/${scanData.id}/create-issues`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode, finding_ids: findingIds }),
+    });
+    const result = await resp.json();
+    if (!resp.ok) {
+      const msg = typeof result.detail === 'object' ? result.detail.message : (result.detail || `HTTP ${resp.status}`);
+      throw new Error(msg);
+    }
+
+    closeCreateIssues();
+    const n = result.created?.length || 0;
+    const errCount = result.errors?.length || 0;
+    const toastMsg = errCount > 0
+      ? `${n} issue${n !== 1 ? 's' : ''} created (${errCount} failed)`
+      : `${n} issue${n !== 1 ? 's' : ''} created successfully`;
+    showToast(toastMsg, errCount > 0 ? 'error' : 'success');
+    // Reload scan issues and re-render detail to show issue badges
+    if (scanData?.id) {
+      await loadScanIssues(scanData.id);
+      renderDetail(scanData);
+    }
+  } catch (e) {
+    document.getElementById('ci-error-msg').textContent = e.message;
+    document.getElementById('ci-error').classList.remove('hidden');
+    btn.disabled = false;
+    btn.textContent = 'Create Issues';
+  }
+}
+
 // Close modals on Escape
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape') { closeModal(); closeExport(); }
+  if (e.key === 'Escape') { closeModal(); closeExport(); closeCreateIssues(); }
 });
 
 function showToast(msg, type = 'success') {

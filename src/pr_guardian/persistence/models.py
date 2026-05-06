@@ -254,6 +254,34 @@ class ScanFindingRow(Base):
 
 
 # ---------------------------------------------------------------------------
+# Scan issue tracking
+# ---------------------------------------------------------------------------
+
+
+class ScanIssueRow(Base):
+    """Tracks platform issues created from scan findings."""
+
+    __tablename__ = "scan_issues"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    scan_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), index=True
+    )
+    # JSON list of ScanFindingRow UUIDs covered by this issue
+    finding_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    issue_url: Mapped[str] = mapped_column(Text, default="")
+    issue_number: Mapped[str] = mapped_column(String(32), default="")
+    title: Mapped[str] = mapped_column(Text, default="")
+    platform: Mapped[str] = mapped_column(String(16), default="")
+    repo: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Finding dismissals (feedback loop)
 # ---------------------------------------------------------------------------
 
