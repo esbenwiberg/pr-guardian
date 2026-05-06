@@ -361,6 +361,23 @@ class GitHubAdapter:
                 else:
                     raise
 
+    async def create_issue(
+        self,
+        repo: str,
+        title: str,
+        body: str,
+        labels: list[str] | None = None,
+    ) -> dict:
+        """Create a GitHub issue. Returns dict with 'number' and 'html_url'."""
+        client = self._get_client()
+        payload: dict = {"title": title, "body": body}
+        if labels:
+            payload["labels"] = labels
+        resp = await client.post(f"/repos/{repo}/issues", json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+        return {"number": data.get("number"), "url": data.get("html_url", "")}
+
     async def list_accessible_repos(self) -> list[dict]:
         """List repos the token has access to (owned + collaborated + org member)."""
         client = self._get_client()
