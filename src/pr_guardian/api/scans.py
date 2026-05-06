@@ -226,21 +226,36 @@ async def list_scans(
     scan_type: str | None = Query(None),
 ):
     """Paginated list of scans with optional filters."""
-    return await storage.list_scans(
-        limit=limit, offset=offset, repo=repo, scan_type=scan_type,
-    )
+    try:
+        return await storage.list_scans(
+            limit=limit, offset=offset, repo=repo, scan_type=scan_type,
+        )
+    except Exception:
+        return []
 
 
 @router.get("/scans/stats")
 async def scan_stats():
     """Aggregate statistics for scans."""
-    return await storage.get_scan_stats()
+    try:
+        return await storage.get_scan_stats()
+    except Exception:
+        return {
+            "total": 0,
+            "by_type": {"recent_changes": 0, "maintenance": 0},
+            "by_severity": {"low": 0, "medium": 0, "high": 0, "critical": 0},
+            "total_cost_usd": None,
+            "avg_cost_usd": None,
+        }
 
 
 @router.get("/scans/{scan_id}")
 async def scan_detail(scan_id: uuid.UUID):
     """Full detail for a single scan."""
-    row = await storage.get_scan(scan_id)
+    try:
+        row = await storage.get_scan(scan_id)
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database not available")
     if not row:
         raise HTTPException(status_code=404, detail="Scan not found")
     return row
@@ -413,4 +428,7 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
 @router.get("/scans/{scan_id}/issues")
 async def list_scan_issues(scan_id: uuid.UUID):
     """List all issues created for a scan."""
-    return await storage.get_scan_issues(scan_id)
+    try:
+        return await storage.get_scan_issues(scan_id)
+    except Exception:
+        return []
