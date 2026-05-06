@@ -20,7 +20,8 @@ def _table_exists(table: str) -> bool:
     conn = op.get_bind()
     result = conn.execute(
         sa.text(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = :table"
+            "SELECT 1 FROM information_schema.tables"
+            " WHERE table_name = :table AND table_schema = current_schema()"
         ),
         {"table": table},
     )

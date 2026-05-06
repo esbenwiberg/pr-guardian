@@ -110,7 +110,18 @@ async def test_create_scan_issue_and_get():
                 platform="github",
                 repo="org/repo",
             )
-        assert isinstance(new_id, uuid.UUID)
+            assert isinstance(new_id, uuid.UUID)
+
+            # Verify round-trip retrieval — especially the JSONB finding_ids column
+            issues = await get_scan_issues(scan_id)
+        assert len(issues) == 1
+        issue = issues[0]
+        assert str(issue["id"]) == str(new_id)
+        assert issue["issue_url"] == "https://github.com/org/repo/issues/42"
+        assert issue["issue_number"] == "42"
+        assert issue["title"] == "[PR Guardian] test issue"
+        assert isinstance(issue["finding_ids"], list)
+        assert set(issue["finding_ids"]) == set(finding_ids)
     finally:
         await engine.dispose()
 
