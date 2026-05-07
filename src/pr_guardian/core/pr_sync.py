@@ -40,6 +40,7 @@ def _normalize_github_pr(pr: dict, repo_full_name: str) -> dict:
     org = repo_full_name.split("/")[0] if "/" in repo_full_name else repo_full_name
     approval_status = "draft" if pr.get("draft") else _gh_approval_status(pr.get("_reviews", []))
     reviewers = [r["login"] for r in pr.get("requested_reviewers", [])]
+    assignees = [a.get("login", "") for a in pr.get("assignees", []) if a.get("login")]
     return {
         "platform": "github",
         "pr_id": str(pr["number"]),
@@ -56,6 +57,8 @@ def _normalize_github_pr(pr: dict, repo_full_name: str) -> dict:
         "has_conflicts": pr.get("mergeable") is False,
         "approval_status": approval_status,
         "reviewers": reviewers,
+        "assignees": assignees,
+        "ci_status": pr.get("_ci_status", "unknown"),
         "comment_count": (pr.get("comments") or 0) + (pr.get("review_comments") or 0),
         "pr_created_at": pr.get("created_at"),
         "pr_updated_at": pr.get("updated_at"),
@@ -96,6 +99,8 @@ def _normalize_ado_pr(pr: dict, org_url: str, project: str, repo_name: str) -> d
         "has_conflicts": pr.get("mergeStatus") == "conflicts",
         "approval_status": approval_status,
         "reviewers": [r for r in reviewers if r],
+        "assignees": [],
+        "ci_status": "unknown",
         "comment_count": 0,
         "pr_created_at": pr.get("creationDate"),
         "pr_updated_at": pr.get("creationDate"),

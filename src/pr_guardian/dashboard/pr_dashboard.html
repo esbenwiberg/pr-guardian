@@ -12,7 +12,7 @@
     z-index: 40; display: none;
   }
   #side-panel {
-    position: fixed; top: 0; right: 0; bottom: 0; width: 420px; max-width: 95vw;
+    position: fixed; top: 0; right: 0; bottom: 0; width: 440px; max-width: 95vw;
     background: #0f172a; border-left: 1px solid #1e293b;
     z-index: 50; transform: translateX(100%);
     transition: transform .2s cubic-bezier(.4,0,.2,1);
@@ -24,9 +24,11 @@
     display: flex; flex-direction: column; gap: 4px;
     padding: 14px 16px; border-bottom: 1px solid #1e293b;
     cursor: pointer; transition: background .12s;
+    border-left: 3px solid transparent;
   }
   .pr-row:hover { background: #1e293b55; }
   .pr-row.active { background: #1e293b; }
+  .pr-row.ready { border-left-color: #34d399; }
   /* ── Filter chips ───────────────────────────────────────────────────── */
   .chip {
     display: inline-flex; align-items: center; gap: 4px;
@@ -53,12 +55,37 @@
   }
   .summary-card:hover { border-color: #6366f1; }
   .summary-card.active { border-color: #6366f1; background: #1e293b; }
+  .summary-card.ready-card { border-color: #166534; }
+  .summary-card.ready-card:hover { border-color: #34d399; }
+  .summary-card.ready-card.active { border-color: #34d399; background: #052e16; }
   .summary-card .sc-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: #64748b; }
   .summary-card .sc-value { font-size: 28px; font-weight: 700; color: #f1f5f9; line-height: 1; }
+  .summary-card.ready-card .sc-value { color: #34d399; }
   .summary-card .sc-sub { font-size: 11px; color: #64748b; }
   /* ── Source badge ───────────────────────────────────────────────────── */
   .src-gh  { background: #21262d; color: #58a6ff; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
   .src-ado { background: #1a1f3a; color: #a78bfa; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+  /* ── CI status badges ───────────────────────────────────────────────── */
+  .ci-success { color: #34d399; font-size: 10px; }
+  .ci-failure { color: #f87171; font-size: 10px; }
+  .ci-pending { color: #fbbf24; font-size: 10px; }
+  .ci-unknown { color: #475569; font-size: 10px; }
+  /* ── Guardian review badge ──────────────────────────────────────────── */
+  .guardian-reviewed { color: #818cf8; font-size: 10px; }
+  .guardian-pending  { color: #475569; font-size: 10px; }
+  /* ── Action buttons in panel ────────────────────────────────────────── */
+  .panel-action {
+    display: flex; align-items: center; gap: 2; width: 100%;
+    padding: 10px 16px; border-radius: 8px; font-size: 13px;
+    border: 1px solid; transition: all .12s; cursor: pointer;
+    background: transparent; text-align: left;
+  }
+  .panel-action svg { width: 16px; height: 16px; flex-shrink: 0; }
+  .dd-opt {
+    padding: 6px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; color: #cbd5e1;
+  }
+  .dd-opt:hover { background: #334155; color: #f1f5f9; }
+  .dd-opt.selected { color: #a5b4fc; }
 </style>
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
@@ -66,7 +93,6 @@
 <aside id="sidebar"></aside>
 <script src="/static/sidebar.js"></script>
 
-<!-- Main layout -->
 <div class="ml-16 lg:ml-64 flex flex-col min-h-screen">
 
   <!-- Header -->
@@ -87,7 +113,12 @@
   <div class="flex-1 max-w-[1400px] w-full mx-auto px-6 py-6">
 
     <!-- Summary cards -->
-    <div class="flex gap-4 mb-6 flex-wrap">
+    <div class="flex gap-3 mb-6 flex-wrap">
+      <div class="summary-card ready-card" id="card-ready" onclick="setView('ready')">
+        <div class="sc-label">✓ Ready for Review</div>
+        <div class="sc-value" id="val-ready">-</div>
+        <div class="sc-sub" id="sub-ready">guardian reviewed, no conflicts</div>
+      </div>
       <div class="summary-card active" id="card-mine" onclick="setView('mine')">
         <div class="sc-label">My PRs</div>
         <div class="sc-value" id="val-mine">-</div>
@@ -121,34 +152,55 @@
       </div>
       <!-- Active filter chips rendered here -->
       <div id="active-chips" class="flex flex-wrap gap-1.5"></div>
-      <!-- Dropdown triggers -->
-      <div class="relative" id="dd-source-wrap">
-        <button class="chip" onclick="toggleDropdown('dd-source')">+ Source</button>
-        <div id="dd-source" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-32">
-          <div class="dd-opt" data-filter="platform" data-val="github">GitHub</div>
-          <div class="dd-opt" data-filter="platform" data-val="ado">Azure DevOps</div>
+
+      <!-- Filter dropdowns -->
+      <div class="flex flex-wrap gap-1.5" id="filter-dropdowns">
+
+        <div class="relative" id="dd-source-wrap">
+          <button class="chip" onclick="toggleDropdown('dd-source')">+ Platform</button>
+          <div id="dd-source" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-36">
+            <div class="dd-opt" data-filter="platform" data-val="github">
+              <span class="src-gh mr-1">GH</span> GitHub
+            </div>
+            <div class="dd-opt" data-filter="platform" data-val="ado">
+              <span class="src-ado mr-1">ADO</span> Azure DevOps
+            </div>
+          </div>
         </div>
-      </div>
-      <div class="relative" id="dd-status-wrap">
-        <button class="chip" onclick="toggleDropdown('dd-status')">+ Status</button>
-        <div id="dd-status" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-40">
-          <div class="dd-opt" data-filter="approval_status" data-val="approved">Approved</div>
-          <div class="dd-opt" data-filter="approval_status" data-val="changes_requested">Changes requested</div>
-          <div class="dd-opt" data-filter="approval_status" data-val="pending">Pending review</div>
-          <div class="dd-opt" data-filter="approval_status" data-val="draft">Draft</div>
+
+        <div class="relative" id="dd-project-wrap">
+          <button class="chip" onclick="toggleDropdown('dd-project')">+ Project</button>
+          <div id="dd-project" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-48 max-h-64 overflow-y-auto">
+            <div class="text-xs text-slate-500 px-2 py-1">Loading…</div>
+          </div>
         </div>
+
+        <div class="relative" id="dd-repo-wrap">
+          <button class="chip" onclick="toggleDropdown('dd-repo')">+ Repo</button>
+          <div id="dd-repo" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-56 max-h-64 overflow-y-auto">
+            <div class="text-xs text-slate-500 px-2 py-1">Loading…</div>
+          </div>
+        </div>
+
+        <div class="relative" id="dd-status-wrap">
+          <button class="chip" onclick="toggleDropdown('dd-status')">+ Status</button>
+          <div id="dd-status" class="hidden absolute top-8 left-0 z-30 bg-slate-800 border border-slate-700 rounded-lg shadow-xl p-2 min-w-44">
+            <div class="dd-opt" data-filter="approval_status" data-val="approved">✅ Approved</div>
+            <div class="dd-opt" data-filter="approval_status" data-val="changes_requested">🔴 Changes requested</div>
+            <div class="dd-opt" data-filter="approval_status" data-val="pending">⏳ Pending review</div>
+            <div class="dd-opt" data-filter="approval_status" data-val="draft">✏ Draft</div>
+          </div>
+        </div>
+
       </div>
     </div>
 
-    <!-- PR list + side panel -->
+    <!-- PR list -->
     <div class="flex gap-0 min-h-[400px]">
-
-      <!-- List -->
       <div class="flex-1 card p-0 overflow-hidden" id="pr-list-wrap">
         <div id="pr-list" class="divide-y divide-slate-800"></div>
         <div id="pr-empty" class="hidden p-8 text-center text-slate-500 text-sm">No open PRs match this view.</div>
         <div id="pr-loading" class="p-8 text-center text-slate-500 text-sm">Loading…</div>
-        <!-- Pagination -->
         <div class="flex items-center justify-between px-4 py-3 border-t border-slate-800 text-xs text-slate-500" id="pagination" style="display:none!important">
           <span id="page-info"></span>
           <div class="flex gap-2">
@@ -157,7 +209,6 @@
           </div>
         </div>
       </div>
-
     </div>
   </div>
 </div>
@@ -196,63 +247,91 @@
   </div>
 </div>
 
-<style>
-  .dd-opt {
-    padding: 6px 10px; font-size: 12px; border-radius: 6px; cursor: pointer; white-space: nowrap; color: #cbd5e1;
-  }
-  .dd-opt:hover { background: #334155; color: #f1f5f9; }
-</style>
-
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
-let view = 'mine';           // mine | queue | stale | null
-let filters = {};            // { platform: 'github', approval_status: 'approved', … }
+let view = 'mine';
+let filters = {};
 let search = '';
 let offset = 0;
 const LIMIT = 50;
 let total = 0;
 let activePrId = null;
 let searchTimer = null;
+let filterOptions = { platforms: [], orgs: [], projects: [], repos: [] };
 
 // ── Init ───────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   loadSummary();
   loadPRs();
   loadIdentityPrefill();
+  loadFilterOptions();
 
   document.getElementById('search-input').addEventListener('input', e => {
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => { search = e.target.value.trim(); offset = 0; loadPRs(); }, 300);
   });
-
   document.getElementById('btn-refresh').addEventListener('click', triggerSync);
   document.getElementById('btn-identity').addEventListener('click', openIdentityModal);
 
-  // Close dropdowns on outside click
   document.addEventListener('click', e => {
     if (!e.target.closest('[id^="dd-"]')) closeAllDropdowns();
   });
 
-  // Dropdown option click
-  document.querySelectorAll('.dd-opt').forEach(el => {
+  // Static filter dropdowns (platform + status)
+  document.querySelectorAll('.dd-opt[data-filter]').forEach(el => {
     el.addEventListener('click', e => {
       e.stopPropagation();
-      const f = el.dataset.filter, v = el.dataset.val;
-      if (filters[f] === v) delete filters[f]; else filters[f] = v;
-      offset = 0;
-      closeAllDropdowns();
-      renderChips();
-      loadPRs();
+      applyFilter(el.dataset.filter, el.dataset.val);
     });
   });
 });
+
+// ── Filter options (dynamic dropdowns) ────────────────────────────────────
+async function loadFilterOptions() {
+  try {
+    const r = await fetch('/api/prs/filter-options');
+    filterOptions = await r.json();
+    populateDynamicDropdown('dd-project', 'project', filterOptions.projects);
+    populateDynamicDropdown('dd-repo', 'repo', filterOptions.repos);
+  } catch(e) {}
+}
+
+function populateDynamicDropdown(ddId, filterKey, values) {
+  const el = document.getElementById(ddId);
+  if (!el) return;
+  el.innerHTML = '';
+  if (!values?.length) {
+    el.innerHTML = '<div class="text-xs text-slate-500 px-2 py-1">None available</div>';
+    return;
+  }
+  values.forEach(v => {
+    const div = document.createElement('div');
+    div.className = 'dd-opt';
+    div.dataset.filter = filterKey;
+    div.dataset.val = v;
+    div.textContent = v;
+    div.addEventListener('click', e => {
+      e.stopPropagation();
+      applyFilter(filterKey, v);
+    });
+    el.appendChild(div);
+  });
+}
+
+function applyFilter(key, val) {
+  if (filters[key] === val) delete filters[key]; else filters[key] = val;
+  offset = 0;
+  closeAllDropdowns();
+  renderChips();
+  loadPRs();
+}
 
 // ── View / filters ─────────────────────────────────────────────────────────
 function setView(v) {
   view = v;
   offset = 0;
   document.querySelectorAll('.summary-card').forEach(c => c.classList.remove('active'));
-  const map = { mine: 'card-mine', queue: 'card-queue', stale: 'card-stale', null: 'card-all' };
+  const map = { mine: 'card-mine', queue: 'card-queue', stale: 'card-stale', ready: 'card-ready', null: 'card-all' };
   const cardId = map[v] ?? 'card-all';
   document.getElementById(cardId)?.classList.add('active');
   loadPRs();
@@ -261,12 +340,18 @@ function setView(v) {
 function renderChips() {
   const wrap = document.getElementById('active-chips');
   wrap.innerHTML = '';
-  const labels = { platform: 'Source', approval_status: 'Status' };
-  const vals = { github: 'GitHub', ado: 'Azure DevOps', approved: 'Approved', changes_requested: 'Changes req.', pending: 'Pending', draft: 'Draft' };
+  const labels = { platform: 'Platform', approval_status: 'Status', project: 'Project', repo: 'Repo' };
+  const vals = {
+    github: 'GitHub', ado: 'Azure DevOps',
+    approved: 'Approved', changes_requested: 'Changes req.',
+    pending: 'Pending', draft: 'Draft',
+  };
   Object.entries(filters).forEach(([k, v]) => {
     const chip = document.createElement('span');
     chip.className = 'chip active';
-    chip.innerHTML = `${labels[k] || k}: ${vals[v] || v} <span class="remove" onclick="removeFilter('${k}')">×</span>`;
+    const label = labels[k] || k;
+    const display = vals[v] || v;
+    chip.innerHTML = `${label}: ${esc(display)} <span class="remove" onclick="removeFilter('${k}')">×</span>`;
     wrap.appendChild(chip);
   });
 }
@@ -286,8 +371,8 @@ function toggleDropdown(id) {
 }
 
 function closeAllDropdowns() {
-  document.querySelectorAll('[id^="dd-source"],[id^="dd-status"]').forEach(el => {
-    if (!el.id.includes('wrap')) el.classList.add('hidden');
+  document.querySelectorAll('[id^="dd-source"],[id^="dd-status"],[id^="dd-project"],[id^="dd-repo"]').forEach(el => {
+    if (!el.id.endsWith('-wrap')) el.classList.add('hidden');
   });
 }
 
@@ -296,17 +381,16 @@ async function loadSummary() {
   try {
     const r = await fetch('/api/prs/summary');
     const d = await r.json();
-    document.getElementById('val-mine').textContent  = d.mine?.total ?? 0;
-    document.getElementById('sub-mine').textContent  = d.mine?.needs_attention ? `${d.mine.needs_attention} need attention` : 'all good';
-    document.getElementById('val-queue').textContent = d.queue?.total ?? 0;
-    document.getElementById('sub-queue').textContent = 'awaiting your review';
-    document.getElementById('val-stale').textContent = d.stale?.total ?? 0;
-    document.getElementById('sub-stale').textContent = d.stale?.oldest_days ? `oldest: ${d.stale.oldest_days}d` : 'none stale';
-    document.getElementById('val-all').textContent   = d.all?.total ?? 0;
-    document.getElementById('sub-all').textContent   = `across ${d.all?.repo_count ?? 0} repos`;
-  } catch(e) {
-    console.warn('summary failed', e);
-  }
+    document.getElementById('val-ready').textContent  = d.ready?.total ?? 0;
+    document.getElementById('val-mine').textContent   = d.mine?.total ?? 0;
+    document.getElementById('sub-mine').textContent   = d.mine?.needs_attention ? `${d.mine.needs_attention} need attention` : 'all good';
+    document.getElementById('val-queue').textContent  = d.queue?.total ?? 0;
+    document.getElementById('sub-queue').textContent  = 'awaiting your review';
+    document.getElementById('val-stale').textContent  = d.stale?.total ?? 0;
+    document.getElementById('sub-stale').textContent  = d.stale?.oldest_days ? `oldest: ${d.stale.oldest_days}d` : 'none stale';
+    document.getElementById('val-all').textContent    = d.all?.total ?? 0;
+    document.getElementById('sub-all').textContent    = `across ${d.all?.repo_count ?? 0} repos`;
+  } catch(e) {}
 }
 
 // ── PR list ────────────────────────────────────────────────────────────────
@@ -334,7 +418,6 @@ async function loadPRs() {
       updatePagination();
       return;
     }
-
     d.items.forEach(pr => list.appendChild(buildPRRow(pr)));
     updatePagination();
   } catch(e) {
@@ -344,7 +427,8 @@ async function loadPRs() {
 
 function buildPRRow(pr) {
   const div = document.createElement('div');
-  div.className = 'pr-row' + (pr.id === activePrId ? ' active' : '');
+  const isReady = pr.has_guardian_review && !pr.has_conflicts && !pr.is_draft && pr.ci_status !== 'failure';
+  div.className = 'pr-row' + (pr.id === activePrId ? ' active' : '') + (isReady ? ' ready' : '');
   div.dataset.id = pr.id;
   div.onclick = () => openPanel(pr);
 
@@ -353,32 +437,53 @@ function buildPRRow(pr) {
   const srcClass = pr.platform === 'github' ? 'src-gh' : 'src-ado';
   const srcLabel = pr.platform === 'github' ? 'GH' : 'ADO';
   const approval = approvalBadge(pr);
-  const drafLabel = pr.is_draft ? '<span class="badge-draft text-xs">DRAFT</span> ' : '';
+  const draftLabel = pr.is_draft ? '<span class="badge-draft text-xs">DRAFT</span> ' : '';
   const staleLabel = isStale ? '<span class="badge-stale text-xs">stale</span> ' : '';
   const conflictLabel = pr.has_conflicts ? '<span class="text-red-400 text-xs">⚠ conflicts</span> ' : '';
 
   const repoShort = pr.project ? `${pr.project}/${pr.repo}` : pr.repo;
-  const reviewers = pr.reviewers?.length ? `→ ${pr.reviewers.slice(0,3).join(', ')}${pr.reviewers.length > 3 ? ` +${pr.reviewers.length-3}` : ''}` : '';
+  const reviewers = pr.reviewers?.length
+    ? `→ ${pr.reviewers.slice(0,2).join(', ')}${pr.reviewers.length > 2 ? ` +${pr.reviewers.length-2}` : ''}`
+    : '';
+  const assigneeLabel = pr.assignees?.length
+    ? `<span class="text-slate-500 text-xs">👤 ${pr.assignees.slice(0,2).join(', ')}${pr.assignees.length > 2 ? ` +${pr.assignees.length-2}` : ''}</span>`
+    : '';
+
+  const ciBadge = ciStatusBadge(pr.ci_status);
+  const guardianBadge = pr.has_guardian_review
+    ? `<span class="guardian-reviewed">🛡 ${pr.guardian_decision || 'reviewed'}</span>`
+    : '';
 
   div.innerHTML = `
     <div class="flex items-start gap-2">
-      <span class="mt-0.5 w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0"></span>
+      <span class="mt-0.5 w-1.5 h-1.5 rounded-full ${isReady ? 'bg-emerald-400' : 'bg-slate-600'} shrink-0"></span>
       <div class="flex-1 min-w-0">
         <div class="text-sm font-medium text-slate-100 truncate">${esc(pr.title)}</div>
         <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-xs text-slate-400">
           <span class="${srcClass}">${srcLabel}</span>
-          <span class="truncate max-w-48" title="${esc(repoShort)}">${esc(repoShort)}</span>
+          <span class="truncate max-w-44" title="${esc(repoShort)}">${esc(repoShort)}</span>
           <span class="text-slate-600">•</span>
           <span>${esc(ago)}</span>
-          ${reviewers ? `<span class="text-slate-500 truncate max-w-40" title="${esc(pr.reviewers?.join(', ')??'')}">${esc(reviewers)}</span>` : ''}
+          ${reviewers ? `<span class="text-slate-500 truncate max-w-36">${esc(reviewers)}</span>` : ''}
+          ${assigneeLabel}
         </div>
-        <div class="flex items-center gap-2 mt-1 text-xs">
-          ${drafLabel}${staleLabel}${conflictLabel}${approval}
+        <div class="flex flex-wrap items-center gap-2 mt-1 text-xs">
+          ${draftLabel}${staleLabel}${conflictLabel}${approval}
+          ${ciBadge}${guardianBadge}
           ${pr.comment_count ? `<span class="text-slate-500">💬 ${pr.comment_count}</span>` : ''}
         </div>
       </div>
     </div>`;
   return div;
+}
+
+function ciStatusBadge(status) {
+  const map = {
+    success: '<span class="ci-success">✓ CI</span>',
+    failure: '<span class="ci-failure">✗ CI</span>',
+    pending: '<span class="ci-pending">⏳ CI</span>',
+  };
+  return map[status] || '';
 }
 
 function approvalBadge(pr) {
@@ -402,12 +507,31 @@ function openPanel(pr) {
   const ago = relativeTime(pr.pr_updated_at);
   const created = pr.pr_created_at ? new Date(pr.pr_created_at).toLocaleDateString() : '—';
   const reviewerList = pr.reviewers?.join(', ') || '—';
+  const assigneeList = pr.assignees?.join(', ') || '—';
 
   const guardianUrl = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}`;
-  const wizardUrl = pr.pr_url ? `/browse-pr?url=${encodeURIComponent(pr.pr_url)}&mode=wizard` : null;
+  const isReady = pr.has_guardian_review && !pr.has_conflicts && !pr.is_draft && pr.ci_status !== 'failure';
+
+  const readyBanner = isReady
+    ? `<div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-900/30 border border-emerald-800 text-emerald-300 text-xs font-medium mb-1">
+        <span>✓</span> Ready for review — guardian reviewed, no conflicts
+       </div>`
+    : '';
+
+  const ciRow = pr.ci_status !== 'unknown'
+    ? `<div><div class="text-xs text-slate-500 mb-0.5">CI Build</div><div class="text-slate-200">${ciBadgeFull(pr.ci_status)}</div></div>`
+    : '';
+
+  const guardianRow = `<div>
+    <div class="text-xs text-slate-500 mb-0.5">Guardian Review</div>
+    <div class="text-slate-200">${pr.has_guardian_review
+      ? `<span class="text-indigo-300">🛡 ${pr.guardian_decision || 'reviewed'}</span>`
+      : '<span class="text-slate-500">not yet run</span>'}</div>
+  </div>`;
 
   document.getElementById('panel-body').innerHTML = `
     <div class="space-y-3">
+      ${readyBanner}
       <div>
         <div class="text-xs text-slate-500 mb-0.5">Repository</div>
         <div class="font-medium text-slate-200">${esc(orgLabel)} › ${esc(repoLabel)}</div>
@@ -417,6 +541,8 @@ function openPanel(pr) {
         <div><div class="text-xs text-slate-500 mb-0.5">Updated</div><div class="text-slate-200">${esc(ago)}</div></div>
         <div><div class="text-xs text-slate-500 mb-0.5">Created</div><div class="text-slate-200">${esc(created)}</div></div>
         <div><div class="text-xs text-slate-500 mb-0.5">Comments</div><div class="text-slate-200">${pr.comment_count ?? 0}</div></div>
+        ${ciRow}
+        ${guardianRow}
       </div>
       <div>
         <div class="text-xs text-slate-500 mb-0.5">Branches</div>
@@ -426,38 +552,63 @@ function openPanel(pr) {
         <div class="text-xs text-slate-500 mb-0.5">Reviewers</div>
         <div class="text-slate-300">${esc(reviewerList)}</div>
       </div>
+      <div>
+        <div class="text-xs text-slate-500 mb-0.5">Assignees</div>
+        <div class="text-slate-300">${esc(assigneeList)}</div>
+      </div>
       <div class="flex items-center gap-2 flex-wrap">
         <div>${approvalBadge(pr)}</div>
         ${pr.is_draft ? '<div class="badge-draft text-xs">DRAFT</div>' : ''}
         ${pr.has_conflicts ? '<div class="text-red-400 text-xs">⚠ conflicts</div>' : ''}
       </div>
     </div>
+
     <div class="space-y-2 pt-2 border-t border-slate-800">
       <a href="${esc(pr.pr_url)}" target="_blank" rel="noopener"
-         class="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg border border-slate-700 hover:border-slate-500 text-sm text-slate-300 hover:text-slate-100 transition-colors">
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+         class="panel-action border-slate-700 hover:border-slate-500 text-slate-300 hover:text-slate-100 gap-2">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 0 0 3 8.25v10.5A2.25 2.25 0 0 0 5.25 21h10.5A2.25 2.25 0 0 0 18 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25"/>
         </svg>
         Open in ${pr.platform === 'github' ? 'GitHub' : 'Azure DevOps'}
       </a>
+
       <a href="${esc(guardianUrl)}"
-         class="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg border border-indigo-700 hover:border-indigo-500 bg-indigo-900/30 hover:bg-indigo-900/50 text-sm text-indigo-300 hover:text-indigo-100 transition-colors">
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+         class="panel-action border-indigo-700 hover:border-indigo-500 bg-indigo-900/30 hover:bg-indigo-900/50 text-indigo-300 hover:text-indigo-100 gap-2">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347c-.75.412-1.667-.13-1.667-.986V5.653Z"/>
         </svg>
         Start Review
       </a>
-      ${wizardUrl ? `<a href="${esc(wizardUrl)}"
-         class="flex items-center gap-2 w-full px-4 py-2.5 rounded-lg border border-emerald-800 hover:border-emerald-600 bg-emerald-900/20 hover:bg-emerald-900/40 text-sm text-emerald-400 hover:text-emerald-200 transition-colors">
-        <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+
+      <button id="wizard-btn" onclick="startWizardReview(${JSON.stringify(pr).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026')})"
+         class="panel-action border-emerald-800 hover:border-emerald-600 bg-emerald-900/20 hover:bg-emerald-900/40 text-emerald-400 hover:text-emerald-200 gap-2">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904 9 18.75l-.813-2.846a4.5 4.5 0 0 0-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 0 0 3.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 0 0 3.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 0 0-3.09 3.09Z"/>
         </svg>
-        🧙 Wizard Review
-      </a>` : ''}
+        🧙 Wizard Review${pr.has_guardian_review ? ' (view existing)' : ' (start + assign me)'}
+      </button>
+
+      <button onclick="hideRepo(${JSON.stringify({platform: pr.platform, org: pr.org, project: pr.project, repo: pr.repo}).replace(/</g,'\\u003c')})"
+         class="panel-action border-slate-700 hover:border-red-700 text-slate-500 hover:text-red-400 gap-2">
+        <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 1.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.451 10.451 0 0 1 12 4.5c4.756 0 8.773 3.162 10.065 7.498a10.522 10.522 0 0 1-4.293 5.774M6.228 6.228 3 3m3.228 3.228 3.65 3.65m7.894 7.894L21 21m-3.228-3.228-3.65-3.65m0 0a3 3 0 1 0-4.243-4.243m4.242 4.242L9.88 9.88"/>
+        </svg>
+        Hide this repo from dashboard
+      </button>
     </div>`;
 
   document.getElementById('panel-overlay').style.display = 'block';
   document.getElementById('side-panel').classList.add('open');
+}
+
+function ciBadgeFull(status) {
+  const map = {
+    success: '✓ Passing',
+    failure: '✗ Failing',
+    pending: '⏳ In progress',
+    unknown: '— Unknown',
+  };
+  return map[status] || map.unknown;
 }
 
 function closePanel() {
@@ -465,6 +616,49 @@ function closePanel() {
   document.querySelectorAll('.pr-row').forEach(r => r.classList.remove('active'));
   document.getElementById('panel-overlay').style.display = 'none';
   document.getElementById('side-panel').classList.remove('open');
+}
+
+// ── Wizard review ──────────────────────────────────────────────────────────
+async function startWizardReview(pr) {
+  const btn = document.getElementById('wizard-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = btn.innerHTML.replace(/🧙.*$/, '⏳ Starting…'); }
+
+  try {
+    const r = await fetch(`/api/prs/${pr.id}/start-wizard`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ assign_self: true }),
+    });
+    const data = await r.json();
+
+    if (data.mode === 'existing' && data.review_id) {
+      window.location.href = `/reviews/${data.review_id}?wizard=true`;
+    } else {
+      window.location.href = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}&mode=wizard`;
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, '🧙 Wizard Review'); }
+    alert('Failed to start wizard review.');
+  }
+}
+
+// ── Hide / exclude repo ────────────────────────────────────────────────────
+async function hideRepo(repoInfo) {
+  if (!confirm(`Hide all PRs from "${repoInfo.repo}" from the dashboard?\n\nYou can restore it in Admin → Excluded Repos.`)) return;
+  try {
+    await fetch('/api/prs/exclude-repo', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(repoInfo),
+    });
+    closePanel();
+    // Refresh filter options + PR list
+    await loadFilterOptions();
+    loadSummary();
+    loadPRs();
+  } catch(e) {
+    alert('Failed to hide repo.');
+  }
 }
 
 // ── Pagination ─────────────────────────────────────────────────────────────
@@ -498,12 +692,8 @@ async function loadIdentityPrefill() {
   } catch(e) {}
 }
 
-function openIdentityModal() {
-  document.getElementById('identity-modal').style.removeProperty('display');
-}
-function closeIdentityModal() {
-  document.getElementById('identity-modal').style.display = 'none';
-}
+function openIdentityModal() { document.getElementById('identity-modal').style.removeProperty('display'); }
+function closeIdentityModal() { document.getElementById('identity-modal').style.display = 'none'; }
 
 async function saveIdentity() {
   const gh  = document.getElementById('inp-gh').value.trim();
@@ -529,7 +719,7 @@ async function triggerSync() {
   btn.disabled = true;
   try {
     await fetch('/api/prs/sync', { method: 'POST' });
-    setTimeout(() => { loadSummary(); loadPRs(); btn.textContent = '↻ Sync'; btn.disabled = false; }, 3000);
+    setTimeout(() => { loadSummary(); loadPRs(); loadFilterOptions(); btn.textContent = '↻ Sync'; btn.disabled = false; }, 3000);
   } catch(e) {
     btn.textContent = '↻ Sync'; btn.disabled = false;
   }

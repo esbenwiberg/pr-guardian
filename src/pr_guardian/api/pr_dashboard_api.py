@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 
 import structlog
 from fastapi import APIRouter, Request
@@ -56,7 +57,7 @@ async def update_user_identity(request: Request, body: IdentityUpdate):
 
 
 # ---------------------------------------------------------------------------
-# Dashboard summary (4 cards)
+# Dashboard summary (cards)
 # ---------------------------------------------------------------------------
 
 
@@ -79,6 +80,7 @@ async def get_pr_summary(request: Request):
             "queue": {"total": 0},
             "stale": {"total": 0, "oldest_days": None},
             "all": {"total": 0, "repo_count": 0},
+            "ready": {"total": 0},
         }
 
 
@@ -93,6 +95,7 @@ async def list_prs(
     view: str | None = None,
     platform: str | None = None,
     org: str | None = None,
+    project: str | None = None,
     repo: str | None = None,
     author: str | None = None,
     search: str | None = None,
@@ -112,6 +115,7 @@ async def list_prs(
             ado_upn=ado_upn,
             platform=platform,
             org=org,
+            project=project,
             repo=repo,
             author=author,
             search=search,
@@ -122,6 +126,20 @@ async def list_prs(
     except Exception as exc:
         log.error("list_prs_failed", error=str(exc))
         return {"items": [], "total": 0, "offset": offset, "limit": limit}
+
+
+# ---------------------------------------------------------------------------
+# Filter options (for dynamic dropdowns)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api/prs/filter-options")
+async def get_filter_options():
+    try:
+        return await storage.get_pr_filter_options()
+    except Exception as exc:
+        log.error("filter_options_failed", error=str(exc))
+        return {"platforms": [], "orgs": [], "projects": [], "repos": []}
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +157,112 @@ async def get_pr(pr_uuid: str):
     except Exception as exc:
         log.error("get_pr_failed", pr_uuid=pr_uuid, error=str(exc))
         return JSONResponse({"error": "db unavailable"}, status_code=503)
+
+
+# ---------------------------------------------------------------------------
+# Wizard review: start + self-assign
+# ---------------------------------------------------------------------------
+
+
+class StartWizardRequest(BaseModel):
+    assign_self: bool = True
+
+
+@router.post("/api/prs/{pr_uuid}/start-wizard")
+async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: Request):
+    """Check for / start a guardian review and optionally self-assign as reviewer."""
+    identity = request.state.identity
+    email = identity.email or ""
+
+    try:
+        pr = await storage.get_synced_pr(pr_uuid)
+    except Exception:
+        pr = None
+    if not pr:
+        return JSONResponse({"error": "not found"}, status_code=404)
+
+    # Self-assign on the platform
+    if body.assign_self and email:
+        try:
+            user_id = await storage.get_user_identity(email)
+            if user_id and pr["platform"] == "github":
+                github_handle = user_id.get("github_handle")
+                if github_handle:
+                    from pr_guardian.platform.github import GitHubAdapter
+                    token = os.environ.get("GITHUB_TOKEN", "")
+                    adapter = GitHubAdapter(token=token)
+                    try:
+                        await adapter.add_pr_reviewer(pr["repo"], pr["pr_id"], github_handle)
+                        await adapter.add_pr_assignee(pr["repo"], pr["pr_id"], github_handle)
+                    finally:
+                        await adapter.close()
+        except Exception as exc:
+            log.warning("start_wizard_assign_failed", error=str(exc))
+
+    # Check for an existing completed review
+    try:
+        existing = await storage.find_review_by_pr_url(pr["pr_url"])
+    except Exception:
+        existing = None
+
+    if existing:
+        return {
+            "mode": "existing",
+            "review_id": str(existing["id"]),
+            "pr_url": pr["pr_url"],
+        }
+
+    # Start a new review in the background
+    try:
+        from pr_guardian.api.review import _parse_pr_url, _run_review_background
+        from pr_guardian.platform.factory import create_adapter
+
+        stub, platform_name = _parse_pr_url(pr["pr_url"])
+        adapter = create_adapter(platform_name)
+        base_url = str(request.base_url)
+        asyncio.create_task(
+            _run_review_background(stub, adapter, "none", base_url, platform_name=platform_name)
+        )
+    except Exception as exc:
+        log.warning("start_wizard_review_launch_failed", error=str(exc))
+
+    return {"mode": "new", "pr_url": pr["pr_url"]}
+
+
+# ---------------------------------------------------------------------------
+# Repo exclusion
+# ---------------------------------------------------------------------------
+
+
+class ExcludeRepoRequest(BaseModel):
+    platform: str
+    org: str
+    project: str = ""
+    repo: str
+
+
+@router.post("/api/prs/exclude-repo")
+async def exclude_repo(body: ExcludeRepoRequest, request: Request):
+    """Exclude a repo from the PR dashboard (admin-side filter)."""
+    identity = request.state.identity
+    email = identity.email or ""
+    added = await storage.add_excluded_repo(
+        platform=body.platform,
+        org=body.org,
+        project=body.project,
+        repo=body.repo,
+        email=email,
+    )
+    return {"ok": True, "added": added}
+
+
+@router.delete("/api/prs/exclude-repo/{exclusion_id}")
+async def unexclude_repo(exclusion_id: str):
+    """Remove a repo exclusion."""
+    removed = await storage.remove_excluded_repo(exclusion_id)
+    if not removed:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return {"ok": True}
 
 
 # ---------------------------------------------------------------------------

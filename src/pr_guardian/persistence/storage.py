@@ -19,6 +19,7 @@ from pr_guardian.persistence.models import (
     AdminRow,
     AgentResultRow,
     ApiKeyRow,
+    ExcludedRepoRow,
     FindingDismissalRow,
     FindingRow,
     GithubPatRow,
@@ -1416,7 +1417,9 @@ async def upsert_synced_pr(data: dict[str, Any]) -> None:
         "has_conflicts": bool(data.get("has_conflicts", False)),
         "approval_status": data.get("approval_status", "pending"),
         "reviewers": data.get("reviewers") or [],
+        "assignees": data.get("assignees") or [],
         "comment_count": int(data.get("comment_count", 0)),
+        "ci_status": data.get("ci_status", "unknown"),
         "pr_created_at": pr_created_at,
         "pr_updated_at": pr_updated_at,
         "synced_at": now,
@@ -1468,6 +1471,7 @@ async def list_synced_prs(
     ado_upn: str | None = None,
     platform: str | None = None,
     org: str | None = None,
+    project: str | None = None,
     repo: str | None = None,
     author: str | None = None,
     search: str | None = None,
@@ -1476,14 +1480,34 @@ async def list_synced_prs(
 ) -> tuple[list[dict[str, Any]], int]:
     """List cached open PRs with filters. Returns (items, total_count)."""
     import json
-    from sqlalchemy import cast, or_
+    from sqlalchemy import cast, exists, or_
     from sqlalchemy.dialects.postgresql import JSONB
 
     stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
     user_handles = [h for h in [github_handle, ado_upn] if h]
 
+    # Subquery: does a completed guardian review exist for this PR?
+    review_exists_subq = (
+        select(ReviewRow.id)
+        .where(ReviewRow.pr_url == SyncedPRRow.pr_url)
+        .where(ReviewRow.finished_at.isnot(None))
+        .correlate(SyncedPRRow)
+        .exists()
+    )
+
+    # Subquery: is this repo excluded?
+    excluded_subq = (
+        select(ExcludedRepoRow.id)
+        .where(ExcludedRepoRow.platform == SyncedPRRow.platform)
+        .where(ExcludedRepoRow.org == SyncedPRRow.org)
+        .where(ExcludedRepoRow.project == SyncedPRRow.project)
+        .where(ExcludedRepoRow.repo == SyncedPRRow.repo)
+        .correlate(SyncedPRRow)
+        .exists()
+    )
+
     async with async_session() as session:
-        q = select(SyncedPRRow)
+        q = select(SyncedPRRow).where(~excluded_subq)
 
         # View filters
         if view == "mine" and user_handles:
@@ -1496,12 +1520,19 @@ async def list_synced_prs(
             q = q.where(or_(*conditions))
         elif view == "stale":
             q = q.where(SyncedPRRow.pr_updated_at < stale_cutoff)
+        elif view == "ready":
+            q = q.where(SyncedPRRow.is_draft == False)  # noqa: E712
+            q = q.where(SyncedPRRow.has_conflicts == False)  # noqa: E712
+            q = q.where(SyncedPRRow.ci_status != "failure")
+            q = q.where(review_exists_subq)
 
         # Extra filters
         if platform:
             q = q.where(SyncedPRRow.platform == platform)
         if org:
             q = q.where(SyncedPRRow.org == org)
+        if project:
+            q = q.where(SyncedPRRow.project == project)
         if repo:
             q = q.where(SyncedPRRow.repo == repo)
         if author:
@@ -1512,20 +1543,53 @@ async def list_synced_prs(
         total = await session.scalar(select(func.count()).select_from(q.subquery()))
         q = q.order_by(SyncedPRRow.pr_updated_at.desc().nullslast()).offset(offset).limit(limit)
         rows = (await session.scalars(q)).all()
-        return [_synced_pr_to_dict(r) for r in rows], int(total or 0)
+        pr_dicts = [_synced_pr_to_dict(r) for r in rows]
+
+        # Batch-fetch guardian review status for the returned PRs
+        if pr_dicts:
+            pr_urls = [d["pr_url"] for d in pr_dicts]
+            review_rows = await session.execute(
+                select(ReviewRow.pr_url, ReviewRow.id, ReviewRow.decision)
+                .where(ReviewRow.pr_url.in_(pr_urls))
+                .where(ReviewRow.finished_at.isnot(None))
+                .order_by(ReviewRow.pr_url, ReviewRow.finished_at.desc())
+            )
+            reviews_map: dict[str, dict] = {}
+            for rpr_url, rid, rdecision in review_rows.fetchall():
+                if rpr_url not in reviews_map:
+                    reviews_map[rpr_url] = {
+                        "guardian_review_id": str(rid),
+                        "guardian_decision": rdecision,
+                    }
+            for d in pr_dicts:
+                info = reviews_map.get(d["pr_url"])
+                if info:
+                    d["has_guardian_review"] = True
+                    d["guardian_review_id"] = info["guardian_review_id"]
+                    d["guardian_decision"] = info["guardian_decision"]
+
+        return pr_dicts, int(total or 0)
 
 
 async def get_pr_dashboard_summary(
     github_handle: str | None = None,
     ado_upn: str | None = None,
 ) -> dict[str, Any]:
-    """Compute counts for the 4 dashboard summary cards."""
+    """Compute counts for the dashboard summary cards."""
     import json
-    from sqlalchemy import cast, or_
+    from sqlalchemy import cast, exists, or_
     from sqlalchemy.dialects.postgresql import JSONB
 
     stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
     user_handles = [h for h in [github_handle, ado_upn] if h]
+
+    review_exists_subq = (
+        select(ReviewRow.id)
+        .where(ReviewRow.pr_url == SyncedPRRow.pr_url)
+        .where(ReviewRow.finished_at.isnot(None))
+        .correlate(SyncedPRRow)
+        .exists()
+    )
 
     async with async_session() as session:
         total_open = await session.scalar(select(func.count(SyncedPRRow.id))) or 0
@@ -1562,6 +1626,14 @@ async def get_pr_dashboard_summary(
             )
         ) or 0
 
+        ready_total = await session.scalar(
+            select(func.count(SyncedPRRow.id))
+            .where(SyncedPRRow.is_draft == False)  # noqa: E712
+            .where(SyncedPRRow.has_conflicts == False)  # noqa: E712
+            .where(SyncedPRRow.ci_status != "failure")
+            .where(review_exists_subq)
+        ) or 0
+
         repo_count = await session.scalar(
             select(func.count(func.distinct(SyncedPRRow.repo)))
         ) or 0
@@ -1580,6 +1652,7 @@ async def get_pr_dashboard_summary(
             "queue": {"total": queue_total},
             "stale": {"total": stale_total, "oldest_days": oldest_days},
             "all": {"total": total_open, "repo_count": repo_count},
+            "ready": {"total": ready_total},
         }
 
 
@@ -1613,8 +1686,118 @@ def _synced_pr_to_dict(row: SyncedPRRow) -> dict[str, Any]:
         "has_conflicts": row.has_conflicts,
         "approval_status": row.approval_status,
         "reviewers": row.reviewers or [],
+        "assignees": row.assignees or [],
         "comment_count": row.comment_count,
+        "ci_status": row.ci_status or "unknown",
+        # Guardian review fields populated by list_synced_prs batch lookup
+        "has_guardian_review": False,
+        "guardian_review_id": None,
+        "guardian_decision": None,
         "pr_created_at": row.pr_created_at.isoformat() if row.pr_created_at else None,
         "pr_updated_at": row.pr_updated_at.isoformat() if row.pr_updated_at else None,
         "synced_at": row.synced_at.isoformat() if row.synced_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Excluded repos (admin-side PR dashboard filtering)
+# ---------------------------------------------------------------------------
+
+
+async def list_excluded_repos() -> list[dict[str, Any]]:
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(ExcludedRepoRow).order_by(ExcludedRepoRow.created_at.desc())
+            )
+        ).all()
+        return [
+            {
+                "id": str(r.id),
+                "platform": r.platform,
+                "org": r.org,
+                "project": r.project,
+                "repo": r.repo,
+                "excluded_by_email": r.excluded_by_email,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
+
+
+async def add_excluded_repo(
+    platform: str, org: str, project: str, repo: str, email: str
+) -> bool:
+    """Add a repo exclusion. Returns False if it already exists."""
+    from sqlalchemy.exc import IntegrityError
+
+    async with async_session() as session:
+        row = ExcludedRepoRow(
+            platform=platform, org=org, project=project, repo=repo,
+            excluded_by_email=email,
+        )
+        session.add(row)
+        try:
+            await session.commit()
+            return True
+        except IntegrityError:
+            await session.rollback()
+            return False
+
+
+async def remove_excluded_repo(exclusion_id: str) -> bool:
+    """Remove a repo exclusion by UUID. Returns False if not found."""
+    from sqlalchemy import delete as sa_delete
+
+    async with async_session() as session:
+        result = await session.execute(
+            sa_delete(ExcludedRepoRow).where(
+                ExcludedRepoRow.id == uuid.UUID(exclusion_id)
+            )
+        )
+        await session.commit()
+        return (result.rowcount or 0) > 0
+
+
+# ---------------------------------------------------------------------------
+# PR filter options (dynamic dropdowns)
+# ---------------------------------------------------------------------------
+
+
+async def get_pr_filter_options() -> dict[str, Any]:
+    """Return distinct platforms, orgs, projects, and repos for filter dropdowns."""
+    from sqlalchemy import text
+
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(
+                    SyncedPRRow.platform,
+                    SyncedPRRow.org,
+                    SyncedPRRow.project,
+                    SyncedPRRow.repo,
+                ).distinct()
+            )
+        ).fetchall()
+
+    platforms: list[str] = []
+    orgs: list[str] = []
+    projects: list[str] = []
+    repos: list[str] = []
+    seen: dict[str, set] = {"platform": set(), "org": set(), "project": set(), "repo": set()}
+    for platform, org, project, repo in rows:
+        if platform and platform not in seen["platform"]:
+            platforms.append(platform); seen["platform"].add(platform)
+        if org and org not in seen["org"]:
+            orgs.append(org); seen["org"].add(org)
+        if project and project not in seen["project"]:
+            projects.append(project); seen["project"].add(project)
+        if repo and repo not in seen["repo"]:
+            repos.append(repo); seen["repo"].add(repo)
+
+    return {
+        "platforms": sorted(platforms),
+        "orgs": sorted(orgs),
+        "projects": sorted(projects),
+        "repos": sorted(repos),
     }

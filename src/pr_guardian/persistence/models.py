@@ -475,7 +475,10 @@ class SyncedPRRow(Base):
     # approved | changes_requested | pending
     approval_status: Mapped[str] = mapped_column(String(32), default="pending")
     reviewers: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
+    assignees: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
     comment_count: Mapped[int] = mapped_column(Integer, default=0)
+    # 'success' | 'failure' | 'pending' | 'unknown'
+    ci_status: Mapped[str] = mapped_column(String(32), default="unknown")
     pr_created_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -483,5 +486,28 @@ class SyncedPRRow(Base):
         DateTime(timezone=True), nullable=True
     )
     synced_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ExcludedRepoRow(Base):
+    """Admin-side repo exclusion: repos hidden from the PR dashboard."""
+
+    __tablename__ = "excluded_repos"
+    __table_args__ = (
+        __import__("sqlalchemy").UniqueConstraint(
+            "platform", "org", "project", "repo", name="uq_excluded_repo"
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    platform: Mapped[str] = mapped_column(String(16))
+    org: Mapped[str] = mapped_column(String(256))
+    project: Mapped[str] = mapped_column(String(256), default="")
+    repo: Mapped[str] = mapped_column(String(256))
+    excluded_by_email: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
