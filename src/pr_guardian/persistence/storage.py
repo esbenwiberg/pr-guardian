@@ -1436,8 +1436,12 @@ async def upsert_synced_pr(data: dict[str, Any]) -> None:
         await session.commit()
 
 
-async def delete_closed_prs(platform: str, repo: str, project: str, open_pr_ids: list[str]) -> None:
-    """Remove PRs that are no longer open in the given repo."""
+async def delete_closed_prs(platform: str, repo: str, project: str, keep_pr_ids: list[str]) -> None:
+    """Remove non-merged PRs that are no longer in the keep list for the given repo.
+
+    Merged PRs are preserved here so a transient failure on the merged-PR fetch
+    cannot wipe them; they age out via ``purge_old_merged_prs`` instead.
+    """
     from sqlalchemy import delete
 
     async with async_session() as session:
@@ -1446,11 +1450,27 @@ async def delete_closed_prs(platform: str, repo: str, project: str, open_pr_ids:
             .where(SyncedPRRow.platform == platform)
             .where(SyncedPRRow.repo == repo)
             .where(SyncedPRRow.project == project)
+            .where(SyncedPRRow.approval_status != "merged")
         )
-        if open_pr_ids:
-            q = q.where(SyncedPRRow.pr_id.notin_(open_pr_ids))
+        if keep_pr_ids:
+            q = q.where(SyncedPRRow.pr_id.notin_(keep_pr_ids))
         await session.execute(q)
         await session.commit()
+
+
+async def purge_old_merged_prs(retention_days: int) -> int:
+    """Delete merged PRs whose pr_updated_at is older than ``retention_days``."""
+    from sqlalchemy import delete
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    async with async_session() as session:
+        result = await session.execute(
+            delete(SyncedPRRow)
+            .where(SyncedPRRow.approval_status == "merged")
+            .where(SyncedPRRow.pr_updated_at < cutoff)
+        )
+        await session.commit()
+        return result.rowcount or 0
 
 
 async def get_synced_pr(pr_uuid: str) -> dict[str, Any] | None:
