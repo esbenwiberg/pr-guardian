@@ -104,6 +104,7 @@ async def run_review(
     diff_override=None,
     skip_platform_side_effects: bool = False,
     comment_mode: str = "summary",
+    pat_name: str | None = None,
 ) -> ReviewResult:
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
@@ -114,7 +115,7 @@ async def run_review(
     # Create DB record only if one wasn't provided by the caller
     if storage and review_db_id is None:
         try:
-            review_db_id = await storage.create_review_record(pr, comment_mode=comment_mode)
+            review_db_id = await storage.create_review_record(pr, comment_mode=comment_mode, pat_name=pat_name)
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
 
