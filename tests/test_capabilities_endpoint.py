@@ -90,6 +90,7 @@ def _patch_endpoint(monkeypatch, review, *, cluster_result=None, diff_raises=Non
         fake_adapter.fetch_diff = _diff
     fake_adapter.fetch_pr_body_and_commits = _pr_body_and_commits
     monkeypatch.setattr(dash, "create_adapter", lambda _p: fake_adapter)
+    monkeypatch.setattr(dash, "create_github_adapter", AsyncMock(return_value=fake_adapter))
 
     monkeypatch.setattr(dash, "create_llm_client", lambda _config: object())
 
