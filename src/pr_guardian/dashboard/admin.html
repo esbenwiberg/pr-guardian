@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>PR Guardian — Admin</title>
 <link rel="stylesheet" href="/static/styles.css">
+<style>
+  .src-gh  { background: #21262d; color: #58a6ff; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+  .src-ado { background: #1a1f3a; color: #a78bfa; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+</style>
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
 
@@ -160,6 +164,28 @@
           </tr>
         </thead>
         <tbody id="pats-body"></tbody>
+      </table>
+    </div>
+
+    <!-- Excluded Repos -->
+    <div class="card p-6 mt-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-semibold">Excluded Repos</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Repos hidden from the PR Dashboard. Users can exclude repos via the dashboard panel.</p>
+        </div>
+      </div>
+      <div id="repos-loading" class="text-xs text-slate-400 py-4">Loading…</div>
+      <div id="repos-empty" class="hidden text-xs text-slate-400 py-4">No excluded repos.</div>
+      <table id="repos-table" class="hidden w-full text-xs">
+        <thead><tr class="text-left text-slate-400 border-b border-slate-700">
+          <th class="pb-2 font-medium">Platform</th>
+          <th class="pb-2 font-medium">Repo</th>
+          <th class="pb-2 font-medium">Excluded by</th>
+          <th class="pb-2 font-medium">Date</th>
+          <th class="pb-2 font-medium"></th>
+        </tr></thead>
+        <tbody id="repos-body"></tbody>
       </table>
     </div>
 
@@ -536,8 +562,50 @@ async function saveEditPat() {
   }
 }
 
+// --- Excluded repos ---
+async function loadExcludedRepos() {
+  try {
+    const r = await fetch(`${API}/excluded-repos`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const repos = await r.json();
+    document.getElementById('repos-loading').classList.add('hidden');
+    if (!repos.length) {
+      document.getElementById('repos-empty').classList.remove('hidden');
+      document.getElementById('repos-table').classList.add('hidden');
+      return;
+    }
+    document.getElementById('repos-empty').classList.add('hidden');
+    document.getElementById('repos-table').classList.remove('hidden');
+    document.getElementById('repos-body').innerHTML = repos.map(r => `
+      <tr class="border-b border-slate-700/30">
+        <td class="py-2"><span class="${r.platform === 'github' ? 'src-gh' : 'src-ado'}">${r.platform === 'github' ? 'GH' : 'ADO'}</span></td>
+        <td class="py-2 text-slate-200 font-medium">${esc(r.project ? r.project + '/' + r.repo : r.repo)}</td>
+        <td class="py-2 text-slate-400">${esc(r.excluded_by_email || '—')}</td>
+        <td class="py-2 text-slate-400">${fmtDate(r.created_at)}</td>
+        <td class="py-2 text-right">
+          <button class="text-emerald-400 hover:text-emerald-300 transition-colors" onclick="restoreRepo('${esc(r.id)}', '${esc(r.repo)}')">Restore</button>
+        </td>
+      </tr>`).join('');
+  } catch(e) {
+    document.getElementById('repos-loading').textContent = 'Failed to load excluded repos.';
+  }
+}
+
+async function restoreRepo(id, name) {
+  if (!confirm(`Restore "${name}" to the PR dashboard?`)) return;
+  try {
+    const r = await fetch(`${API}/excluded-repos/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    showToast(`"${name}" restored`);
+    loadExcludedRepos();
+  } catch(e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
 // --- Init ---
 loadIdentity();
+loadExcludedRepos();
 </script>
 
 <script src="/static/command-palette.js"></script>

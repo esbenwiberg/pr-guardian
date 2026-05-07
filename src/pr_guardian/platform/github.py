@@ -13,6 +13,25 @@ from pr_guardian.platform.models import WebhookPayload
 log = structlog.get_logger()
 
 
+def _compute_ci_status(runs: list[dict]) -> str:
+    """Derive overall CI status from GitHub check-runs list."""
+    if not runs:
+        return "unknown"
+    in_progress = any(r.get("status") != "completed" for r in runs)
+    conclusions = {
+        r.get("conclusion")
+        for r in runs
+        if r.get("status") == "completed" and r.get("conclusion")
+    }
+    if any(c in ("failure", "timed_out", "action_required") for c in conclusions):
+        return "failure"
+    if in_progress:
+        return "pending"
+    if conclusions and all(c in ("success", "neutral", "skipped") for c in conclusions):
+        return "success"
+    return "unknown"
+
+
 class GitHubAdapter:
     """GitHub platform adapter using REST API."""
 
@@ -399,7 +418,7 @@ class GitHubAdapter:
         return repos
 
     async def list_repo_open_prs(self, repo: str) -> list[dict]:
-        """List open PRs for a repo, enriched with review approval state."""
+        """List open PRs for a repo, enriched with review approval state and CI status."""
         client = self._get_client()
         resp = await client.get(
             f"/repos/{repo}/pulls",
@@ -418,7 +437,45 @@ class GitHubAdapter:
                 pr["_reviews"] = rev_resp.json()
             except Exception:
                 pr["_reviews"] = []
+
+            head_sha = pr.get("head", {}).get("sha", "")
+            if head_sha:
+                try:
+                    ci_resp = await client.get(
+                        f"/repos/{repo}/commits/{head_sha}/check-runs",
+                        params={"per_page": 100},
+                    )
+                    if ci_resp.status_code == 200:
+                        pr["_ci_status"] = _compute_ci_status(
+                            ci_resp.json().get("check_runs", [])
+                        )
+                    else:
+                        pr["_ci_status"] = "unknown"
+                except Exception:
+                    pr["_ci_status"] = "unknown"
+            else:
+                pr["_ci_status"] = "unknown"
         return prs
+
+    async def add_pr_reviewer(self, repo: str, pr_id: str, username: str) -> None:
+        """Request review from a specific user on a PR."""
+        client = self._get_client()
+        resp = await client.post(
+            f"/repos/{repo}/pulls/{pr_id}/requested_reviewers",
+            json={"reviewers": [username]},
+        )
+        if resp.status_code not in (200, 201, 422):
+            resp.raise_for_status()
+
+    async def add_pr_assignee(self, repo: str, pr_id: str, username: str) -> None:
+        """Add a user as an assignee on a PR."""
+        client = self._get_client()
+        resp = await client.post(
+            f"/repos/{repo}/issues/{pr_id}/assignees",
+            json={"assignees": [username]},
+        )
+        if resp.status_code not in (200, 201):
+            resp.raise_for_status()
 
     async def close(self) -> None:
         if self._client:

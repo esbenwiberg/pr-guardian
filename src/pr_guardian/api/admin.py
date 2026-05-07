@@ -230,3 +230,26 @@ async def delete_github_pat(pat_id: uuid.UUID, identity: Identity = Depends(requ
 
     log.info("github_pat_deleted", pat_id=str(pat_id), by=identity.display_name)
     return {"status": "deleted", "id": str(pat_id)}
+
+
+# ---------------------------------------------------------------------------
+# Excluded repos (PR dashboard filtering)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/excluded-repos")
+async def list_excluded_repos(identity: Identity = Depends(require_admin)):
+    """List all repos excluded from the PR dashboard."""
+    return await storage.list_excluded_repos()
+
+
+@router.delete("/excluded-repos/{exclusion_id}")
+async def remove_excluded_repo(
+    exclusion_id: str, identity: Identity = Depends(require_admin)
+):
+    """Restore a previously excluded repo to the PR dashboard."""
+    removed = await storage.remove_excluded_repo(exclusion_id)
+    if not removed:
+        raise HTTPException(404, "Exclusion not found")
+    log.info("repo_exclusion_removed", exclusion_id=exclusion_id, by=identity.display_name)
+    return {"status": "removed", "id": exclusion_id}
