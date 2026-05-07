@@ -144,8 +144,9 @@
   .concern-actions button.danger.active { background: rgba(249,115,22,0.18); border-color: rgba(249,115,22,0.5); color: var(--orange); }
   .concern-actions button.ghost.active  { background: rgba(100,116,139,0.18); border-color: rgba(100,116,139,0.4); color: var(--muted); }
   .concern-actions button.ghost { background: transparent; }
-  .concern-actions .clear { margin-left: auto; font-size: 11.5px; color: var(--dim); background: transparent; border: 0; cursor: pointer; padding: 4px 6px; }
+  .concern-actions .clear { font-size: 11.5px; color: var(--dim); background: transparent; border: 0; cursor: pointer; padding: 4px 6px; }
   .concern-actions .clear:hover { color: var(--muted); }
+  .concern-actions-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 
   /* Wrap-up */
   .summary-grid { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 10px; margin-bottom: 24px; }
@@ -702,10 +703,7 @@ function renderCapability(capId) {
         ${decidedTag}
       </div>
       <div class="concern-prose">${reasoning}</div>
-      ${d.hunk ? `<details class="expander">
-        <summary>Show the diff</summary>
-        ${renderHunk(d.hunk)}
-      </details>` : ''}
+      <div id="hunk-${i}" style="display:none">${d.hunk ? renderHunk(d.hunk) : ''}</div>
       ${d.fix ? `<details class="expander">
         <summary>Recommended fix</summary>
         <div class="fix-hint"><strong>Fix sketch</strong>${d.fix}</div>
@@ -714,7 +712,10 @@ function renderCapability(capId) {
         <button class="primary ${s === 'accepted' ? 'active' : ''}" data-act="accept" data-idx="${i}">✓ Accept</button>
         <button class="danger ${s === 'fix' ? 'active' : ''}" data-act="fix" data-idx="${i}">✎ Request fix</button>
         <button class="ghost ${s === 'dismissed' ? 'active' : ''}" data-act="dismiss" data-idx="${i}">— Dismiss</button>
-        ${s !== "pending" ? `<button class="clear" data-act="clear" data-idx="${i}">clear</button>` : ""}
+        <span class="concern-actions-right">
+          ${s !== "pending" ? `<button class="clear" data-act="clear" data-idx="${i}">clear</button>` : ""}
+          ${d.hunk ? `<button class="ghost" data-act="toggle-code" data-idx="${i}">‹/› source</button>` : ""}
+        </span>
       </div>
     </div>`;
   }).join("");
@@ -731,6 +732,11 @@ function renderCapability(capId) {
       e.stopPropagation();
       const act = btn.dataset.act;
       const idx = parseInt(btn.dataset.idx, 10);
+      if (act === "toggle-code") {
+        const hunkEl = document.getElementById(`hunk-${idx}`);
+        if (hunkEl) hunkEl.style.display = hunkEl.style.display === "none" ? "" : "none";
+        return;
+      }
       try {
         await applyDecision(idx, act);
       } catch (err) {

@@ -24,7 +24,7 @@ from pr_guardian.llm.factory import create_llm_client
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import finding_signature
-from pr_guardian.platform.factory import create_adapter
+from pr_guardian.platform.factory import create_adapter, create_github_adapter
 from pr_guardian.wizard.capability_clusterer import (
     FileSummary,
     FindingSummary,
@@ -158,10 +158,9 @@ async def dashboard_review_diff(review_id: uuid.UUID):
         raise HTTPException(422, "Review has no PR URL — cannot fetch diff")
 
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
-    from pr_guardian.platform.factory import create_adapter
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = create_adapter(platform_name)
+    adapter = await create_github_adapter(row.get("pat_name")) if platform_name == "github" else create_adapter(platform_name)
 
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
@@ -247,7 +246,7 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     from pr_guardian.models.pr import Diff
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = create_adapter(platform_name)
+    adapter = await create_github_adapter(row.get("pat_name")) if platform_name == "github" else create_adapter(platform_name)
 
     # Best-effort diff + context fetch — when platform credentials are
     # unavailable or the PR is gone, fall back to building a minimal file list
@@ -612,7 +611,7 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
         project=review.get("project", ""),
     )
 
-    adapter = create_adapter(platform_str)
+    adapter = await create_github_adapter() if platform_str == "github" else create_adapter(platform_str)
     decision_counts = _summarise_decisions(review)
     comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts)
 
@@ -680,10 +679,9 @@ async def re_review(review_id: uuid.UUID, request: Request):
         raise HTTPException(422, "Review has no PR URL — cannot re-review")
 
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
-    from pr_guardian.platform.factory import create_adapter
 
     stub, platform_name = _parse_pr_url(review["pr_url"])
-    adapter = create_adapter(platform_name)
+    adapter = await create_github_adapter(review.get("pat_name")) if platform_name == "github" else create_adapter(platform_name)
 
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)

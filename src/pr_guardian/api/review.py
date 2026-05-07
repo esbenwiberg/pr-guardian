@@ -54,6 +54,7 @@ async def _run_review_background(
     stub: PlatformPR, adapter, comment_mode: str, base_url: str,
     *,
     platform_name: str,
+    pat_name: str | None = None,
 ) -> None:
     """Hydrate the PR stub and run the full review pipeline in the background."""
     import traceback
@@ -71,7 +72,7 @@ async def _run_review_background(
         pass
 
     try:
-        await run_review(pr, adapter, comment_mode=comment_mode, base_url=base_url, dismissals=dismissals)
+        await run_review(pr, adapter, comment_mode=comment_mode, base_url=base_url, dismissals=dismissals, pat_name=pat_name)
     except Exception as e:
         log.error("background_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
@@ -102,7 +103,7 @@ async def manual_review(req: ReviewRequest, request: Request):
 
     log.info("manual_review_started", platform=platform_name, pr_id=stub.pr_id, repo=stub.repo)
     base_url = str(request.base_url).rstrip("/")
-    asyncio.create_task(_run_review_background(stub, adapter, req.comment_mode, base_url, platform_name=platform_name))
+    asyncio.create_task(_run_review_background(stub, adapter, req.comment_mode, base_url, platform_name=platform_name, pat_name=req.pat_name))
 
     return ReviewResponse(
         status="queued",
@@ -178,6 +179,8 @@ class RepoReviewResponse(BaseModel):
 
 async def _run_repo_review_background(
     repo: str, platform: str, adapter, ref: str, max_files: int,
+    *,
+    pat_name: str | None = None,
 ) -> None:
     """Run a full repo review in the background.
 
@@ -199,7 +202,7 @@ async def _run_repo_review_background(
     # shows up in Active Reviews immediately and any failure is surfaced there.
     if storage:
         try:
-            review_db_id = await storage.create_review_record(pr, comment_mode="none")
+            review_db_id = await storage.create_review_record(pr, comment_mode="none", pat_name=pat_name)
             await storage.update_review_stage(review_db_id, "queued", "Building repo diff")
             event_bus.publish(ReviewEvent(
                 review_id=str(review_db_id),
@@ -278,7 +281,7 @@ async def manual_repo_review(req: RepoReviewRequest):
     log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
 
     asyncio.create_task(
-        _run_repo_review_background(repo, req.platform, adapter, req.ref, req.max_files)
+        _run_repo_review_background(repo, req.platform, adapter, req.ref, req.max_files, pat_name=req.pat_name)
     )
 
     return RepoReviewResponse(

@@ -62,6 +62,7 @@ class ReviewRow(Base):
     comment_mode: Mapped[str] = mapped_column(
         String(32), server_default="none", nullable=False
     )
+    pat_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
