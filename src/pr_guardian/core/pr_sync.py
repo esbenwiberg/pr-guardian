@@ -184,11 +184,11 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
                 default_branch = repo_data.get("default_branch") or "main"
                 try:
                     merged_prs = await adapter.fetch_merged_prs(
-                        repo, since=since, base=default_branch,
+                        repo, since=since, base=default_branch
                     )
                 except Exception as exc:
                     log.warning(
-                        "github_fetch_merged_failed", repo=repo, error=str(exc),
+                        "github_fetch_merged_failed", repo=repo, error=str(exc)
                     )
                     merged_prs = []
 
@@ -283,19 +283,19 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                             for pr in prs:
                                 await storage.upsert_synced_pr(
                                     _normalize_ado_pr(
-                                        pr, org_url, project_name, repo_name,
+                                        pr, org_url, project_name, repo_name
                                     )
                                 )
                                 keep_ids.append(str(pr.get("pullRequestId", "")))
                             for pr in merged_prs:
                                 await storage.upsert_synced_pr(
                                     _normalize_ado_merged_pr(
-                                        pr, org_url, project_name, repo_name,
+                                        pr, org_url, project_name, repo_name
                                     )
                                 )
                                 keep_ids.append(str(pr.get("number", "")))
                             await storage.mark_sync_source_synced(
-                                "ado", repo_name, project=project_name,
+                                "ado", repo_name, project=project_name
                             )
                         await storage.delete_closed_prs(
                             "ado", repo_name, project_name, keep_ids,
