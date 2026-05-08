@@ -298,7 +298,7 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                                 "ado", repo_name, project=project_name
                             )
                         await storage.delete_closed_prs(
-                            "ado", repo_name, project_name, keep_ids,
+                            "ado", repo_name, project_name, keep_ids
                         )
                         log.debug(
                             "ado_repo_synced",
