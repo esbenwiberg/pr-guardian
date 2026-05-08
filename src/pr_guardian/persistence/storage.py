@@ -1496,6 +1496,7 @@ async def list_synced_prs(
     project: str | None = None,
     repo: str | None = None,
     author: str | None = None,
+    approval_status: str | None = None,
     search: str | None = None,
     offset: int = 0,
     limit: int = 50,
@@ -1532,6 +1533,13 @@ async def list_synced_prs(
 
     async with async_session() as session:
         q = select(SyncedPRRow).where(~excluded_subq)
+
+        # Exclude merged PRs unless the caller explicitly asks for a status
+        # (merged PRs are kept around for retention but shouldn't pollute open views).
+        if approval_status:
+            q = q.where(SyncedPRRow.approval_status == approval_status)
+        else:
+            q = q.where(SyncedPRRow.approval_status != "merged")
 
         # View filters
         if view == "mine" and user_handles:
@@ -1636,18 +1644,22 @@ async def get_pr_dashboard_summary(
         .exists()
     )
 
+    open_only = SyncedPRRow.approval_status != "merged"
+
     async with async_session() as session:
-        total_open = await session.scalar(select(func.count(SyncedPRRow.id))) or 0
+        total_open = await session.scalar(
+            select(func.count(SyncedPRRow.id)).where(open_only)
+        ) or 0
 
         if user_handles:
             mine_q = select(func.count(SyncedPRRow.id)).where(
                 SyncedPRRow.author.in_(user_handles)
-            )
+            ).where(open_only)
             mine_total = await session.scalar(mine_q) or 0
 
             attention_q = select(func.count(SyncedPRRow.id)).where(
                 SyncedPRRow.author.in_(user_handles)
-            ).where(
+            ).where(open_only).where(
                 or_(
                     SyncedPRRow.approval_status == "changes_requested",
                     SyncedPRRow.pr_updated_at < stale_cutoff,
@@ -1660,15 +1672,15 @@ async def get_pr_dashboard_summary(
                 SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB))
                 for h in user_handles
             ]
-            queue_q = select(func.count(SyncedPRRow.id)).where(or_(*queue_conditions))
+            queue_q = select(func.count(SyncedPRRow.id)).where(or_(*queue_conditions)).where(open_only)
             queue_total = await session.scalar(queue_q) or 0
         else:
             mine_total = mine_attention = queue_total = 0
 
         stale_total = await session.scalar(
-            select(func.count(SyncedPRRow.id)).where(
-                SyncedPRRow.pr_updated_at < stale_cutoff
-            )
+            select(func.count(SyncedPRRow.id))
+            .where(SyncedPRRow.pr_updated_at < stale_cutoff)
+            .where(open_only)
         ) or 0
 
         ready_total = await session.scalar(
@@ -1676,17 +1688,18 @@ async def get_pr_dashboard_summary(
             .where(SyncedPRRow.is_draft == False)  # noqa: E712
             .where(SyncedPRRow.has_conflicts == False)  # noqa: E712
             .where(SyncedPRRow.ci_status != "failure")
+            .where(open_only)
             .where(review_exists_subq)
         ) or 0
 
         repo_count = await session.scalar(
-            select(func.count(func.distinct(SyncedPRRow.repo)))
+            select(func.count(func.distinct(SyncedPRRow.repo))).where(open_only)
         ) or 0
 
         oldest_stale = await session.scalar(
-            select(func.min(SyncedPRRow.pr_updated_at)).where(
-                SyncedPRRow.pr_updated_at < stale_cutoff
-            )
+            select(func.min(SyncedPRRow.pr_updated_at))
+            .where(SyncedPRRow.pr_updated_at < stale_cutoff)
+            .where(open_only)
         )
         oldest_days = None
         if oldest_stale:
