@@ -45,6 +45,7 @@
   .badge-changes    { color: #f87171; }
   .badge-pending    { color: #94a3b8; }
   .badge-draft      { color: #64748b; }
+  .badge-merged     { color: #a78bfa; }
   .badge-stale      { color: #fb923c; }
   /* ── Summary cards ──────────────────────────────────────────────────── */
   .summary-card {
@@ -189,6 +190,7 @@
             <div class="dd-opt" data-filter="approval_status" data-val="changes_requested">🔴 Changes requested</div>
             <div class="dd-opt" data-filter="approval_status" data-val="pending">⏳ Pending review</div>
             <div class="dd-opt" data-filter="approval_status" data-val="draft">✏ Draft</div>
+            <div class="dd-opt" data-filter="approval_status" data-val="merged">🟣 Merged</div>
           </div>
         </div>
 
@@ -492,6 +494,7 @@ function approvalBadge(pr) {
     changes_requested: '<span class="badge-changes">🔴 changes req.</span>',
     draft: '<span class="badge-draft">✏ draft</span>',
     pending: '<span class="badge-pending">⏳ pending</span>',
+    merged: '<span class="badge-merged">🟣 merged</span>',
   };
   return map[pr.approval_status] || map.pending;
 }

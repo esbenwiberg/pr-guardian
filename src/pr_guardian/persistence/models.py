@@ -473,7 +473,7 @@ class SyncedPRRow(Base):
     target_branch: Mapped[str] = mapped_column(String(256), default="")
     is_draft: Mapped[bool] = mapped_column(Boolean, default=False)
     has_conflicts: Mapped[bool] = mapped_column(Boolean, default=False)
-    # approved | changes_requested | pending
+    # approved | changes_requested | pending | draft | merged
     approval_status: Mapped[str] = mapped_column(String(32), default="pending")
     reviewers: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
     assignees: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
