@@ -512,3 +512,26 @@ class ExcludedRepoRow(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class ExclusionRuleRow(Base):
+    """Admin-defined wildcard exclusion: repos matching any rule are hidden everywhere.
+
+    Each pattern field uses fnmatch syntax (`*`, `?`, char classes). An empty pattern
+    means "match any value for this field" — so a rule with org_pattern="acme" and
+    repo_pattern="" excludes every repo under the acme org.
+    """
+
+    __tablename__ = "exclusion_rules"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    platform: Mapped[str] = mapped_column(String(16))
+    org_pattern: Mapped[str] = mapped_column(String(256), default="")
+    project_pattern: Mapped[str] = mapped_column(String(256), default="")
+    repo_pattern: Mapped[str] = mapped_column(String(256), default="")
+    created_by_email: Mapped[str] = mapped_column(String(256), default="")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

@@ -20,6 +20,7 @@ from pr_guardian.persistence.models import (
     AgentResultRow,
     ApiKeyRow,
     ExcludedRepoRow,
+    ExclusionRuleRow,
     FindingDismissalRow,
     FindingRow,
     GithubPatRow,
@@ -1527,6 +1528,8 @@ async def list_synced_prs(
         .exists()
     )
 
+    rules = await list_exclusion_rules()
+
     async with async_session() as session:
         q = select(SyncedPRRow).where(~excluded_subq)
 
@@ -1561,10 +1564,31 @@ async def list_synced_prs(
         if search:
             q = q.where(SyncedPRRow.title.ilike(f"%{search}%"))
 
-        total = await session.scalar(select(func.count()).select_from(q.subquery()))
-        q = q.order_by(SyncedPRRow.pr_updated_at.desc().nullslast()).offset(offset).limit(limit)
-        rows = (await session.scalars(q)).all()
-        pr_dicts = [_synced_pr_to_dict(r) for r in rows]
+        ordered = q.order_by(SyncedPRRow.pr_updated_at.desc().nullslast())
+
+        if rules:
+            # Wildcard rules require Python-side fnmatch — fetch rows up to a hard cap,
+            # filter, then paginate. Sync-time filtering keeps the persisted set small;
+            # cap guards against pathological cases (> 5 000 rows is unexpected).
+            _MAX_FETCH = 5_000
+            all_rows = (await session.scalars(ordered.limit(_MAX_FETCH))).all()
+            if len(all_rows) == _MAX_FETCH:
+                log.warning(
+                    "list_synced_prs hit fetch cap; results may be truncated",
+                    cap=_MAX_FETCH,
+                )
+            filtered = [
+                r for r in all_rows
+                if not repo_matches_rules(rules, r.platform, r.org, r.project, r.repo)
+            ]
+            total = len(filtered)
+            page = filtered[offset : offset + limit]
+            pr_dicts = [_synced_pr_to_dict(r) for r in page]
+        else:
+            total = await session.scalar(select(func.count()).select_from(q.subquery()))
+            paged = ordered.offset(offset).limit(limit)
+            rows = (await session.scalars(paged)).all()
+            pr_dicts = [_synced_pr_to_dict(r) for r in rows]
 
         # Batch-fetch guardian review status for the returned PRs
         if pr_dicts:
@@ -1775,6 +1799,103 @@ async def remove_excluded_repo(exclusion_id: str) -> bool:
             sa_delete(ExcludedRepoRow).where(
                 ExcludedRepoRow.id == uuid.UUID(exclusion_id)
             )
+        )
+        await session.commit()
+        return (result.rowcount or 0) > 0
+
+
+# ---------------------------------------------------------------------------
+# Exclusion rules (admin-defined wildcard exclusions)
+# ---------------------------------------------------------------------------
+
+
+def _rule_to_dict(row: ExclusionRuleRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "platform": row.platform,
+        "org_pattern": row.org_pattern,
+        "project_pattern": row.project_pattern,
+        "repo_pattern": row.repo_pattern,
+        "created_by_email": row.created_by_email,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def repo_matches_rules(
+    rules: list[dict[str, Any]],
+    platform: str,
+    org: str,
+    project: str,
+    repo: str,
+) -> bool:
+    """True if (platform, org, project, repo) matches any rule. Empty pattern = match-any."""
+    from fnmatch import fnmatchcase
+
+    for rule in rules:
+        if rule.get("platform") and rule["platform"] != platform:
+            continue
+        org_pat = rule.get("org_pattern") or ""
+        proj_pat = rule.get("project_pattern") or ""
+        repo_pat = rule.get("repo_pattern") or ""
+        if org_pat and not fnmatchcase(org or "", org_pat):
+            continue
+        if proj_pat and not fnmatchcase(project or "", proj_pat):
+            continue
+        if repo_pat and not fnmatchcase(repo or "", repo_pat):
+            continue
+        return True
+    return False
+
+
+async def list_exclusion_rules() -> list[dict[str, Any]]:
+    try:
+        async with async_session() as session:
+            rows = (
+                await session.scalars(
+                    select(ExclusionRuleRow).order_by(ExclusionRuleRow.created_at.desc())
+                )
+            ).all()
+            return [_rule_to_dict(r) for r in rows]
+    except Exception:
+        log.warning("list_exclusion_rules_failed", hint="DB unavailable; returning empty list")
+        return []
+
+
+async def add_exclusion_rule(
+    *,
+    platform: str,
+    org_pattern: str = "",
+    project_pattern: str = "",
+    repo_pattern: str = "",
+    email: str = "",
+) -> dict[str, Any]:
+    """Add a new exclusion rule. Returns the created rule dict."""
+    async with async_session() as session:
+        row = ExclusionRuleRow(
+            platform=platform,
+            org_pattern=org_pattern,
+            project_pattern=project_pattern,
+            repo_pattern=repo_pattern,
+            created_by_email=email,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _rule_to_dict(row)
+
+
+async def remove_exclusion_rule(rule_id: str) -> bool:
+    """Remove an exclusion rule by UUID. Returns False if not found or rule_id is invalid."""
+    from sqlalchemy import delete as sa_delete
+
+    try:
+        parsed_id = uuid.UUID(rule_id)
+    except ValueError:
+        return False
+
+    async with async_session() as session:
+        result = await session.execute(
+            sa_delete(ExclusionRuleRow).where(ExclusionRuleRow.id == parsed_id)
         )
         await session.commit()
         return (result.rowcount or 0) > 0

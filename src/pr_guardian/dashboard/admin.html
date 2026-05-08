@@ -167,12 +167,61 @@
       </table>
     </div>
 
+    <!-- Exclusion Rules -->
+    <div class="card p-6 mt-6">
+      <div class="flex items-center justify-between mb-4">
+        <div>
+          <h2 class="text-sm font-semibold">Exclusion Rules</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Wildcard rules that hide entire orgs, projects, or repo patterns from sync and dashboard. Use <code class="text-slate-300">*</code> and <code class="text-slate-300">?</code> as wildcards. Empty pattern = match anything.</p>
+        </div>
+      </div>
+
+      <!-- Create form -->
+      <div class="flex flex-wrap gap-3 items-end mb-5">
+        <div>
+          <label class="text-xs font-medium text-slate-300 block mb-1">Platform</label>
+          <select id="rule-platform" class="form-input" onchange="onRulePlatformChange()">
+            <option value="github">GitHub</option>
+            <option value="ado">Azure DevOps</option>
+          </select>
+        </div>
+        <div class="flex-1 min-w-[140px]">
+          <label class="text-xs font-medium text-slate-300 block mb-1">Org pattern</label>
+          <input type="text" id="rule-org" class="form-input w-full" placeholder="e.g. acme or acme-*">
+        </div>
+        <div class="flex-1 min-w-[140px]" id="rule-project-wrap" style="display:none">
+          <label class="text-xs font-medium text-slate-300 block mb-1">Project pattern</label>
+          <input type="text" id="rule-project" class="form-input w-full" placeholder="e.g. LegacyApps">
+        </div>
+        <div class="flex-1 min-w-[140px]">
+          <label class="text-xs font-medium text-slate-300 block mb-1">Repo pattern</label>
+          <input type="text" id="rule-repo" class="form-input w-full" placeholder="e.g. test-* or *">
+        </div>
+        <button class="btn btn-primary btn-sm h-[38px]" onclick="createRule()">Add Rule</button>
+      </div>
+
+      <div id="rules-loading" class="text-xs text-slate-400 py-4">Loading…</div>
+      <div id="rules-empty" class="hidden text-xs text-slate-400 py-4">No exclusion rules.</div>
+      <table id="rules-table" class="hidden w-full text-xs">
+        <thead><tr class="text-left text-slate-400 border-b border-slate-700">
+          <th class="pb-2 font-medium">Platform</th>
+          <th class="pb-2 font-medium">Org</th>
+          <th class="pb-2 font-medium">Project</th>
+          <th class="pb-2 font-medium">Repo</th>
+          <th class="pb-2 font-medium">Added by</th>
+          <th class="pb-2 font-medium">Date</th>
+          <th class="pb-2 font-medium"></th>
+        </tr></thead>
+        <tbody id="rules-body"></tbody>
+      </table>
+    </div>
+
     <!-- Excluded Repos -->
     <div class="card p-6 mt-6">
       <div class="flex items-center justify-between mb-4">
         <div>
           <h2 class="text-sm font-semibold">Excluded Repos</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Repos hidden from the PR Dashboard. Users can exclude repos via the dashboard panel.</p>
+          <p class="text-xs text-slate-400 mt-0.5">Individual repo exclusions. Users can exclude repos via the dashboard panel; for bulk filtering use Exclusion Rules above.</p>
         </div>
       </div>
       <div id="repos-loading" class="text-xs text-slate-400 py-4">Loading…</div>
@@ -603,8 +652,88 @@ async function restoreRepo(id, name) {
   }
 }
 
+// --- Exclusion rules ---
+function onRulePlatformChange() {
+  const platform = document.getElementById('rule-platform').value;
+  document.getElementById('rule-project-wrap').style.display = platform === 'ado' ? '' : 'none';
+}
+
+async function loadExclusionRules() {
+  try {
+    const r = await fetch(`${API}/exclusion-rules`);
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const rules = await r.json();
+    document.getElementById('rules-loading').classList.add('hidden');
+    if (!rules.length) {
+      document.getElementById('rules-empty').classList.remove('hidden');
+      document.getElementById('rules-table').classList.add('hidden');
+      return;
+    }
+    document.getElementById('rules-empty').classList.add('hidden');
+    document.getElementById('rules-table').classList.remove('hidden');
+    document.getElementById('rules-body').innerHTML = rules.map(rule => `
+      <tr class="border-b border-slate-700/30">
+        <td class="py-2"><span class="${rule.platform === 'github' ? 'src-gh' : 'src-ado'}">${rule.platform === 'github' ? 'GH' : 'ADO'}</span></td>
+        <td class="py-2 font-mono text-slate-200">${esc(rule.org_pattern || '*')}</td>
+        <td class="py-2 font-mono text-slate-300">${esc(rule.project_pattern || (rule.platform === 'ado' ? '*' : '—'))}</td>
+        <td class="py-2 font-mono text-slate-200">${esc(rule.repo_pattern || '*')}</td>
+        <td class="py-2 text-slate-400">${esc(rule.created_by_email || '—')}</td>
+        <td class="py-2 text-slate-400">${fmtDate(rule.created_at)}</td>
+        <td class="py-2 text-right">
+          <button class="text-red-400 hover:text-red-300 transition-colors" onclick="deleteRule('${esc(rule.id)}')">Delete</button>
+        </td>
+      </tr>`).join('');
+  } catch(e) {
+    document.getElementById('rules-loading').textContent = 'Failed to load rules.';
+  }
+}
+
+async function createRule() {
+  const platform = document.getElementById('rule-platform').value;
+  const org_pattern = document.getElementById('rule-org').value.trim();
+  const project_pattern = platform === 'ado'
+    ? document.getElementById('rule-project').value.trim()
+    : '';
+  const repo_pattern = document.getElementById('rule-repo').value.trim();
+  if (!org_pattern && !project_pattern && !repo_pattern) {
+    showToast('Provide at least one pattern', 'error');
+    return;
+  }
+  try {
+    const r = await fetch(`${API}/exclusion-rules`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ platform, org_pattern, project_pattern, repo_pattern }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.detail || `HTTP ${r.status}`);
+    }
+    document.getElementById('rule-org').value = '';
+    document.getElementById('rule-project').value = '';
+    document.getElementById('rule-repo').value = '';
+    showToast('Exclusion rule added');
+    loadExclusionRules();
+  } catch(e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
+async function deleteRule(id) {
+  if (!confirm('Delete this exclusion rule?')) return;
+  try {
+    const r = await fetch(`${API}/exclusion-rules/${id}`, { method: 'DELETE' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    showToast('Rule deleted');
+    loadExclusionRules();
+  } catch(e) {
+    showToast(`Failed: ${e.message}`, 'error');
+  }
+}
+
 // --- Init ---
 loadIdentity();
+loadExclusionRules();
 loadExcludedRepos();
 </script>
 
