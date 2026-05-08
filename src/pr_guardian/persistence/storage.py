@@ -1547,10 +1547,11 @@ async def list_synced_prs(
         ordered = q.order_by(SyncedPRRow.pr_updated_at.desc().nullslast())
 
         if rules:
-            # Wildcard rules require Python-side fnmatch — fetch all matching rows,
-            # filter, then paginate. Rule N is admin-bounded and sync-time filter
-            # already keeps the persisted set small.
-            all_rows = (await session.scalars(ordered)).all()
+            # Wildcard rules require Python-side fnmatch — fetch rows up to a hard cap,
+            # filter, then paginate. Sync-time filtering keeps the persisted set small;
+            # cap guards against pathological cases (> 5 000 rows is unexpected).
+            _MAX_FETCH = 5_000
+            all_rows = (await session.scalars(ordered.limit(_MAX_FETCH))).all()
             filtered = [
                 r for r in all_rows
                 if not repo_matches_rules(rules, r.platform, r.org, r.project, r.repo)
@@ -1859,14 +1860,17 @@ async def add_exclusion_rule(
 
 
 async def remove_exclusion_rule(rule_id: str) -> bool:
-    """Remove an exclusion rule by UUID. Returns False if not found."""
+    """Remove an exclusion rule by UUID. Returns False if not found or rule_id is invalid."""
     from sqlalchemy import delete as sa_delete
+
+    try:
+        parsed_id = uuid.UUID(rule_id)
+    except ValueError:
+        return False
 
     async with async_session() as session:
         result = await session.execute(
-            sa_delete(ExclusionRuleRow).where(
-                ExclusionRuleRow.id == uuid.UUID(rule_id)
-            )
+            sa_delete(ExclusionRuleRow).where(ExclusionRuleRow.id == parsed_id)
         )
         await session.commit()
         return (result.rowcount or 0) > 0
