@@ -253,3 +253,74 @@ async def remove_excluded_repo(
         raise HTTPException(404, "Exclusion not found")
     log.info("repo_exclusion_removed", exclusion_id=exclusion_id, by=identity.display_name)
     return {"status": "removed", "id": exclusion_id}
+
+
+# ---------------------------------------------------------------------------
+# Exclusion rules (wildcard repo exclusion)
+# ---------------------------------------------------------------------------
+
+
+_VALID_PLATFORMS = {"github", "ado"}
+
+
+class AddExclusionRuleRequest(BaseModel):
+    platform: str
+    org_pattern: str = ""
+    project_pattern: str = ""
+    repo_pattern: str = ""
+
+
+@router.get("/exclusion-rules")
+async def list_exclusion_rules(identity: Identity = Depends(require_admin)):
+    """List all wildcard exclusion rules."""
+    return await storage.list_exclusion_rules()
+
+
+@router.post("/exclusion-rules", status_code=201)
+async def add_exclusion_rule(
+    body: AddExclusionRuleRequest,
+    identity: Identity = Depends(require_admin),
+):
+    """Add a wildcard exclusion rule. At least one pattern field must be set."""
+    platform = body.platform.strip().lower()
+    if platform not in _VALID_PLATFORMS:
+        raise HTTPException(400, f"platform must be one of {sorted(_VALID_PLATFORMS)}")
+
+    org_pattern = body.org_pattern.strip()
+    project_pattern = body.project_pattern.strip()
+    repo_pattern = body.repo_pattern.strip()
+
+    if not (org_pattern or project_pattern or repo_pattern):
+        raise HTTPException(400, "At least one pattern field must be provided")
+    if platform == "github" and project_pattern:
+        raise HTTPException(400, "project_pattern is not applicable to github rules")
+
+    rule = await storage.add_exclusion_rule(
+        platform=platform,
+        org_pattern=org_pattern,
+        project_pattern=project_pattern,
+        repo_pattern=repo_pattern,
+        email=identity.email or "",
+    )
+    log.info(
+        "exclusion_rule_added",
+        rule_id=rule["id"],
+        platform=platform,
+        org=org_pattern,
+        project=project_pattern,
+        repo=repo_pattern,
+        by=identity.display_name,
+    )
+    return rule
+
+
+@router.delete("/exclusion-rules/{rule_id}")
+async def remove_exclusion_rule(
+    rule_id: str, identity: Identity = Depends(require_admin)
+):
+    """Delete a wildcard exclusion rule."""
+    removed = await storage.remove_exclusion_rule(rule_id)
+    if not removed:
+        raise HTTPException(404, "Rule not found")
+    log.info("exclusion_rule_removed", rule_id=rule_id, by=identity.display_name)
+    return {"status": "removed", "id": rule_id}

@@ -107,17 +107,23 @@ def _normalize_ado_pr(pr: dict, org_url: str, project: str, repo_name: str) -> d
     }
 
 
-async def _sync_github(token: str) -> None:
+async def _sync_github(token: str, pat_label: str = "env") -> None:
     from pr_guardian.platform.github import GitHubAdapter
+
+    rules = await storage.list_exclusion_rules()
 
     adapter = GitHubAdapter(token=token)
     try:
         repos = await adapter.list_accessible_repos()
-        log.info("github_sync_repos_discovered", count=len(repos))
+        log.info("github_sync_repos_discovered", count=len(repos), pat=pat_label)
 
         for repo_data in repos:
             repo = repo_data.get("full_name", "")
             if not repo:
+                continue
+            org = repo_data.get("owner", {}).get("login", "")
+            if storage.repo_matches_rules(rules, "github", org, "", repo):
+                log.debug("github_repo_skipped_by_rule", repo=repo)
                 continue
             try:
                 prs = await adapter.list_repo_open_prs(repo)
@@ -125,7 +131,7 @@ async def _sync_github(token: str) -> None:
                     continue
                 await storage.upsert_sync_source(
                     platform="github",
-                    org=repo_data.get("owner", {}).get("login", ""),
+                    org=org,
                     project="",
                     repo=repo,
                     repo_url=repo_data.get("clone_url", ""),
@@ -147,6 +153,8 @@ async def _sync_github(token: str) -> None:
 async def _sync_ado(pat: str, org_url: str) -> None:
     from pr_guardian.platform.ado import ADOAdapter
 
+    rules = await storage.list_exclusion_rules()
+
     adapter = ADOAdapter(pat=pat, org_url=org_url)
     try:
         projects = await adapter.list_projects()
@@ -161,6 +169,9 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                 for repo_data in repos:
                     repo_name = repo_data.get("name", "")
                     if not repo_name:
+                        continue
+                    if storage.repo_matches_rules(rules, "ado", org_url, project_name, repo_name):
+                        log.debug("ado_repo_skipped_by_rule", project=project_name, repo=repo_name)
                         continue
                     try:
                         prs = await adapter.list_repo_open_prs(project_name, repo_name)
@@ -189,15 +200,37 @@ async def _sync_ado(pat: str, org_url: str) -> None:
         await adapter.close()
 
 
+async def _resolve_github_sync_tokens() -> list[tuple[str, str]]:
+    """Return list of (label, token) pairs for every GitHub PAT to sync.
+
+    Iterates all PATs in the DB so each org's repos are reachable. Falls back to
+    GITHUB_TOKEN env var only when the DB list is empty (legacy single-PAT installs).
+    """
+    pats = await storage.list_github_pats()
+    pairs: list[tuple[str, str]] = []
+    for pat in pats:
+        try:
+            token = await storage.resolve_github_token(pat["name"])
+        except LookupError as exc:
+            log.warning("github_pat_resolve_failed", pat=pat["name"], error=str(exc))
+            continue
+        if token:
+            pairs.append((pat["name"], token))
+    if not pairs:
+        env_token = os.environ.get("GITHUB_TOKEN", "")
+        if env_token:
+            pairs.append(("env", env_token))
+    return pairs
+
+
 async def run_pr_sync() -> None:
     """Single sync pass across all configured platforms."""
-    github_token = os.environ.get("GITHUB_TOKEN", "")
     ado_pat = os.environ.get("ADO_PAT", "")
     ado_org_url = os.environ.get("ADO_ORG_URL", "")
 
     tasks = []
-    if github_token:
-        tasks.append(_sync_github(github_token))
+    for label, token in await _resolve_github_sync_tokens():
+        tasks.append(_sync_github(token, pat_label=label))
     if ado_pat and ado_org_url:
         tasks.append(_sync_ado(ado_pat, ado_org_url))
 
