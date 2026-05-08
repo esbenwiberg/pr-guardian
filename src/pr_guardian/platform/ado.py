@@ -568,6 +568,7 @@ class ADOAdapter:
                     "number": pr.get("pullRequestId"),
                     "title": pr.get("title", ""),
                     "user": {"login": pr.get("createdBy", {}).get("uniqueName", "")},
+                    "created_at": pr.get("creationDate"),
                     "merged_at": closed_date,
                     "base": {"ref": base},
                     "_ado_project": project,

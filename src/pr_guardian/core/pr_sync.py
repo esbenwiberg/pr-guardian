@@ -102,6 +102,7 @@ def _normalize_ado_merged_pr(
     )
     author = pr.get("user", {}).get("login", "")
     merged_at = pr.get("merged_at")
+    created_at = pr.get("created_at") or merged_at
     return {
         "platform": "ado",
         "pr_id": pr_id,
@@ -121,7 +122,7 @@ def _normalize_ado_merged_pr(
         "assignees": [],
         "ci_status": "unknown",
         "comment_count": 0,
-        "pr_created_at": merged_at,
+        "pr_created_at": created_at,
         "pr_updated_at": merged_at,
     }
 
@@ -192,7 +193,7 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
                     )
                     merged_prs = []
 
-                keep_ids: list[str] = []
+                synced_pr_ids: list[str] = []
                 if prs or merged_prs:
                     await storage.upsert_sync_source(
                         platform="github",
@@ -203,14 +204,14 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
                     )
                     for pr in prs:
                         await storage.upsert_synced_pr(_normalize_github_pr(pr, repo))
-                        keep_ids.append(str(pr["number"]))
+                        synced_pr_ids.append(str(pr["number"]))
                     for pr in merged_prs:
                         await storage.upsert_synced_pr(
                             _normalize_github_merged_pr(pr, repo)
                         )
-                        keep_ids.append(str(pr["number"]))
+                        synced_pr_ids.append(str(pr["number"]))
                     await storage.mark_sync_source_synced("github", repo)
-                await storage.delete_closed_prs("github", repo, "", keep_ids)
+                await storage.delete_closed_prs("github", repo, "", synced_pr_ids)
                 log.debug(
                     "github_repo_synced",
                     repo=repo,
@@ -271,7 +272,7 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                             )
                             merged_prs = []
 
-                        keep_ids: list[str] = []
+                        synced_pr_ids: list[str] = []
                         if prs or merged_prs:
                             await storage.upsert_sync_source(
                                 platform="ado",
@@ -286,19 +287,19 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                                         pr, org_url, project_name, repo_name
                                     )
                                 )
-                                keep_ids.append(str(pr.get("pullRequestId", "")))
+                                synced_pr_ids.append(str(pr.get("pullRequestId", "")))
                             for pr in merged_prs:
                                 await storage.upsert_synced_pr(
                                     _normalize_ado_merged_pr(
                                         pr, org_url, project_name, repo_name
                                     )
                                 )
-                                keep_ids.append(str(pr.get("number", "")))
+                                synced_pr_ids.append(str(pr.get("number", "")))
                             await storage.mark_sync_source_synced(
                                 "ado", repo_name, project=project_name
                             )
                         await storage.delete_closed_prs(
-                            "ado", repo_name, project_name, keep_ids
+                            "ado", repo_name, project_name, synced_pr_ids
                         )
                         log.debug(
                             "ado_repo_synced",

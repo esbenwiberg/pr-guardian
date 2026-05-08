@@ -300,6 +300,28 @@ class TestExclusionRulesAdminApi:
 
 
 class TestSyncTimeFilter:
+    def test_normalize_ado_merged_pr_prefers_created_at(self):
+        from pr_guardian.core import pr_sync
+
+        pr = {
+            "number": 42,
+            "title": "Merged PR",
+            "user": {"login": "dev@example.com"},
+            "created_at": "2026-05-01T10:00:00Z",
+            "merged_at": "2026-05-03T12:00:00Z",
+            "base": {"ref": "main"},
+        }
+
+        result = pr_sync._normalize_ado_merged_pr(
+            pr,
+            "https://dev.azure.com/acme",
+            "Project",
+            "Repo",
+        )
+
+        assert result["pr_created_at"] == "2026-05-01T10:00:00Z"
+        assert result["pr_updated_at"] == "2026-05-03T12:00:00Z"
+
     async def test_github_sync_skips_repos_matching_rule(self):
         from pr_guardian.core import pr_sync
 
