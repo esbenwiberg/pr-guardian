@@ -1552,6 +1552,11 @@ async def list_synced_prs(
             # cap guards against pathological cases (> 5 000 rows is unexpected).
             _MAX_FETCH = 5_000
             all_rows = (await session.scalars(ordered.limit(_MAX_FETCH))).all()
+            if len(all_rows) == _MAX_FETCH:
+                log.warning(
+                    "list_synced_prs hit fetch cap; results may be truncated",
+                    cap=_MAX_FETCH,
+                )
             filtered = [
                 r for r in all_rows
                 if not repo_matches_rules(rules, r.platform, r.org, r.project, r.repo)

@@ -182,6 +182,12 @@ async def test_remove_exclusion_rule_returns_true_on_success():
     assert ok is True
 
 
+async def test_remove_exclusion_rule_returns_false_for_invalid_uuid():
+    # No DB call should occur — the UUID parse guard must short-circuit.
+    ok = await remove_exclusion_rule("not-a-uuid")
+    assert ok is False
+
+
 async def test_remove_exclusion_rule_returns_false_when_missing():
     session = AsyncMock()
     exec_result = MagicMock()
