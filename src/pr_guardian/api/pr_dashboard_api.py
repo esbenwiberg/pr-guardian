@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import uuid as _uuid_mod
 
 import structlog
 from fastapi import APIRouter, Request
@@ -10,6 +11,43 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from pr_guardian.persistence import storage
+
+# ---------------------------------------------------------------------------
+# Demo data — shown when DB is unavailable (GUARDIAN_DEV_ADMIN=1 mode only)
+# ---------------------------------------------------------------------------
+
+_DEMO_PR_ID = "11111111-2222-3333-4444-555555555555"
+_DEMO_PR_URL = "https://github.com/demo-org/demo-repo/pull/42"
+
+_DEMO_PRS = [
+    {
+        "id": _DEMO_PR_ID,
+        "platform": "github",
+        "pr_id": "42",
+        "org": "demo-org",
+        "project": "",
+        "repo": "demo-repo",
+        "title": "feat: add widget support to the dashboard",
+        "author": "alice",
+        "author_display": "Alice Example",
+        "pr_url": _DEMO_PR_URL,
+        "source_branch": "feature/widgets",
+        "target_branch": "main",
+        "is_draft": False,
+        "has_conflicts": False,
+        "approval_status": "pending",
+        "reviewers": ["bob"],
+        "assignees": [],
+        "comment_count": 3,
+        "ci_status": "success",
+        "has_guardian_review": False,
+        "guardian_review_id": None,
+        "guardian_decision": None,
+        "pr_created_at": "2026-05-10T09:00:00",
+        "pr_updated_at": "2026-05-11T07:00:00",
+        "synced_at": "2026-05-11T07:00:00",
+    }
+]
 
 log = structlog.get_logger()
 router = APIRouter(tags=["pr-dashboard"])
@@ -127,6 +165,9 @@ async def list_prs(
         return {"items": items, "total": total, "offset": offset, "limit": limit}
     except Exception as exc:
         log.error("list_prs_failed", error=str(exc))
+        # In dev-admin mode without DB, surface demo data so the dashboard is testable.
+        if os.environ.get("GUARDIAN_DEV_ADMIN") == "1":
+            return {"items": _DEMO_PRS, "total": len(_DEMO_PRS), "offset": offset, "limit": limit}
         return {"items": [], "total": 0, "offset": offset, "limit": limit}
 
 
@@ -180,6 +221,9 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
         pr = await storage.get_synced_pr(pr_uuid)
     except Exception:
         pr = None
+    # Fall back to demo data in dev-admin no-DB mode
+    if not pr and os.environ.get("GUARDIAN_DEV_ADMIN") == "1":
+        pr = next((p for p in _DEMO_PRS if p["id"] == pr_uuid), None)
     if not pr:
         return JSONResponse({"error": "not found"}, status_code=404)
 
@@ -214,6 +258,29 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
             "pr_url": pr["pr_url"],
         }
 
+    # Pre-create the review record so we can return the review_id immediately.
+    # If DB is unavailable, generate a UUID so the redirect still works.
+    review_db_id = None
+    try:
+        from pr_guardian.models.pr import PlatformPR, Platform
+        platform_val = Platform.GITHUB if pr["platform"] == "github" else Platform.ADO
+        repo_full = f"{pr['org']}/{pr['repo']}" if pr["platform"] == "github" else pr["repo"]
+        pr_stub_for_record = PlatformPR(
+            platform=platform_val,
+            pr_id=pr["pr_id"],
+            repo=repo_full,
+            repo_url=pr["pr_url"].rsplit("/pull/", 1)[0] + ".git",
+            source_branch=pr.get("source_branch", ""),
+            target_branch=pr.get("target_branch", ""),
+            author=pr.get("author", ""),
+            title=pr.get("title", ""),
+            head_commit_sha="",
+        )
+        review_db_id = await storage.create_review_record(pr_stub_for_record, comment_mode="none")
+    except Exception as exc:
+        log.warning("start_wizard_precreate_failed", error=str(exc))
+        review_db_id = _uuid_mod.uuid4()
+
     # Start a new review in the background
     try:
         from pr_guardian.api.review import _parse_pr_url, _run_review_background
@@ -223,12 +290,16 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
         adapter = create_adapter(platform_name)
         base_url = str(request.base_url)
         asyncio.create_task(
-            _run_review_background(stub, adapter, "none", base_url, platform_name=platform_name)
+            _run_review_background(stub, adapter, "none", base_url, platform_name=platform_name, review_db_id=review_db_id)
         )
     except Exception as exc:
         log.warning("start_wizard_review_launch_failed", error=str(exc))
 
-    return {"mode": "new", "pr_url": pr["pr_url"]}
+    return {
+        "mode": "new",
+        "review_id": str(review_db_id) if review_db_id else None,
+        "pr_url": pr["pr_url"],
+    }
 
 
 # ---------------------------------------------------------------------------

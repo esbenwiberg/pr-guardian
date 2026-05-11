@@ -575,13 +575,13 @@ function openPanel(pr) {
         Open in ${pr.platform === 'github' ? 'GitHub' : 'Azure DevOps'}
       </a>
 
-      <a href="${esc(guardianUrl)}"
+      <button id="start-review-btn" onclick="startAutoReview(${JSON.stringify(pr).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026')})"
          class="panel-action border-indigo-700 hover:border-indigo-500 bg-indigo-900/30 hover:bg-indigo-900/50 text-indigo-300 hover:text-indigo-100 gap-2">
         <svg fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.347a1.125 1.125 0 0 1 0 1.972l-11.54 6.347c-.75.412-1.667-.13-1.667-.986V5.653Z"/>
         </svg>
         Start Review
-      </a>
+      </button>
 
       <button id="wizard-btn" onclick="startWizardReview(${JSON.stringify(pr).replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026')})"
          class="panel-action border-emerald-800 hover:border-emerald-600 bg-emerald-900/20 hover:bg-emerald-900/40 text-emerald-400 hover:text-emerald-200 gap-2">
@@ -621,6 +621,29 @@ function closePanel() {
   document.getElementById('side-panel').classList.remove('open');
 }
 
+// ── Auto review (start in background, stay on page) ───────────────────────
+async function startAutoReview(pr) {
+  const btn = document.getElementById('start-review-btn');
+  if (btn) { btn.disabled = true; btn.innerHTML = btn.innerHTML.replace(/Start Review/, '⏳ Starting…'); }
+
+  try {
+    const r = await fetch('/api/review', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pr_url: pr.pr_url, comment_mode: 'none' }),
+    });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    if (btn) {
+      btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, '✓ Review started');
+      btn.classList.remove('border-indigo-700', 'hover:border-indigo-500', 'bg-indigo-900/30', 'hover:bg-indigo-900/50', 'text-indigo-300', 'hover:text-indigo-100');
+      btn.classList.add('border-emerald-700', 'bg-emerald-900/20', 'text-emerald-300');
+    }
+  } catch(e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, 'Start Review'); }
+    alert('Failed to start review.');
+  }
+}
+
 // ── Wizard review ──────────────────────────────────────────────────────────
 async function startWizardReview(pr) {
   const btn = document.getElementById('wizard-btn');
@@ -634,10 +657,10 @@ async function startWizardReview(pr) {
     });
     const data = await r.json();
 
-    if (data.mode === 'existing' && data.review_id) {
-      window.location.href = `/reviews/${data.review_id}?wizard=true`;
+    if (data.review_id) {
+      window.location.href = `/reviews/${data.review_id}/wizard`;
     } else {
-      window.location.href = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}&mode=wizard`;
+      window.location.href = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}`;
     }
   } catch(e) {
     if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, '🧙 Wizard Review'); }
