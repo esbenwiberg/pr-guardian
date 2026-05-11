@@ -624,7 +624,7 @@ function closePanel() {
 // ── Auto review (start in background, stay on page) ───────────────────────
 async function startAutoReview(pr) {
   const btn = document.getElementById('start-review-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = btn.innerHTML.replace(/Start Review/, '⏳ Starting…'); }
+  if (btn) { btn.disabled = true; btn.innerHTML = btn.innerHTML.replace('Start Review', '⏳ Starting…'); }
 
   try {
     const r = await fetch('/api/review', {
@@ -634,12 +634,12 @@ async function startAutoReview(pr) {
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     if (btn) {
-      btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, '✓ Review started');
+      btn.innerHTML = btn.innerHTML.replace('⏳ Starting…', '✓ Review started');
       btn.classList.remove('border-indigo-700', 'hover:border-indigo-500', 'bg-indigo-900/30', 'hover:bg-indigo-900/50', 'text-indigo-300', 'hover:text-indigo-100');
       btn.classList.add('border-emerald-700', 'bg-emerald-900/20', 'text-emerald-300');
     }
   } catch(e) {
-    if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, 'Start Review'); }
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace('⏳ Starting…', 'Start Review'); }
     alert('Failed to start review.');
   }
 }
@@ -647,7 +647,7 @@ async function startAutoReview(pr) {
 // ── Wizard review ──────────────────────────────────────────────────────────
 async function startWizardReview(pr) {
   const btn = document.getElementById('wizard-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = btn.innerHTML.replace(/🧙.*$/, '⏳ Starting…'); }
+  if (btn) { btn.disabled = true; btn.innerHTML = btn.innerHTML.replace(/🧙[^<]*/, '⏳ Starting…'); }
 
   try {
     const r = await fetch(`/api/prs/${pr.id}/start-wizard`, {
@@ -660,10 +660,10 @@ async function startWizardReview(pr) {
     if (data.review_id) {
       window.location.href = `/reviews/${data.review_id}/wizard`;
     } else {
-      window.location.href = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}`;
+      window.location.href = `/browse-pr?url=${encodeURIComponent(pr.pr_url)}&mode=wizard`;
     }
   } catch(e) {
-    if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace(/⏳.*$/, '🧙 Wizard Review'); }
+    if (btn) { btn.disabled = false; btn.innerHTML = btn.innerHTML.replace('⏳ Starting…', '🧙 Wizard Review'); }
     alert('Failed to start wizard review.');
   }
 }

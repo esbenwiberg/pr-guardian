@@ -258,35 +258,29 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
             "pr_url": pr["pr_url"],
         }
 
+    # Parse the PR URL once — works for both GitHub and ADO URLs.
+    from pr_guardian.api.review import _parse_pr_url, _run_review_background
+    from pr_guardian.platform.factory import create_adapter
+
+    try:
+        stub, platform_name = _parse_pr_url(pr["pr_url"])
+    except Exception as exc:
+        log.warning("start_wizard_parse_failed", error=str(exc))
+        return JSONResponse({"error": "unsupported PR URL"}, status_code=400)
+
     # Pre-create the review record so we can return the review_id immediately.
-    # If DB is unavailable, generate a UUID so the redirect still works.
+    # If DB is unavailable we fall back to a transient UUID so the wizard
+    # redirect still lands on a page (wizard shows an error state there instead
+    # of silently doing nothing).
     review_db_id = None
     try:
-        from pr_guardian.models.pr import PlatformPR, Platform
-        platform_val = Platform.GITHUB if pr["platform"] == "github" else Platform.ADO
-        repo_full = f"{pr['org']}/{pr['repo']}" if pr["platform"] == "github" else pr["repo"]
-        pr_stub_for_record = PlatformPR(
-            platform=platform_val,
-            pr_id=pr["pr_id"],
-            repo=repo_full,
-            repo_url=pr["pr_url"].rsplit("/pull/", 1)[0] + ".git",
-            source_branch=pr.get("source_branch", ""),
-            target_branch=pr.get("target_branch", ""),
-            author=pr.get("author", ""),
-            title=pr.get("title", ""),
-            head_commit_sha="",
-        )
-        review_db_id = await storage.create_review_record(pr_stub_for_record, comment_mode="none")
+        review_db_id = await storage.create_review_record(stub, comment_mode="none")
     except Exception as exc:
         log.warning("start_wizard_precreate_failed", error=str(exc))
         review_db_id = _uuid_mod.uuid4()
 
     # Start a new review in the background
     try:
-        from pr_guardian.api.review import _parse_pr_url, _run_review_background
-        from pr_guardian.platform.factory import create_adapter
-
-        stub, platform_name = _parse_pr_url(pr["pr_url"])
         adapter = create_adapter(platform_name)
         base_url = str(request.base_url)
         asyncio.create_task(
