@@ -55,6 +55,7 @@ async def _run_review_background(
     *,
     platform_name: str,
     pat_name: str | None = None,
+    review_db_id: uuid.UUID | None = None,
 ) -> None:
     """Hydrate the PR stub and run the full review pipeline in the background."""
     import traceback
@@ -72,7 +73,14 @@ async def _run_review_background(
         pass
 
     try:
-        await run_review(pr, adapter, comment_mode=comment_mode, base_url=base_url, dismissals=dismissals, pat_name=pat_name)
+        await run_review(
+            pr, adapter,
+            comment_mode=comment_mode,
+            base_url=base_url,
+            dismissals=dismissals,
+            pat_name=pat_name,
+            existing_review_db_id=review_db_id,
+        )
     except Exception as e:
         log.error("background_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
