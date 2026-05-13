@@ -148,7 +148,11 @@ def _normalize_ado_merged_pr(
 def _normalize_ado_pr(pr: dict, org_url: str, project: str, repo_name: str) -> dict:
     reviewers_raw = pr.get("reviewers", [])
     reviewers = [r.get("uniqueName", "") or r.get("displayName", "") for r in reviewers_raw]
-    author_id = pr.get("createdBy", {}).get("uniqueName", "")
+    created_by = pr.get("createdBy", {})
+    # Service accounts and federated/external identities can have an empty
+    # uniqueName, so fall back to the GUID `id` to keep self-approval filtering
+    # effective for automated accounts.
+    author_id = created_by.get("uniqueName", "") or created_by.get("id", "")
     approval_status = _ado_approval_status(reviewers_raw, author_id)
     pr_id = str(pr.get("pullRequestId", ""))
     pr_url = (

@@ -3,7 +3,11 @@ from __future__ import annotations
 
 import pytest
 
-from pr_guardian.core.pr_sync import _ado_approval_status, _gh_approval_status
+from pr_guardian.core.pr_sync import (
+    _ado_approval_status,
+    _gh_approval_status,
+    _normalize_ado_pr,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -102,3 +106,50 @@ class TestGhApprovalStatus:
             self._review("reviewer", "APPROVED"),
         ]
         assert _gh_approval_status(reviews, "author") == "approved"
+
+
+# ---------------------------------------------------------------------------
+# _normalize_ado_pr — author_id extraction edge cases
+# ---------------------------------------------------------------------------
+
+class TestNormalizeAdoPrAuthorId:
+    def _pr(self, created_by: dict, reviewers: list[dict]) -> dict:
+        return {
+            "pullRequestId": 1,
+            "title": "t",
+            "createdBy": created_by,
+            "reviewers": reviewers,
+            "sourceRefName": "refs/heads/feat",
+            "targetRefName": "refs/heads/main",
+        }
+
+    def test_service_account_with_empty_uniquename_falls_back_to_id(self):
+        # Service accounts / federated identities can have an empty uniqueName.
+        # We must still recognise their self-approval via the GUID id.
+        svc_id = "00000000-0000-0000-0000-000000000001"
+        pr = self._pr(
+            created_by={"id": svc_id, "uniqueName": ""},
+            reviewers=[{"id": svc_id, "uniqueName": "", "vote": 10}],
+        )
+        result = _normalize_ado_pr(pr, "https://dev.azure.com/org", "proj", "repo")
+        assert result["approval_status"] == "pending"
+
+    def test_service_account_self_plus_real_reviewer(self):
+        svc_id = "00000000-0000-0000-0000-000000000001"
+        pr = self._pr(
+            created_by={"id": svc_id, "uniqueName": ""},
+            reviewers=[
+                {"id": svc_id, "uniqueName": "", "vote": 10},
+                {"uniqueName": "human@example.com", "vote": 10},
+            ],
+        )
+        result = _normalize_ado_pr(pr, "https://dev.azure.com/org", "proj", "repo")
+        assert result["approval_status"] == "approved"
+
+    def test_normal_account_self_approval_still_pending(self):
+        pr = self._pr(
+            created_by={"id": "guid-1", "uniqueName": "author@example.com"},
+            reviewers=[{"uniqueName": "author@example.com", "vote": 10}],
+        )
+        result = _normalize_ado_pr(pr, "https://dev.azure.com/org", "proj", "repo")
+        assert result["approval_status"] == "pending"
