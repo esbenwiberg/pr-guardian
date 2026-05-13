@@ -20,11 +20,17 @@ def _is_work_hours() -> bool:
     return 9 <= datetime.now().hour < 18
 
 
-def _gh_approval_status(reviews: list[dict]) -> str:
-    """Compute approval status from GitHub review list (most recent per reviewer wins)."""
+def _gh_approval_status(reviews: list[dict], author_login: str = "") -> str:
+    """Compute approval status from GitHub review list (most recent per reviewer wins).
+
+    Self-approvals are excluded: GitHub policy requires at least one reviewer
+    other than the author to approve.
+    """
     latest: dict[str, str] = {}
     for r in reviews:
         login = r.get("user", {}).get("login", "")
+        if author_login and login == author_login:
+            continue
         state = r.get("state", "")
         if state in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             latest[login] = state
@@ -39,7 +45,8 @@ def _gh_approval_status(reviews: list[dict]) -> str:
 
 def _normalize_github_pr(pr: dict, repo_full_name: str) -> dict:
     org = repo_full_name.split("/")[0] if "/" in repo_full_name else repo_full_name
-    approval_status = "draft" if pr.get("draft") else _gh_approval_status(pr.get("_reviews", []))
+    author_login = pr.get("user", {}).get("login", "")
+    approval_status = "draft" if pr.get("draft") else _gh_approval_status(pr.get("_reviews", []), author_login)
     reviewers = [r["login"] for r in pr.get("requested_reviewers", [])]
     assignees = [a.get("login", "") for a in pr.get("assignees", []) if a.get("login")]
     return {
@@ -66,9 +73,20 @@ def _normalize_github_pr(pr: dict, repo_full_name: str) -> dict:
     }
 
 
-def _ado_approval_status(reviewers: list[dict]) -> str:
-    """Compute approval from ADO reviewer votes."""
-    votes = [r.get("vote", 0) for r in reviewers]
+def _ado_approval_status(reviewers: list[dict], author_id: str = "") -> str:
+    """Compute approval from ADO reviewer votes.
+
+    Self-approvals are excluded: ADO policy requires at least one reviewer
+    other than the author to approve.
+    """
+    non_author = [
+        r for r in reviewers
+        if not author_id or (
+            r.get("uniqueName", "") != author_id
+            and r.get("id", "") != author_id
+        )
+    ]
+    votes = [r.get("vote", 0) for r in non_author]
     if any(v <= -5 for v in votes):
         return "changes_requested"
     if votes and all(v >= 10 for v in votes):
@@ -130,7 +148,12 @@ def _normalize_ado_merged_pr(
 def _normalize_ado_pr(pr: dict, org_url: str, project: str, repo_name: str) -> dict:
     reviewers_raw = pr.get("reviewers", [])
     reviewers = [r.get("uniqueName", "") or r.get("displayName", "") for r in reviewers_raw]
-    approval_status = _ado_approval_status(reviewers_raw)
+    created_by = pr.get("createdBy", {})
+    # Service accounts and federated/external identities can have an empty
+    # uniqueName, so fall back to the GUID `id` to keep self-approval filtering
+    # effective for automated accounts.
+    author_id = created_by.get("uniqueName", "") or created_by.get("id", "")
+    approval_status = _ado_approval_status(reviewers_raw, author_id)
     pr_id = str(pr.get("pullRequestId", ""))
     pr_url = (
         f"{org_url.rstrip('/')}/{project}/_git/{repo_name}/pullrequest/{pr_id}"
