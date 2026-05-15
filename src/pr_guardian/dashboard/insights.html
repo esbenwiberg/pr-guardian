@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PR Guardian Dashboard</title>
+<title>PR Guardian — Insights</title>
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
@@ -14,10 +14,23 @@
 <!-- Main Content -->
 <div class="ml-16 lg:ml-64">
   <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
-    <h1 class="text-sm font-semibold text-slate-50">Dashboard</h1>
+    <h1 class="text-sm font-semibold text-slate-50">Insights</h1>
   </header>
 
   <div class="max-w-[1400px] mx-auto p-6">
+
+  <!-- Empty-state callout (Brief 07) — shown only when no reviews exist yet -->
+  <div id="insights-empty" class="mb-6 p-5 rounded-xl border border-slate-700 bg-slate-900/60" style="display:none">
+    <div class="flex items-start gap-4">
+      <div class="text-2xl">📊</div>
+      <div class="flex-1">
+        <div class="text-base font-semibold text-slate-100">No reviews yet</div>
+        <p class="text-sm text-slate-400 mt-1">Once Guardian processes its first PR, decision rates, risk tiers, severity breakdowns, and cost trends will appear here.</p>
+        <a href="/reviews" class="inline-block mt-3 text-sm text-indigo-400 hover:text-indigo-300 font-medium">Trigger your first review →</a>
+      </div>
+    </div>
+  </div>
+
   <!-- Stats -->
   <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4 mb-6" id="stats-grid">
     <a href="/reviews" class="stat-card hover:border-slate-600 transition-colors cursor-pointer">
@@ -105,6 +118,30 @@
     </div>
   </div>
 
+  <!-- Cost over time (Brief 07) — last 30 days. -->
+  <div class="card mb-6">
+    <div class="card-body">
+      <div class="flex items-baseline justify-between mb-3">
+        <h3 class="text-sm font-semibold">Cost over time</h3>
+        <div class="text-2xs text-slate-500" id="cost-summary">—</div>
+      </div>
+      <svg id="cost-chart" viewBox="0 0 600 120" preserveAspectRatio="none" style="width:100%;height:120px;display:block">
+        <defs>
+          <linearGradient id="cost-grad" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stop-color="#818cf8" stop-opacity="0.45"/>
+            <stop offset="100%" stop-color="#818cf8" stop-opacity="0"/>
+          </linearGradient>
+        </defs>
+        <path id="cost-area" fill="url(#cost-grad)" d=""/>
+        <path id="cost-line" fill="none" stroke="#818cf8" stroke-width="1.5" d=""/>
+      </svg>
+      <div class="flex justify-between text-2xs text-slate-500 mt-1 tabular-nums">
+        <span id="cost-range-start">30d ago</span>
+        <span id="cost-range-end">today</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Recent Reviews feed -->
   <div class="card mb-6" id="recent-section" style="display:none">
     <div class="card-header flex items-center justify-between">
@@ -180,9 +217,54 @@ async function loadStats() {
     renderRiskBars(stats.risk_tier_counts);
     renderSeverityBars(stats.severity_counts);
     renderRepoBars(stats.top_repos);
+    renderCostChart(stats.cost_per_day || []);
+    document.getElementById('insights-empty').style.display = stats.total_reviews ? 'none' : '';
   } catch (e) {
     console.error('Failed to load stats', e);
   }
+}
+
+function renderCostChart(series) {
+  const line = document.getElementById('cost-line');
+  const area = document.getElementById('cost-area');
+  const summaryEl = document.getElementById('cost-summary');
+  const startEl = document.getElementById('cost-range-start');
+  const endEl = document.getElementById('cost-range-end');
+  if (!Array.isArray(series) || !series.length) {
+    line.setAttribute('d', '');
+    area.setAttribute('d', '');
+    summaryEl.textContent = '—';
+    return;
+  }
+  const W = 600, H = 120, PAD_Y = 8;
+  const maxCost = Math.max(...series.map(p => p.cost), 0.0001);
+  const step = series.length > 1 ? W / (series.length - 1) : W;
+  const pts = series.map((p, i) => {
+    const x = i * step;
+    const y = H - PAD_Y - (p.cost / maxCost) * (H - PAD_Y * 2);
+    return [x, y];
+  });
+  const linePath = pts.map((p, i) => (i === 0 ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+  const areaPath = linePath + ` L${W},${H} L0,${H} Z`;
+  line.setAttribute('d', linePath);
+  area.setAttribute('d', areaPath);
+
+  const total = series.reduce((acc, p) => acc + p.cost, 0);
+  const nonZero = series.filter(p => p.cost > 0).length;
+  const avg = nonZero ? total / nonZero : 0;
+  let trend = '';
+  if (series.length >= 14) {
+    const half = Math.floor(series.length / 2);
+    const a = series.slice(0, half).reduce((s, p) => s + p.cost, 0);
+    const b = series.slice(half).reduce((s, p) => s + p.cost, 0);
+    if (a > 0) {
+      const pct = Math.round(((b - a) / a) * 100);
+      trend = pct === 0 ? '' : ` · trending ${pct > 0 ? '↑' : '↓'} ${Math.abs(pct)}%`;
+    }
+  }
+  summaryEl.textContent = `Total: ${formatCost(total)}  ·  per-active-day avg: ${formatCost(avg)}${trend}`;
+  startEl.textContent = series[0].date;
+  endEl.textContent = series[series.length - 1].date;
 }
 
 async function loadActive() {

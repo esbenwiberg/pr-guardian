@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — Reviews</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<aside id="sidebar"></aside>
+<script src="/static/sidebar.js"></script>
+
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <h1 class="text-sm font-semibold text-slate-50">Reviews</h1>
+    <div class="text-2xs text-slate-500 tabular-nums" id="queue-count"></div>
+  </header>
+
+  <div class="max-w-[1280px] mx-auto p-6">
+
+    <!-- Paste-URL bar -->
+    <div class="mb-5">
+      <form id="trigger-form" class="flex items-center gap-2">
+        <div class="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/60 focus-within:border-indigo-400/60">
+          <svg class="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+          <input id="trigger-url" type="text"
+                 class="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+                 placeholder="Paste a PR URL  ·  or  owner/repo  for a repo scan"
+                 autocomplete="off"/>
+          <span id="trigger-error" class="hidden text-xs text-red-400"></span>
+        </div>
+        <button type="submit" id="trigger-btn" class="btn btn-primary text-sm">Review &rarr;</button>
+      </form>
+    </div>
+
+    <!-- Filter chips -->
+    <div class="flex flex-wrap items-center gap-2 mb-3">
+      <div class="flex items-center gap-1" id="filter-chips">
+        <button class="chip chip-active" data-filter="all">All</button>
+        <button class="chip" data-filter="needs_review">Needs review</button>
+        <button class="chip" data-filter="mine">Mine</button>
+        <button class="chip" data-filter="scans">Scans</button>
+      </div>
+      <div class="flex items-center gap-2 ml-auto">
+        <select id="facet-repo" class="form-select text-xs py-1 px-2"><option value="">repo: any</option></select>
+        <select id="facet-author" class="form-select text-xs py-1 px-2"><option value="">author: any</option></select>
+        <select id="facet-risk" class="form-select text-xs py-1 px-2">
+          <option value="">risk: any</option>
+          <option value="high">high</option>
+          <option value="medium">medium</option>
+          <option value="low">low</option>
+          <option value="trivial">trivial</option>
+        </select>
+        <button id="sync-btn" class="text-xs text-slate-400 hover:text-slate-100 px-2 py-1 rounded hover:bg-slate-800/60">&#8635; Sync</button>
+      </div>
+    </div>
+
+    <!-- Queue -->
+    <div id="queue" class="rounded-lg border border-slate-800 bg-slate-900/40 divide-y divide-slate-800/80 overflow-hidden">
+      <div class="py-16 text-center text-sm text-slate-500" id="queue-empty">Loading…</div>
+    </div>
+
+  </div>
+</div>
+
+<style>
+  .chip {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    border: 1px solid rgb(30 41 59);
+    color: rgb(148 163 184);
+    background: transparent;
+    transition: all 120ms;
+  }
+  .chip:hover { color: rgb(241 245 249); border-color: rgb(71 85 105); }
+  .chip-active { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.5); background: rgb(99 102 241 / 0.08); }
+  .queue-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; transition: background 120ms; cursor: pointer; }
+  .queue-row:hover { background: rgb(15 23 42 / 0.6); }
+  .subject-icon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: rgb(148 163 184); border: 1px solid rgb(51 65 85); background: rgb(15 23 42); }
+  .subject-icon.pr { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.45); }
+  .subject-icon.scan { color: rgb(251 191 36); border-color: rgb(251 191 36 / 0.45); }
+  .platform-chip { font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 3px; color: rgb(148 163 184); border: 1px solid rgb(51 65 85); }
+  .origin-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; color: rgb(148 163 184); border: 1px solid rgb(51 65 85); }
+  .origin-chip.manual, .origin-chip.you-triggered { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.45); }
+  .stale-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; color: rgb(251 191 36); border: 1px solid rgb(251 191 36 / 0.45); background: rgb(251 191 36 / 0.06); }
+  .risk-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+  .risk-dot.high { background: rgb(248 113 113); }
+  .risk-dot.medium { background: rgb(251 191 36); }
+  .risk-dot.low { background: rgb(110 231 183); }
+  .risk-dot.trivial { background: rgb(71 85 105); }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  const queueEl = document.getElementById('queue');
+  const emptyEl = document.getElementById('queue-empty');
+  const countEl = document.getElementById('queue-count');
+  const facetRepo = document.getElementById('facet-repo');
+  const facetAuthor = document.getElementById('facet-author');
+  const facetRisk = document.getElementById('facet-risk');
+  const errEl = document.getElementById('trigger-error');
+
+  let ITEMS = [];
+  let FILTER = 'all';
+  let ME = null;
+
+  fetch('/api/me').then(r => r.ok ? r.json() : null).then(u => { ME = u; });
+
+  // Sync URL state with filter chips.
+  const params = new URLSearchParams(window.location.search);
+  const urlFilter = params.get('filter');
+  if (urlFilter && ['all','needs_review','mine','scans'].includes(urlFilter)) FILTER = urlFilter;
+  if (params.get('subject') === 'repo') FILTER = 'scans';
+
+  function applyFilter() {
+    document.querySelectorAll('#filter-chips .chip').forEach(c => c.classList.toggle('chip-active', c.dataset.filter === FILTER));
+    render();
+    const u = new URL(window.location.href);
+    if (FILTER === 'all') u.searchParams.delete('filter'); else u.searchParams.set('filter', FILTER);
+    u.searchParams.delete('subject');
+    window.history.replaceState({}, '', u.toString());
+  }
+
+  document.querySelectorAll('#filter-chips .chip').forEach(c => {
+    c.addEventListener('click', () => { FILTER = c.dataset.filter; applyFilter(); });
+  });
+
+  facetRepo.addEventListener('change', render);
+  facetAuthor.addEventListener('change', render);
+  facetRisk.addEventListener('change', render);
+  document.getElementById('sync-btn').addEventListener('click', loadQueue);
+
+  function escape(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
+
+  function timeAgo(iso) {
+    if (!iso) return '';
+    const t = new Date(iso).getTime();
+    const dt = (Date.now() - t) / 1000;
+    if (dt < 60) return `${Math.max(1, Math.floor(dt))}s ago`;
+    if (dt < 3600) return `${Math.floor(dt/60)}m ago`;
+    if (dt < 86400) return `${Math.floor(dt/3600)}h ago`;
+    return `${Math.floor(dt/86400)}d ago`;
+  }
+
+  function riskDots(item) {
+    const map = { critical: item.findings?.critical || 0, high: item.findings?.high || 0, medium: item.findings?.medium || 0, low: item.findings?.low || 0 };
+    const sum = map.critical + map.high;
+    if (item.risk_tier === 'trivial' && !sum) return '<span class="text-2xs text-slate-500">clean</span>';
+    const parts = [];
+    for (let i = 0; i < Math.min(3, Math.max(1, sum || 1)); i++) {
+      parts.push(`<span class="risk-dot ${item.risk_tier}"></span>`);
+    }
+    return parts.join('');
+  }
+
+  function findingSummary(item) {
+    const f = item.findings || {};
+    const high = (f.critical || 0) + (f.high || 0);
+    const med = f.medium || 0;
+    const low = f.low || 0;
+    const pieces = [];
+    if (high) pieces.push(`<span class="text-red-400">${high} high</span>`);
+    if (med) pieces.push(`<span class="text-amber-400">${med} med</span>`);
+    if (low) pieces.push(`<span class="text-slate-400">${low} low</span>`);
+    if (!pieces.length) pieces.push('<span class="text-emerald-400">clean</span>');
+    if (item.estimated_review_minutes) pieces.push(`<span class="text-slate-500">~${item.estimated_review_minutes}m</span>`);
+    return pieces.join(' · ');
+  }
+
+  function originLabel(item) {
+    if (item.trigger_origin === 'manual' && item.triggered_by) {
+      if (ME && ME.email && ME.email === item.triggered_by) return { text: 'you triggered', cls: 'origin-chip you-triggered' };
+      return { text: 'manual', cls: 'origin-chip manual' };
+    }
+    if (item.trigger_origin === 'scan') return { text: 'scan · full', cls: 'origin-chip' };
+    if (item.trigger_origin === 'manual') return { text: 'manual', cls: 'origin-chip manual' };
+    return { text: 'auto', cls: 'origin-chip' };
+  }
+
+  function rowHtml(item) {
+    const isPR = item.subject_type === 'pr';
+    const platform = item.platform ? item.platform.toUpperCase().replace('GITHUB','GH') : '';
+    const origin = originLabel(item);
+    const staleBadge = item.stale ? '<span class="stale-chip">&#9888; updated</span>' : '';
+    const subject = isPR
+      ? `<span class="subject-icon pr">PR</span>`
+      : `<span class="subject-icon scan">&#128193;</span>`;
+    const subtitle = isPR
+      ? `${escape(item.repo)} &middot; ${escape(item.author || 'unknown')} &middot; ${timeAgo(item.started_at)}`
+      : `${escape(item.repo)} &middot; ${escape(item.author || 'scheduled')} &middot; ${timeAgo(item.started_at)}`;
+    const filesText = item.files_changed ? `${item.files_changed} files` : 'full';
+    return `
+      <div class="queue-row" data-id="${escape(item.id)}">
+        ${subject}
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            ${platform ? `<span class="platform-chip">${platform}</span>` : ''}
+            ${isPR ? `<span class="text-2xs text-slate-500">#${escape(item.id.replace(/^demo-pr-/,''))}</span>` : ''}
+            <span class="text-sm font-medium text-slate-100 truncate">${escape(item.title)}</span>
+            ${staleBadge}
+          </div>
+          <div class="text-2xs text-slate-500">${subtitle}</div>
+        </div>
+        <div class="flex flex-col items-end gap-1 shrink-0 text-xs tabular-nums">
+          <div class="flex items-center gap-1.5">${riskDots(item)}<span class="ml-1">${findingSummary(item)}</span></div>
+          <div class="flex items-center gap-2 text-2xs text-slate-500">
+            <span class="${origin.cls}">${origin.text}</span>
+            <span>${filesText}</span>
+          </div>
+        </div>
+        <svg class="w-4 h-4 text-slate-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>
+      </div>`;
+  }
+
+  function passesFilters(item) {
+    if (FILTER === 'needs_review' && item.decision !== 'human_review') return false;
+    if (FILTER === 'mine') {
+      const myEmail = ME && ME.email;
+      const mine = (myEmail && (item.author === myEmail || item.triggered_by === myEmail));
+      if (!mine) return false;
+    }
+    if (FILTER === 'scans' && item.subject_type !== 'scan') return false;
+    if (facetRepo.value && item.repo !== facetRepo.value) return false;
+    if (facetAuthor.value && item.author !== facetAuthor.value) return false;
+    if (facetRisk.value && item.risk_tier !== facetRisk.value) return false;
+    return true;
+  }
+
+  function rebuildFacets() {
+    const repos = [...new Set(ITEMS.map(i => i.repo).filter(Boolean))].sort();
+    const authors = [...new Set(ITEMS.map(i => i.author).filter(Boolean))].sort();
+    facetRepo.innerHTML = '<option value="">repo: any</option>' + repos.map(r => `<option value="${escape(r)}">${escape(r)}</option>`).join('');
+    facetAuthor.innerHTML = '<option value="">author: any</option>' + authors.map(a => `<option value="${escape(a)}">${escape(a)}</option>`).join('');
+  }
+
+  function render() {
+    const filtered = ITEMS.filter(passesFilters);
+    countEl.textContent = filtered.length ? `${filtered.length} review${filtered.length === 1 ? '' : 's'}` : '';
+    if (!ITEMS.length) {
+      queueEl.innerHTML = `<div class="empty-state py-16 text-center">
+        <svg class="w-10 h-10 mx-auto mb-3 text-slate-600" viewBox="0 0 24 24" fill="currentColor"><path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z" opacity=".5"/></svg>
+        <p class="text-sm text-slate-300 mb-1">Nothing waiting for review.</p>
+        <p class="text-xs text-slate-500">Paste a PR URL above to trigger one.</p>
+      </div>`;
+      return;
+    }
+    if (!filtered.length) {
+      queueEl.innerHTML = `<div class="empty-state py-16 text-center">
+        <p class="text-sm text-slate-300 mb-1">No reviews match these filters.</p>
+        <button class="text-xs text-indigo-400 hover:text-indigo-300" onclick="(function(){ document.querySelectorAll('.chip').forEach(c=>c.classList.remove('chip-active')); document.querySelector('.chip[data-filter=all]').classList.add('chip-active'); window.__resetFilters && window.__resetFilters(); })()">Clear filters</button>
+      </div>`;
+      return;
+    }
+    queueEl.innerHTML = filtered.map(rowHtml).join('');
+    queueEl.querySelectorAll('.queue-row').forEach(row => {
+      row.addEventListener('click', () => { window.location.href = `/reviews/${encodeURIComponent(row.dataset.id)}`; });
+    });
+  }
+
+  window.__resetFilters = function () {
+    FILTER = 'all'; facetRepo.value = ''; facetAuthor.value = ''; facetRisk.value = '';
+    applyFilter();
+  };
+
+  async function loadQueue() {
+    emptyEl && (emptyEl.textContent = 'Loading…');
+    try {
+      const r = await fetch('/api/reviews/queue');
+      const data = await r.json();
+      ITEMS = (data.items || []);
+      rebuildFacets();
+      render();
+    } catch (e) {
+      queueEl.innerHTML = `<div class="empty-state py-16 text-center text-xs text-red-400">Failed to load queue: ${escape(String(e))}</div>`;
+    }
+  }
+
+  // Trigger form
+  document.getElementById('trigger-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    errEl.classList.add('hidden'); errEl.textContent = '';
+    const url = document.getElementById('trigger-url').value.trim();
+    if (!url) { errEl.textContent = 'Enter a PR URL or owner/repo.'; errEl.classList.remove('hidden'); return; }
+    const isRepoShort = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url);
+    const mode = isRepoShort ? 'scan' : 'pr';
+    const btn = document.getElementById('trigger-btn');
+    btn.disabled = true; btn.textContent = 'Triggering…';
+    try {
+      const r = await fetch('/api/reviews/trigger', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, mode }),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        errEl.textContent = data.detail || 'Failed to trigger review.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      window.location.href = `/reviews/${encodeURIComponent(data.id)}/live`;
+    } catch (e) {
+      errEl.textContent = String(e); errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Review →';
+    }
+  });
+
+  applyFilter();
+  loadQueue();
+})();
+</script>
+
+</body>
+</html>

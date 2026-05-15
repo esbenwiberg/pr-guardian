@@ -53,6 +53,7 @@ async def dashboard_stats():
             "avg_cost_usd": 0.0,
             "total_cost_usd": 0,
             "top_repos": [],
+            "cost_per_day": [],
         }
 
 

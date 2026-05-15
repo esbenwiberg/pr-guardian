@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian — Live review</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<aside id="sidebar"></aside>
+<script src="/static/sidebar.js"></script>
+
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <div class="flex items-center gap-3 text-sm">
+      <a href="/reviews" class="text-slate-400 hover:text-slate-100">← Reviews</a>
+      <span class="text-slate-700">/</span>
+      <span class="text-slate-100" id="lp-title">running…</span>
+      <span class="origin-chip" id="lp-status">queued</span>
+    </div>
+    <div class="flex items-center gap-2 text-2xs text-slate-500 tabular-nums">
+      <span id="lp-elapsed">0s elapsed</span>
+      <button id="lp-share" class="btn btn-secondary text-xs">Share link</button>
+      <button id="lp-cancel" class="btn btn-secondary text-xs">Cancel</button>
+    </div>
+  </header>
+
+  <div class="max-w-[720px] mx-auto px-6 pt-[80px]">
+    <div id="lp-pipeline" class="space-y-1.5 font-mono text-sm">
+      <!-- rendered by JS -->
+    </div>
+    <div id="lp-error" class="hidden mt-6 p-3 rounded border border-red-500/40 bg-red-500/5 text-xs text-red-300"></div>
+    <div id="lp-actions" class="hidden mt-4 flex gap-2">
+      <button id="lp-rerun" class="btn btn-primary text-xs">Re-run</button>
+      <a href="/reviews" class="btn btn-secondary text-xs">Back to queue</a>
+    </div>
+  </div>
+</div>
+
+<style>
+  .stage { display: grid; grid-template-columns: 14px 110px 1fr 60px; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 4px; }
+  .stage.indent { padding-left: 24px; }
+  .stage-name { color: rgb(148 163 184); }
+  .stage-detail { color: rgb(100 116 139); }
+  .stage-time { text-align: right; color: rgb(100 116 139); font-variant-numeric: tabular-nums; }
+  .dot { width: 8px; height: 8px; border-radius: 999px; background: rgb(51 65 85); }
+  .dot.queued { background: rgb(51 65 85); }
+  .dot.running { background: rgb(129 140 248); animation: pulse 1.2s infinite; }
+  .dot.complete { background: rgb(110 231 183); }
+  .dot.error { background: rgb(248 113 113); }
+  .stage.complete .stage-name { color: rgb(203 213 225); }
+  .stage.error .stage-name { color: rgb(252 165 165); }
+  .stage.error .stage-detail { color: rgb(252 165 165); }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  const REVIEW_ID = (window.location.pathname.match(/^\/reviews\/([^/]+)\/live/) || [])[1] || '';
+
+  const PIPELINE_DEF = [
+    { key: 'discovery',   name: 'Discovery',    children: [] },
+    { key: 'mechanical',  name: 'Mechanical',   children: [] },
+    { key: 'triage',      name: 'Triage',       children: [] },
+    { key: 'agents',      name: 'Agents',       children: ['security','performance','architecture','hotspot','code_quality','test_quality'] },
+    { key: 'decision',    name: 'Decision',     children: [] },
+  ];
+
+  // state: stages and agents keyed by name, holding {status, detail, durationMs}
+  const STATE = {};
+  PIPELINE_DEF.forEach(s => {
+    STATE[s.key] = { status: 'queued', detail: '', duration: null };
+    s.children.forEach(c => { STATE[`${s.key}.${c}`] = { status: 'queued', detail: '', duration: null }; });
+  });
+
+  const startTs = Date.now();
+  const pipeEl = document.getElementById('lp-pipeline');
+  const titleEl = document.getElementById('lp-title');
+  const statusEl = document.getElementById('lp-status');
+  const elapsedEl = document.getElementById('lp-elapsed');
+  const errorEl = document.getElementById('lp-error');
+  const actionsEl = document.getElementById('lp-actions');
+
+  function fmtDuration(ms) {
+    if (ms == null) return '';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms/1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+  }
+  function symbol(status) {
+    switch (status) {
+      case 'complete': return '✓';
+      case 'error':    return '✗';
+      case 'running':  return '●';
+      default:         return '·';
+    }
+  }
+
+  function render() {
+    const html = [];
+    for (const s of PIPELINE_DEF) {
+      const st = STATE[s.key];
+      const row = `
+        <div class="stage ${st.status}">
+          <span class="dot ${st.status}"></span>
+          <span class="stage-name">${symbol(st.status)} ${s.name}</span>
+          <span class="stage-detail">${st.detail || ''}</span>
+          <span class="stage-time">${fmtDuration(st.duration)}</span>
+        </div>`;
+      html.push(row);
+      if (s.key === 'agents') {
+        for (const child of s.children) {
+          const c = STATE[`agents.${child}`];
+          html.push(`
+            <div class="stage indent ${c.status}">
+              <span class="dot ${c.status}"></span>
+              <span class="stage-name">${symbol(c.status)} ${child.replace('_',' ')}</span>
+              <span class="stage-detail">${c.detail || (c.status === 'queued' ? 'queued' : '')}</span>
+              <span class="stage-time">${fmtDuration(c.duration)}</span>
+            </div>`);
+        }
+      }
+    }
+    pipeEl.innerHTML = html.join('');
+  }
+
+  function setOverallStatus() {
+    const decision = STATE['decision'];
+    if (decision.status === 'complete') { statusEl.textContent = 'complete'; return true; }
+    if (Object.values(STATE).some(s => s.status === 'error')) { statusEl.textContent = 'error'; return false; }
+    if (Object.values(STATE).some(s => s.status === 'running')) { statusEl.textContent = 'running'; return null; }
+    return null;
+  }
+
+  function applyEvent(ev) {
+    if (!ev || ev.review_id !== REVIEW_ID) return;
+    titleEl.textContent = ev.repo ? `${ev.repo} · ${ev.pr_id || ''}`.trim() : (titleEl.textContent || 'running…');
+    const stage = (ev.stage || '').toLowerCase();
+    if (!stage) return;
+    if (stage in STATE) {
+      const isComplete = ev.detail?.toLowerCase().includes('done') || ev.detail?.toLowerCase().includes('complete');
+      STATE[stage] = { status: isComplete ? 'complete' : 'running', detail: ev.detail || '', duration: null };
+    } else if (stage.startsWith('agents.')) {
+      const key = stage;
+      if (key in STATE) STATE[key] = { status: 'running', detail: ev.detail || '', duration: null };
+    } else if (stage === 'error' || stage === 'failed') {
+      Object.keys(STATE).forEach(k => { if (STATE[k].status === 'running') STATE[k] = { status: 'error', detail: ev.detail || 'failed', duration: null }; });
+      showError(ev.detail || 'A stage failed.');
+    } else if (stage === 'complete' || stage === 'finished') {
+      STATE['decision'] = { status: 'complete', detail: ev.detail || 'done', duration: null };
+      onComplete();
+    }
+    setOverallStatus();
+    render();
+  }
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.classList.remove('hidden');
+    actionsEl.classList.remove('hidden');
+  }
+
+  function onComplete() {
+    statusEl.textContent = 'complete';
+    setTimeout(() => {
+      const mode = localStorage.getItem('prg:viewer_mode') || '';
+      const q = mode ? `?mode=${encodeURIComponent(mode)}` : '';
+      window.location.href = `/reviews/${encodeURIComponent(REVIEW_ID)}${q}`;
+    }, 600);
+  }
+
+  document.getElementById('lp-share').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(window.location.href); }
+    catch (e) {}
+    const btn = document.getElementById('lp-share');
+    const t = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = t; }, 1500);
+  });
+
+  document.getElementById('lp-cancel').addEventListener('click', async () => {
+    if (!confirm('Cancel this review?')) return;
+    try { await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}`, { method: 'DELETE' }); }
+    catch (e) {}
+    window.location.href = '/reviews';
+  });
+
+  document.getElementById('lp-rerun').addEventListener('click', async () => {
+    try { await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}/re-review`, { method: 'POST' }); }
+    catch (e) {}
+    window.location.reload();
+  });
+
+  // Tick elapsed time every second.
+  setInterval(() => {
+    const s = Math.floor((Date.now() - startTs) / 1000);
+    elapsedEl.textContent = s < 60 ? `${s}s elapsed` : `${Math.floor(s/60)}m ${s%60}s elapsed`;
+  }, 1000);
+
+  // Subscribe to SSE.
+  let es = null;
+  function connect() {
+    try {
+      es = new EventSource('/api/dashboard/events');
+      es.onmessage = (m) => { try { applyEvent(JSON.parse(m.data)); } catch (e) {} };
+      es.onerror = () => { /* fallback: poll briefly later */ };
+    } catch (e) {
+      // fall through
+    }
+  }
+  connect();
+
+  render();
+
+  // If no events arrive in 8s, hint that the review may already be done — offer to open it.
+  setTimeout(() => {
+    const noActivity = Object.values(STATE).every(s => s.status === 'queued');
+    if (!noActivity) return;
+    pipeEl.insertAdjacentHTML('beforeend', `
+      <div class="mt-4 p-3 rounded border border-slate-700 bg-slate-900/60 text-xs text-slate-400">
+        No live events yet. The review may already be complete —
+        <a class="text-indigo-400 hover:text-indigo-300" href="/reviews/${REVIEW_ID}">open the review →</a>
+      </div>`);
+  }, 8000);
+
+})();
+</script>
+
+</body>
+</html>

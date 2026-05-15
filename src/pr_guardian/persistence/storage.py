@@ -298,6 +298,28 @@ async def get_stats() -> dict[str, Any]:
             select(func.count(ReviewRow.id)).where(ReviewRow.finished_at.is_(None))
         )
 
+        # Per-day cost for the last 30 days (Brief 07 — cost-over-time chart).
+        # Returned as a list of {date: "YYYY-MM-DD", cost: <usd>}, oldest first,
+        # with zero-filled days so the client can render a continuous strip.
+        cost_per_day: list[dict] = []
+        try:
+            from datetime import date, timedelta
+            today = date.today()
+            window_start = today - timedelta(days=29)
+            day_col = func.date(ReviewRow.started_at).label("d")
+            rows = (await session.execute(
+                select(day_col, func.coalesce(func.sum(ReviewRow.cost_usd), 0.0))
+                .where(ReviewRow.started_at.isnot(None))
+                .where(func.date(ReviewRow.started_at) >= window_start)
+                .group_by(day_col)
+            )).all()
+            day_map = {str(r[0]): float(r[1] or 0.0) for r in rows}
+            for i in range(30):
+                d = window_start + timedelta(days=i)
+                cost_per_day.append({"date": d.isoformat(), "cost": round(day_map.get(d.isoformat(), 0.0), 4)})
+        except Exception:
+            cost_per_day = []
+
         return {
             "total_reviews": total or 0,
             "active_reviews": pending or 0,
@@ -309,6 +331,7 @@ async def get_stats() -> dict[str, Any]:
             "avg_cost_usd": round(avg_cost, 4) if avg_cost else 0.0,
             "total_cost_usd": round(total_cost, 4) if total_cost else 0.0,
             "top_repos": [{"repo": r[0], "count": r[1]} for r in top_repos],
+            "cost_per_day": cost_per_day,
         }
 
 

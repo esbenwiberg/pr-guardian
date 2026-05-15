@@ -6,7 +6,6 @@ from pathlib import Path
 
 import structlog
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from pr_guardian.api.admin import router as admin_router
@@ -16,6 +15,7 @@ from pr_guardian.api.dashboard_page import router as dashboard_page_router
 from pr_guardian.api.health_api import router as health_router
 from pr_guardian.api.pr_dashboard_api import router as pr_dashboard_router
 from pr_guardian.api.review import router as review_router
+from pr_guardian.api.reviews_queue import router as reviews_queue_router
 from pr_guardian.api.scans import router as scans_router
 from pr_guardian.api.webhooks import router as webhooks_router
 from pr_guardian.auth.identity import IdentityMiddleware
@@ -73,6 +73,7 @@ app.add_middleware(IdentityMiddleware)
 
 app.include_router(health_router)
 app.include_router(review_router)
+app.include_router(reviews_queue_router)
 app.include_router(webhooks_router)
 app.include_router(scans_router)
 app.include_router(dashboard_api_router)
@@ -85,6 +86,14 @@ _STATIC_DIR = Path(__file__).resolve().parent / "dashboard" / "static"
 if _STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
+
+@app.middleware("http")
+async def _no_cache_static(request, call_next):
+    response = await call_next(request)
+    if request.url.path.startswith("/static/"):
+        response.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return response
+
 _PROTOTYPES_DIR = Path(__file__).resolve().parent.parent.parent / "prototypes"
 if _PROTOTYPES_DIR.is_dir():
     app.mount(
@@ -94,6 +103,3 @@ if _PROTOTYPES_DIR.is_dir():
     )
 
 
-@app.get("/")
-async def root():
-    return RedirectResponse(url="/dashboard")

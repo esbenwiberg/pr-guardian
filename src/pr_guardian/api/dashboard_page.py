@@ -1,21 +1,33 @@
-"""Serve the dashboard HTML pages."""
+"""Serve the dashboard HTML pages.
+
+Routing follows the UI redesign sitemap (specs/ui-redesign/design.md):
+  /reviews         — queue (new root)
+  /reviews/{id}    — review viewer
+  /insights        — analytics
+  /settings        — admin-only, consolidated
+  /help/*          — documentation pages
+
+Legacy paths 302-redirect to their new home.
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
-from fastapi import APIRouter
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, Request
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 router = APIRouter(tags=["dashboard"])
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 _PR_DASHBOARD_HTML = _DASHBOARD_DIR / "pr_dashboard.html"
-_DASHBOARD_HTML = _DASHBOARD_DIR / "index.html"
-_REVIEWS_HTML = _DASHBOARD_DIR / "reviews.html"
+_INSIGHTS_HTML = _DASHBOARD_DIR / "insights.html"
+_REVIEWS_QUEUE_HTML = _DASHBOARD_DIR / "reviews_queue.html"
+_LIVE_PROGRESS_HTML = _DASHBOARD_DIR / "live_progress.html"
 _REVIEW_DETAIL_HTML = _DASHBOARD_DIR / "review_detail.html"
 _SCANS_HTML = _DASHBOARD_DIR / "scans.html"
 _PROMPTS_HTML = _DASHBOARD_DIR / "prompts.html"
-_SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"
+_SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"  # new consolidated hub (Brief 06)
+_SETTINGS_LLM_HTML = _DASHBOARD_DIR / "settings_llm.html"  # legacy LLM provider page (embedded)
 _ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
@@ -25,97 +37,185 @@ _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 
 
-@router.get("/pr-dashboard", response_class=HTMLResponse)
-async def pr_dashboard():
-    """Serve the unified PR dashboard page."""
-    return _PR_DASHBOARD_HTML.read_text()
+def _is_admin(request: Request) -> bool:
+    identity = getattr(request.state, "identity", None)
+    return bool(getattr(identity, "is_admin", False))
 
 
-@router.get("/dashboard", response_class=HTMLResponse)
-async def dashboard():
-    """Serve the dashboard overview page."""
-    return _DASHBOARD_HTML.read_text()
+# ---------------------------------------------------------------------------
+# Primary surfaces
+# ---------------------------------------------------------------------------
+
+@router.get("/", response_class=HTMLResponse)
+async def root():
+    return RedirectResponse(url="/reviews", status_code=302)
 
 
 @router.get("/reviews", response_class=HTMLResponse)
 async def reviews_page():
-    """Serve the reviews list page."""
-    return _REVIEWS_HTML.read_text()
+    """Reviews queue — the new root."""
+    return _REVIEWS_QUEUE_HTML.read_text()
 
 
-@router.get("/reviews/{review_id}/human-review", response_class=HTMLResponse)
-async def human_review_page(review_id: str):
-    """Serve the human review (Chapters) page."""
-    return _HUMAN_REVIEW_HTML.read_text()
+@router.get("/reviews/{review_id}/live", response_class=HTMLResponse)
+async def review_live(review_id: str):
+    """Live pipeline progress stream for a running review."""
+    return _LIVE_PROGRESS_HTML.read_text()
 
 
-@router.get("/reviews/{review_id}/wizard", response_class=HTMLResponse)
-async def human_wizard_page(review_id: str):
-    """Serve the wizard-style review page (Briefing → Capabilities → Wrap-up)."""
-    return _HUMAN_WIZARD_HTML.read_text()
+_VIEWER_MODES = {
+    "wizard": _HUMAN_WIZARD_HTML,
+    "chapters": _HUMAN_REVIEW_HTML,
+    "findings": _REVIEW_DETAIL_HTML,
+}
+
+
+def _pick_default_mode(review_id: str) -> str:
+    """Pick a sensible default mode when ?mode= is absent.
+
+    Heuristic: scans → wizard; otherwise findings. The shared viewer-shell on
+    the client can still override based on the user's last-used mode (kept in
+    localStorage).
+    """
+    if review_id.startswith("scan-") or review_id.startswith("demo-scan"):
+        return "wizard"
+    return "findings"
 
 
 @router.get("/reviews/{review_id}", response_class=HTMLResponse)
-async def review_detail(review_id: str):
-    """Serve the standalone review findings page."""
-    return _REVIEW_DETAIL_HTML.read_text()
+async def review_detail(review_id: str, request: Request):
+    """Review viewer — three modes (wizard|chapters|findings) under one URL."""
+    mode = (request.query_params.get("mode") or "").lower().strip()
+    if mode not in _VIEWER_MODES:
+        mode = _pick_default_mode(review_id)
+    return _VIEWER_MODES[mode].read_text()
 
 
-@router.get("/scans", response_class=HTMLResponse)
-async def scans_page():
-    """Serve the scans list and detail page."""
-    return _SCANS_HTML.read_text()
+@router.get("/insights", response_class=HTMLResponse)
+async def insights_page():
+    """Analytics surface. Renamed from /dashboard."""
+    return _INSIGHTS_HTML.read_text()
 
 
-@router.get("/scans/{scan_id}", response_class=HTMLResponse)
-async def scan_detail_page(scan_id: str):
-    """Serve the scan detail page."""
-    return _SCANS_HTML.read_text()
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    """Admin-only settings page. Brief 06 will consolidate /prompts and /admin into anchored sections."""
+    if not _is_admin(request):
+        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
+    return _SETTINGS_HTML.read_text()
 
 
-@router.get("/prompts", response_class=HTMLResponse)
-async def prompts_page():
-    """Serve the prompt editor page."""
+# ---------------------------------------------------------------------------
+# Help (footer popover — no top-level nav slot)
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# Embedded panes consumed by the /settings hub via <iframe>.
+# Each pane is the legacy single-purpose page; the hub frames them so we can
+# keep their JS isolated (Brief 06 — see settings.html).
+# ---------------------------------------------------------------------------
+
+@router.get("/_embed/settings/llm", response_class=HTMLResponse)
+async def embed_llm(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
+    return _SETTINGS_LLM_HTML.read_text()
+
+
+@router.get("/_embed/settings/prompts", response_class=HTMLResponse)
+async def embed_prompts(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
     return _PROMPTS_HTML.read_text()
 
 
-@router.get("/browse-pr", response_class=HTMLResponse)
-async def browse_pr_page():
-    """Serve the Browse PR page (open any PR URL in chapter view)."""
-    return _BROWSE_PR_HTML.read_text()
+@router.get("/_embed/settings/admin", response_class=HTMLResponse)
+async def embed_admin(request: Request):
+    if not _is_admin(request):
+        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
+    return _ADMIN_HTML.read_text()
+
+
+@router.get("/help/how-it-works", response_class=HTMLResponse)
+async def help_how_it_works():
+    return _HOW_IT_WORKS_HTML.read_text()
+
+
+@router.get("/help/cli", response_class=HTMLResponse)
+async def help_cli():
+    return _CLI_REFERENCE_HTML.read_text()
+
+
+@router.get("/help/api", response_class=HTMLResponse)
+async def help_api():
+    return _API_REFERENCE_HTML.read_text()
+
+
+# ---------------------------------------------------------------------------
+# Legacy redirects (302 — preserve old bookmarks during the redesign)
+# ---------------------------------------------------------------------------
+
+@router.get("/dashboard")
+async def legacy_dashboard():
+    return RedirectResponse(url="/insights", status_code=302)
+
+
+@router.get("/pr-dashboard")
+async def legacy_pr_dashboard():
+    return RedirectResponse(url="/reviews", status_code=302)
+
+
+@router.get("/browse-pr")
+async def legacy_browse_pr():
+    return RedirectResponse(url="/reviews", status_code=302)
+
+
+@router.get("/scans")
+async def legacy_scans():
+    return RedirectResponse(url="/reviews?subject=repo", status_code=302)
+
+
+@router.get("/scans/{scan_id}")
+async def legacy_scan_detail(scan_id: str):
+    return RedirectResponse(url=f"/reviews/{scan_id}", status_code=302)
+
+
+@router.get("/prompts")
+async def legacy_prompts():
+    return RedirectResponse(url="/settings#prompts", status_code=302)
+
+
+@router.get("/admin")
+async def legacy_admin():
+    return RedirectResponse(url="/settings#api-keys", status_code=302)
+
+
+@router.get("/how-it-works")
+async def legacy_how_it_works():
+    return RedirectResponse(url="/help/how-it-works", status_code=302)
+
+
+@router.get("/cli-reference")
+async def legacy_cli_reference():
+    return RedirectResponse(url="/help/cli", status_code=302)
+
+
+@router.get("/api-reference")
+async def legacy_api_reference():
+    return RedirectResponse(url="/help/api", status_code=302)
+
+
+@router.get("/reviews/{review_id}/wizard")
+async def legacy_wizard(review_id: str):
+    return RedirectResponse(url=f"/reviews/{review_id}?mode=wizard", status_code=302)
+
+
+@router.get("/reviews/{review_id}/human-review")
+async def legacy_human_review(review_id: str):
+    return RedirectResponse(url=f"/reviews/{review_id}?mode=chapters", status_code=302)
 
 
 @router.get("/review-mode", response_class=HTMLResponse)
 async def review_mode_page():
-    """Serve the live PR review mode page (browse diff without a stored review)."""
+    """Live PR review mode (browse diff without a stored review). Kept as a power-user entry; not in primary nav."""
     return _HUMAN_REVIEW_HTML.read_text()
-
-
-@router.get("/how-it-works", response_class=HTMLResponse)
-async def how_it_works_page():
-    """Serve the how-it-works explainer page."""
-    return _HOW_IT_WORKS_HTML.read_text()
-
-
-@router.get("/cli-reference", response_class=HTMLResponse)
-async def cli_reference_page():
-    """Serve the CLI reference documentation page."""
-    return _CLI_REFERENCE_HTML.read_text()
-
-
-@router.get("/api-reference", response_class=HTMLResponse)
-async def api_reference_page():
-    """Serve the API reference documentation page."""
-    return _API_REFERENCE_HTML.read_text()
-
-
-@router.get("/settings", response_class=HTMLResponse)
-async def settings_page():
-    """Serve the LLM provider settings page."""
-    return _SETTINGS_HTML.read_text()
-
-
-@router.get("/admin", response_class=HTMLResponse)
-async def admin_page():
-    """Serve the admin management page."""
-    return _ADMIN_HTML.read_text()
