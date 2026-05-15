@@ -39,6 +39,13 @@
     border-left-color: rgb(99, 102, 241);
     background: rgba(99,102,241,0.08);
   }
+  .rail-sub { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 6px 0; }
+  .rail-sub a {
+    padding: 5px 12px 5px 24px;
+    font-size: 12px;
+    color: rgb(100, 116, 139);
+  }
+  .rail-sub a:hover { color: rgb(203, 213, 225); }
   .settings-section { scroll-margin-top: 60px; }
   .settings-section h2 {
     font-size: 18px; font-weight: 700; color: rgb(241, 245, 249);
@@ -57,7 +64,7 @@
   /* Smaller frames where it makes sense */
   iframe[data-pane="llm"]     { height: 760px; }
   iframe[data-pane="prompts"] { height: 920px; }
-  iframe[data-pane="admin"]   { height: 1400px; }
+  iframe[data-pane="admin"]   { height: 2200px; }
 </style>
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
@@ -75,12 +82,15 @@
     <div class="settings-hub">
       <!-- Left rail -->
       <nav class="settings-rail" id="rail">
-        <a href="#llm"        data-target="llm"        class="active">LLM Provider</a>
-        <a href="#prompts"    data-target="prompts">Agent Prompts</a>
-        <a href="#api-keys"   data-target="api-keys">API Keys</a>
-        <a href="#admins"     data-target="admins">Admins</a>
-        <a href="#pats"       data-target="pats">GitHub PATs</a>
-        <a href="#exclusions" data-target="exclusions">Exclusions</a>
+        <a href="#llm"     data-target="llm" class="active">LLM Provider</a>
+        <a href="#prompts" data-target="prompts">Agent Prompts</a>
+        <a href="#admin"   data-target="admin">Admin</a>
+        <div class="rail-sub" data-parent="admin">
+          <a href="#admin" data-iframe-hash="keys"       data-target="admin">API Keys</a>
+          <a href="#admin" data-iframe-hash="admins"     data-target="admin">Admins</a>
+          <a href="#admin" data-iframe-hash="pats"       data-target="admin">GitHub PATs</a>
+          <a href="#admin" data-iframe-hash="exclusions" data-target="admin">Exclusions</a>
+        </div>
       </nav>
 
       <!-- Sections -->
@@ -98,28 +108,10 @@
           <iframe class="settings-frame" data-pane="prompts" src="/_embed/settings/prompts?embed=1" title="Agent Prompts"></iframe>
         </section>
 
-        <section id="api-keys" class="settings-section">
-          <h2>API Keys</h2>
-          <p class="sub">Service keys for the Agent API. Scroll within the frame for Admins, PATs, and Exclusions — all served from the same admin pane.</p>
-          <iframe class="settings-frame" data-pane="admin" src="/_embed/settings/admin?embed=1#keys" title="API Keys"></iframe>
-        </section>
-
-        <section id="admins" class="settings-section">
-          <h2>Admins</h2>
-          <p class="sub">Who can see and change these settings.</p>
-          <iframe class="settings-frame" data-pane="admin" src="/_embed/settings/admin?embed=1#admins" title="Admins"></iframe>
-        </section>
-
-        <section id="pats" class="settings-section">
-          <h2>GitHub PATs</h2>
-          <p class="sub">Personal access tokens used to talk to GitHub.</p>
-          <iframe class="settings-frame" data-pane="admin" src="/_embed/settings/admin?embed=1#pats" title="GitHub PATs"></iframe>
-        </section>
-
-        <section id="exclusions" class="settings-section">
-          <h2>Exclusions</h2>
-          <p class="sub">Repos and rules that PR Guardian will skip.</p>
-          <iframe class="settings-frame" data-pane="admin" src="/_embed/settings/admin?embed=1#exclusions" title="Exclusions"></iframe>
+        <section id="admin" class="settings-section">
+          <h2>Admin</h2>
+          <p class="sub">API keys, admins, GitHub PATs, and exclusions.</p>
+          <iframe id="admin-frame" class="settings-frame" data-pane="admin" src="/_embed/settings/admin?embed=1" title="Admin"></iframe>
         </section>
       </div>
     </div>
@@ -132,10 +124,42 @@
 
   const rail = document.getElementById('rail');
   const links = Array.from(rail.querySelectorAll('a'));
-  const sections = links.map(a => document.getElementById(a.dataset.target));
+  // Top-level links only (skip sub-anchors which deep-link inside an iframe).
+  const topLinks = links.filter(a => !a.hasAttribute('data-iframe-hash'));
+  const sections = topLinks
+    .map(a => document.getElementById(a.dataset.target))
+    .filter(Boolean);
 
   function activate(id) {
-    links.forEach(a => a.classList.toggle('active', a.dataset.target === id));
+    topLinks.forEach(a => a.classList.toggle('active', a.dataset.target === id));
+  }
+
+  function absOffsetTop(el) {
+    let y = 0;
+    for (let n = el; n; n = n.offsetParent) y += n.offsetTop;
+    return y;
+  }
+
+  function scrollIframeTo(hash) {
+    const frame = document.getElementById('admin-frame');
+    if (!frame) return;
+    const jump = () => {
+      try {
+        const doc = frame.contentDocument;
+        if (!doc) return false;
+        const el = doc.getElementById(hash);
+        if (!el) return false;
+        // The iframe is laid out at its full height, so internal scrolling is a
+        // no-op. Scroll the PARENT page to (iframe offset + element offset).
+        const headerOffset = 60; // sticky header height
+        const target = absOffsetTop(frame) + absOffsetTop(el) - headerOffset;
+        window.scrollTo({ top: target, behavior: 'smooth' });
+        return true;
+      } catch (_) { return false; }
+    };
+    if (jump()) return;
+    // iframe may still be loading — retry once after load
+    frame.addEventListener('load', jump, { once: true });
   }
 
   // Intersection observer — whichever section's top is nearest the top of
@@ -150,19 +174,36 @@
   links.forEach(a => a.addEventListener('click', (ev) => {
     ev.preventDefault();
     const id = a.dataset.target;
+    const sub = a.getAttribute('data-iframe-hash');
     activate(id);
-    document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
-    history.replaceState(null, '', `#${id}`);
+    if (sub) {
+      // Sub-rail: scroll directly to the deep target inside the admin iframe.
+      // Don't also scroll to the parent section — the two animations race.
+      scrollIframeTo(sub);
+      history.replaceState(null, '', `#${id}--${sub}`);
+    } else {
+      document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
+      history.replaceState(null, '', `#${id}`);
+    }
   }));
 
   // If the URL has a hash on load (e.g. /settings#prompts from a legacy
   // redirect), jump there once the iframes have laid out.
-  const hash = (window.location.hash || '').replace('#', '');
-  if (hash && document.getElementById(hash)) {
-    setTimeout(() => {
-      activate(hash);
-      document.getElementById(hash).scrollIntoView({ behavior: 'auto', block: 'start' });
-    }, 50);
+  // Supports compound hashes like #admin--admins for iframe deep-links.
+  const rawHash = (window.location.hash || '').replace('#', '');
+  if (rawHash) {
+    const [top, sub] = rawHash.split('--');
+    // Legacy hashes (api-keys, admins, pats, exclusions) → admin pane
+    const adminAliases = { 'api-keys': 'keys', 'admins': 'admins', 'pats': 'pats', 'exclusions': 'exclusions' };
+    let topId = top, subId = sub;
+    if (adminAliases[top]) { topId = 'admin'; subId = adminAliases[top]; }
+    if (document.getElementById(topId)) {
+      setTimeout(() => {
+        activate(topId);
+        document.getElementById(topId).scrollIntoView({ behavior: 'auto', block: 'start' });
+        if (subId) scrollIframeTo(subId);
+      }, 50);
+    }
   }
 })();
 </script>

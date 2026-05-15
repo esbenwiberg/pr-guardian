@@ -25,7 +25,7 @@
   <div class="max-w-[720px] mx-auto px-6 py-6 space-y-6">
 
     <!-- API Keys Card -->
-    <div class="card p-6">
+    <div id="keys" class="card p-6" style="scroll-margin-top: 16px">
       <h2 class="text-[15px] font-semibold mb-1">API Keys</h2>
       <p class="text-xs text-slate-400 mb-5">Create keys for agents and CI bots to authenticate without OIDC. Keys are shown once at creation.</p>
 
@@ -90,7 +90,7 @@
     </div>
 
     <!-- Admins Card -->
-    <div class="card p-6">
+    <div id="admins" class="card p-6" style="scroll-margin-top: 16px">
       <h2 class="text-[15px] font-semibold mb-1">Admins</h2>
       <p class="text-xs text-slate-400 mb-5">Admins can manage API keys, prompts, and LLM settings. Add by email (must match Entra ID login).</p>
 
@@ -120,7 +120,7 @@
     </div>
 
     <!-- GitHub PATs Card -->
-    <div class="card p-6">
+    <div id="pats" class="card p-6" style="scroll-margin-top: 16px">
       <h2 class="text-[15px] font-semibold mb-1">GitHub PATs</h2>
       <p class="text-xs text-slate-400 mb-5">Store named GitHub Personal Access Tokens for use when triggering reviews. Tokens are encrypted at rest. One PAT can be marked as default and will be used when no specific PAT is selected.</p>
 
@@ -168,7 +168,7 @@
     </div>
 
     <!-- Exclusion Rules -->
-    <div class="card p-6 mt-6">
+    <div id="exclusions" class="card p-6 mt-6" style="scroll-margin-top: 16px">
       <div class="flex items-center justify-between mb-4">
         <div>
           <h2 class="text-sm font-semibold">Exclusion Rules</h2>
