@@ -83,6 +83,16 @@ class PlatformAdapter(Protocol):
         """List files in repo (recursive tree)."""
         ...
 
+    async def list_recently_changed_files(
+        self, repo: str, ref: str = "HEAD", limit: int = 300,
+    ) -> list[str]:
+        """List files most recently touched on ``ref``, newest-first.
+
+        Walks recent commits (bounded internally) and returns up to ``limit``
+        unique paths. Paths still existing as blobs in the tree only.
+        """
+        ...
+
     async def fetch_pr_files(
         self, repo: str, pr_id: int | str, project: str = "",
     ) -> list[dict]:

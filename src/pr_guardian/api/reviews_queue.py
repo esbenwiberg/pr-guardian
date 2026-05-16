@@ -28,7 +28,17 @@ _GITHUB_PR_RE = re.compile(
 _ADO_PR_RE = re.compile(
     r"https?://dev\.azure\.com/(?P<org>[^/]+)/(?P<project>[^/]+)/_git/(?P<repo>[^/]+)/pullrequest/(?P<n>\d+)"
 )
+_GITHUB_REPO_URL_RE = re.compile(
+    r"^https?://github\.com/(?P<owner>[^/]+)/(?P<repo>[^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
+)
+_ADO_REPO_URL_RE = re.compile(
+    r"^https?://dev\.azure\.com/[^/]+/(?P<project>[^/]+)/_git/(?P<repo>[^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
+)
 _REPO_SHORT_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+# ADO 3-segment shorthand: org/project/repo
+_ADO_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +212,45 @@ async def reviews_queue(request: Request):
 class TriggerRequest(BaseModel):
     url: str
     mode: str = "pr"  # "pr" or "scan"
+    platform: str | None = None  # "github" | "ado" — overrides auto-detect for ambiguous shorthand
+    selection: str = "all"  # "all" | "recent" — only used in scan mode
+    max_files: int | None = None  # only used in scan mode; server-clamped
+
+
+def _resolve_repo_scan_target(url: str, requested_platform: str | None) -> tuple[str, str]:
+    """Resolve a user-typed repo identifier to (repo, platform) for a scan.
+
+    Accepts:
+      - https://github.com/owner/repo[.git]                            → github
+      - https://dev.azure.com/org/project/_git/repo[.git]              → ado
+      - owner/repo                                                     → github (or honor requested_platform="ado")
+      - org/project/repo                                               → ado
+    """
+    # Full GitHub repo URL
+    m = _GITHUB_REPO_URL_RE.match(url)
+    if m:
+        return f"{m.group('owner')}/{m.group('repo')}", "github"
+
+    # Full ADO repo URL
+    m = _ADO_REPO_URL_RE.match(url)
+    if m:
+        return f"{m.group('project')}/{m.group('repo')}", "ado"
+
+    # ADO 3-segment shorthand: org/project/repo
+    if _ADO_TRIPLE_RE.match(url):
+        parts = url.split("/")
+        return f"{parts[1]}/{parts[2]}", "ado"
+
+    # 2-segment shorthand — ambiguous. Honor explicit platform, default github.
+    if _REPO_SHORT_RE.match(url):
+        if requested_platform == "ado":
+            return url, "ado"
+        return url, "github"
+
+    raise HTTPException(
+        status_code=400,
+        detail="Unrecognised repo. Use owner/repo (GitHub), org/project/repo (ADO), or a full repo URL.",
+    )
 
 
 @router.post("/trigger")
@@ -213,7 +262,6 @@ async def trigger_review(req: TriggerRequest, request: Request):
 
     gh = _GITHUB_PR_RE.match(url)
     ado = _ADO_PR_RE.match(url)
-    repo_short = _REPO_SHORT_RE.match(url)
 
     if gh or ado:
         # Reuse the existing review trigger so we don't fork logic.
@@ -230,11 +278,27 @@ async def trigger_review(req: TriggerRequest, request: Request):
             log.error("trigger_pr_failed", error=str(e))
             raise HTTPException(status_code=500, detail=f"Failed to trigger PR review: {e}")
 
-    if repo_short and req.mode == "scan":
-        from pr_guardian.api.review import manual_repo_review, RepoReviewRequest
+    if req.mode == "scan":
+        from pr_guardian.api.review import (
+            manual_repo_review, RepoReviewRequest, REPO_REVIEW_MAX_FILES,
+        )
+        repo, platform = _resolve_repo_scan_target(url, req.platform)
+        selection = req.selection if req.selection in ("all", "recent") else "all"
         try:
-            resp = await manual_repo_review(RepoReviewRequest(repo=url, platform="github"))
-            return {"id": f"scan-{resp.repo.replace('/', '-')}", "status": resp.status, "platform": resp.platform, "repo": resp.repo}
+            resp = await manual_repo_review(RepoReviewRequest(
+                repo=repo,
+                platform=platform,
+                selection=selection,
+                max_files=req.max_files or REPO_REVIEW_MAX_FILES,
+            ))
+            return {
+                "id": f"scan-{resp.repo.replace('/', '-')}",
+                "status": resp.status,
+                "platform": resp.platform,
+                "repo": resp.repo,
+                "selection": resp.selection,
+                "max_files": resp.max_files,
+            }
         except HTTPException:
             raise
         except Exception as e:

@@ -645,6 +645,93 @@ class ADOAdapter:
             if not item.get("isFolder", False) and item.get("path")
         ]
 
+    async def list_recently_changed_files(
+        self, repo: str, ref: str = "HEAD", limit: int = 300,
+    ) -> list[str]:
+        """Walk recent commits on ``ref`` and return up to ``limit`` unique paths.
+
+        Lists commits newest-first via the ADO commits API, then for each commit
+        fetches the changes (with file paths) in parallel. Stops early once we
+        have enough unique paths.
+        """
+        client = self._get_client()
+        project, repo_name = self._parse_repo(repo)
+        commit_scan_limit = max(200, limit * 2)
+        top = min(commit_scan_limit, 100)
+
+        commits_url = (
+            f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/commits"
+        )
+
+        # 1. List commit IDs newest-first
+        ids: list[str] = []
+        skip = 0
+        while len(ids) < commit_scan_limit:
+            params: dict = {
+                "$top": top,
+                "$skip": skip,
+                "api-version": "7.1",
+            }
+            if ref and ref != "HEAD":
+                params["searchCriteria.itemVersion.version"] = ref
+                if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref.lower()):
+                    params["searchCriteria.itemVersion.versionType"] = "commit"
+                else:
+                    params["searchCriteria.itemVersion.versionType"] = "branch"
+            resp = await client.get(commits_url, params=params)
+            resp.raise_for_status()
+            batch = resp.json().get("value", [])
+            if not batch:
+                break
+            ids.extend(c.get("commitId", "") for c in batch if c.get("commitId"))
+            if len(batch) < top:
+                break
+            skip += len(batch)
+        ids = ids[:commit_scan_limit]
+
+        # 2. Fetch per-commit changes in parallel
+        sem = asyncio.Semaphore(_MAX_CONCURRENT_FETCHES)
+        results: list[list[str] | None] = [None] * len(ids)
+
+        async def _fetch(idx: int, commit_id: str) -> None:
+            async with sem:
+                try:
+                    url = (
+                        f"{self._org_url}/{project}/_apis/git/repositories/"
+                        f"{repo_name}/commits/{commit_id}/changes"
+                    )
+                    r = await client.get(url, params={"api-version": "7.1"})
+                    r.raise_for_status()
+                    changes = r.json().get("changes", []) or []
+                    paths: list[str] = []
+                    for ch in changes:
+                        item = ch.get("item") or {}
+                        if item.get("gitObjectType") == "tree":
+                            continue
+                        p = (item.get("path") or "").lstrip("/")
+                        if p:
+                            paths.append(p)
+                    results[idx] = paths
+                except Exception as e:
+                    log.debug("ado_commit_changes_failed", commit=commit_id, error=str(e))
+                    results[idx] = []
+
+        await asyncio.gather(*(_fetch(i, c) for i, c in enumerate(ids)))
+
+        # 3. Dedupe in commit order
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for files in results:
+            if not files:
+                continue
+            for path in files:
+                if path and path not in seen:
+                    seen.add(path)
+                    ordered.append(path)
+                    if len(ordered) >= limit:
+                        return ordered
+        return ordered
+
     async def fetch_compare_diff(
         self, repo: str, base_sha: str, head_sha: str, project: str = "",
     ) -> Diff:

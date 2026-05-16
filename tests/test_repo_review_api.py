@@ -95,6 +95,32 @@ class TestManualRepoReviewQueueing:
         assert resp.status_code == 200
         assert resp.json()["ref"] == "main"
 
+    def test_max_files_is_clamped_to_hard_ceiling(self, client):
+        """Caller-supplied max_files must be clamped to HARD_MAX_FILES."""
+        from pr_guardian.core.repo_review import HARD_MAX_FILES
+        with (
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=_mock_adapter()),
+            patch("pr_guardian.api.review.asyncio.create_task"),
+        ):
+            resp = client.post(
+                "/api/review/repo",
+                json={"repo": "owner/repo", "platform": "github", "max_files": 999999},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["max_files"] == HARD_MAX_FILES
+
+    def test_selection_recent_accepted(self, client):
+        with (
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=_mock_adapter()),
+            patch("pr_guardian.api.review.asyncio.create_task"),
+        ):
+            resp = client.post(
+                "/api/review/repo",
+                json={"repo": "owner/repo", "platform": "github", "selection": "recent"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["selection"] == "recent"
+
 
 class TestRepoReviewBackground:
     """Background task must surface diff-build errors via DB, not silently discard them."""
@@ -139,9 +165,11 @@ class TestRepoReviewBackground:
         mock_storage.update_review_stage = AsyncMock()
         adapter = _mock_adapter()
         empty_meta = {
+            "selection": "all", "requested_max_files": 300,
             "files_listed": 0, "files_skipped_binary": 0,
             "files_included": 0, "files_truncated": 0,
-            "files_read_errors": 0, "total_bytes": 0,
+            "files_read_errors": 0, "selection_capped": False,
+            "total_bytes": 0,
         }
 
         with (

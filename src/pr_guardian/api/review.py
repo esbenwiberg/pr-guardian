@@ -12,8 +12,10 @@ from pydantic import BaseModel, ConfigDict
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
+    HARD_MAX_FILES,
     build_synthetic_pr,
     build_repo_diff,
+    clamp_max_files,
 )
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.factory import create_adapter, create_github_adapter
@@ -170,6 +172,7 @@ class RepoReviewRequest(BaseModel):
     platform: str = "github"
     ref: str = "HEAD"
     max_files: int = REPO_REVIEW_MAX_FILES
+    selection: Literal["all", "recent"] = "all"
     pat_name: str | None = None
 
 
@@ -178,16 +181,19 @@ class RepoReviewResponse(BaseModel):
     repo: str
     platform: str
     ref: str
+    selection: str
+    max_files: int
     note: str = (
-        "Repo review runs the full PR-review pipeline across every file in the "
-        "repo at the given ref. Intended for small repos only — cost and duration "
-        "scale with total code size."
+        "Repo review runs the full PR-review pipeline across every selected "
+        "file in the repo at the given ref. Use selection='recent' on larger "
+        "repos to focus on the most recently changed files."
     )
 
 
 async def _run_repo_review_background(
     repo: str, platform: str, adapter, ref: str, max_files: int,
     *,
+    selection: str = "all",
     pat_name: str | None = None,
 ) -> None:
     """Run a full repo review in the background.
@@ -223,11 +229,46 @@ async def _run_repo_review_background(
             log.warning("repo_review_db_create_failed", error=str(e))
 
     try:
-        diff, meta = await build_repo_diff(adapter, repo, ref=ref, max_files=max_files)
+        diff, meta = await build_repo_diff(
+            adapter, repo, ref=ref,
+            selection=selection,  # type: ignore[arg-type]
+            max_files=max_files,
+        )
         log.info(
             "repo_review_diff_built",
-            repo=repo, files_included=meta["files_included"], total_bytes=meta["total_bytes"],
+            repo=repo,
+            selection=selection,
+            files_included=meta["files_included"],
+            files_truncated=meta["files_truncated"],
+            files_skipped_binary=meta["files_skipped_binary"],
+            selection_capped=meta["selection_capped"],
+            total_bytes=meta["total_bytes"],
         )
+
+        # Surface the meta back to the UI via SSE + stage detail so reviewers
+        # can see how many files were truncated / skipped / capped.
+        bits = [f"{meta['files_included']} files"]
+        if meta["selection_capped"]:
+            bits.append("capped")
+        if meta["files_truncated"]:
+            bits.append(f"{meta['files_truncated']} truncated")
+        if meta["files_skipped_binary"]:
+            bits.append(f"{meta['files_skipped_binary']} binaries skipped")
+        detail = ", ".join(bits)
+        if storage and review_db_id:
+            try:
+                await storage.update_review_stage(review_db_id, "repo_diff_built", detail)
+            except Exception:
+                pass
+        event_bus.publish(ReviewEvent(
+            review_id=str(review_db_id) if review_db_id else "",
+            pr_id=pr.pr_id,
+            repo=pr.repo,
+            stage="repo_diff_built",
+            detail=detail,
+            extra=meta,
+        ))
+
         await run_review(
             pr,
             adapter,
@@ -286,10 +327,20 @@ async def manual_repo_review(req: RepoReviewRequest):
         except Exception as e:
             raise HTTPException(status_code=400, detail=str(e))
 
-    log.info("manual_repo_review_started", platform=req.platform, repo=repo, ref=req.ref)
+    max_files = clamp_max_files(req.max_files)
+
+    log.info(
+        "manual_repo_review_started",
+        platform=req.platform, repo=repo, ref=req.ref,
+        selection=req.selection, max_files=max_files,
+        clamped=(max_files != req.max_files),
+    )
 
     asyncio.create_task(
-        _run_repo_review_background(repo, req.platform, adapter, req.ref, req.max_files, pat_name=req.pat_name)
+        _run_repo_review_background(
+            repo, req.platform, adapter, req.ref, max_files,
+            selection=req.selection, pat_name=req.pat_name,
+        )
     )
 
     return RepoReviewResponse(
@@ -297,6 +348,8 @@ async def manual_repo_review(req: RepoReviewRequest):
         repo=repo,
         platform=req.platform,
         ref=req.ref,
+        selection=req.selection,
+        max_files=max_files,
     )
 
 

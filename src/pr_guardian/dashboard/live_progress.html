@@ -27,6 +27,7 @@
   </header>
 
   <div class="max-w-[720px] mx-auto px-6 pt-[80px]">
+    <div id="lp-meta-banner" class="hidden mb-4 p-3 rounded border border-slate-700 bg-slate-800/40 text-xs text-slate-300 font-mono"></div>
     <div id="lp-pipeline" class="space-y-1.5 font-mono text-sm">
       <!-- rendered by JS -->
     </div>
@@ -134,11 +135,30 @@
     return null;
   }
 
+  function renderMetaBanner(extra, detail) {
+    const el = document.getElementById('lp-meta-banner');
+    if (!el || !extra) return;
+    const parts = [];
+    if (extra.selection) parts.push(`selection: <span class="text-slate-100">${extra.selection}</span>`);
+    if (extra.files_included != null) parts.push(`included: <span class="text-slate-100">${extra.files_included}</span>`);
+    if (extra.files_truncated) parts.push(`<span class="text-amber-400">truncated: ${extra.files_truncated}</span>`);
+    if (extra.files_skipped_binary) parts.push(`skipped: ${extra.files_skipped_binary}`);
+    if (extra.files_read_errors) parts.push(`<span class="text-red-400">read errors: ${extra.files_read_errors}</span>`);
+    if (extra.selection_capped) parts.push(`<span class="text-amber-400">capped at ${extra.requested_max_files}</span>`);
+    if (extra.total_bytes != null) parts.push(`bytes: ${extra.total_bytes.toLocaleString()}`);
+    el.innerHTML = `<span class="text-slate-500">repo diff · </span>${parts.join(' · ')}`;
+    el.classList.remove('hidden');
+  }
+
   function applyEvent(ev) {
     if (!ev || ev.review_id !== REVIEW_ID) return;
     titleEl.textContent = ev.repo ? `${ev.repo} · ${ev.pr_id || ''}`.trim() : (titleEl.textContent || 'running…');
     const stage = (ev.stage || '').toLowerCase();
     if (!stage) return;
+    if (stage === 'repo_diff_built') {
+      renderMetaBanner(ev.extra, ev.detail);
+      return;
+    }
     if (stage in STATE) {
       const isComplete = ev.detail?.toLowerCase().includes('done') || ev.detail?.toLowerCase().includes('complete');
       STATE[stage] = { status: isComplete ? 'complete' : 'running', detail: ev.detail || '', duration: null };

@@ -1,12 +1,20 @@
 """Whole-repo review: runs the PR review pipeline against a full repo snapshot.
 
-Treats the repo (at a given ref) as a synthetic PR where every file is "added".
-This reuses the hardened PR review pipeline but lets users ad-hoc review a
-smaller repository end-to-end.
+Treats the repo (at a given ref) as a synthetic PR where every selected file is
+"added". Reuses the hardened PR review pipeline but lets users ad-hoc review a
+smaller (or recently-active slice of a) repository end-to-end.
 
-Only suitable for small repos — token budget grows linearly with total code size.
+Two selection modes:
+
+- ``all``    — walk the full tree, fail loudly if it's larger than ``max_files``.
+- ``recent`` — walk recent commits and pick the N most recently touched files.
+
+Only suitable for relatively small slices — token budget grows linearly with
+total code size.
 """
 from __future__ import annotations
+
+from typing import Literal
 
 import structlog
 
@@ -21,6 +29,11 @@ DEFAULT_MAX_FILES = 300
 DEFAULT_MAX_BYTES_PER_FILE = 200_000
 DEFAULT_MAX_TOTAL_BYTES = 4_000_000
 
+# Server-side ceiling. Caller-supplied max_files is clamped to this value.
+HARD_MAX_FILES = 2000
+
+SelectionMode = Literal["all", "recent"]
+
 # Binary/generated paths we never want to feed to agents.
 _SKIP_SUFFIXES = (
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg",
@@ -34,6 +47,13 @@ _SKIP_DIR_PARTS = (
     "node_modules/", "dist/", "build/", ".next/", ".git/", "vendor/",
     "__pycache__/", ".venv/", ".mypy_cache/", ".pytest_cache/",
 )
+
+
+def clamp_max_files(requested: int) -> int:
+    """Clamp a caller-supplied max_files to [1, HARD_MAX_FILES]."""
+    if requested <= 0:
+        return DEFAULT_MAX_FILES
+    return min(requested, HARD_MAX_FILES)
 
 
 def _should_skip(path: str) -> bool:
@@ -51,29 +71,73 @@ def _synthesize_patch(content: str) -> str:
     return header + "\n".join(f"+{line}" for line in lines)
 
 
+async def _select_candidates(
+    adapter: PlatformAdapter,
+    repo: str,
+    ref: str,
+    selection: SelectionMode,
+    max_files: int,
+) -> tuple[list[str], int, bool]:
+    """Pick the file paths we'll feed to the diff.
+
+    Returns (candidates, total_listed, capped_in_selection).
+
+    For ``all``: lists the full tree, filters, and *raises* if the survivors
+    exceed ``max_files`` — we don't want to silently review a random slice of a
+    huge repo.
+
+    For ``recent``: walks the most recent commits and returns up to ``max_files``
+    most-recently-touched paths. ``capped_in_selection`` is True iff we hit the
+    cap (i.e. there were more recently-changed files than ``max_files``).
+    """
+    if selection == "recent":
+        # Ask the adapter for up to max_files recently-changed paths. The
+        # adapter is responsible for ordering newest-first.
+        paths = await adapter.list_recently_changed_files(
+            repo, ref=ref, limit=max_files,
+        )
+        filtered = [p for p in paths if not _should_skip(p)]
+        capped = len(filtered) >= max_files
+        return filtered[:max_files], len(paths), capped
+
+    # "all" — load the full tree
+    all_paths = await adapter.list_repo_files(repo, ref=ref)
+    candidates = [p for p in all_paths if not _should_skip(p)]
+    if len(candidates) > max_files:
+        raise ValueError(
+            f"Repo has {len(candidates)} reviewable files (limit: {max_files}). "
+            f"Too large for repo review — try selection='recent' or a "
+            f"narrower scope."
+        )
+    return candidates, len(all_paths), False
+
+
 async def build_repo_diff(
     adapter: PlatformAdapter,
     repo: str,
     ref: str = "HEAD",
     *,
+    selection: SelectionMode = "all",
     max_files: int = DEFAULT_MAX_FILES,
     max_bytes_per_file: int = DEFAULT_MAX_BYTES_PER_FILE,
     max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
 ) -> tuple[Diff, dict]:
-    """Walk the repo tree at ``ref`` and produce a synthetic Diff.
+    """Build a synthetic Diff covering the selected files.
 
     Returns (diff, metadata). ``metadata`` reports counts for UI feedback.
-    Raises ValueError if the repo exceeds file or byte caps.
+    Raises ValueError if the repo exceeds file or byte caps (only in
+    ``all`` mode — ``recent`` is bounded by definition).
     """
-    all_paths = await adapter.list_repo_files(repo, ref=ref)
-    candidates = [p for p in all_paths if not _should_skip(p)]
-    skipped = len(all_paths) - len(candidates)
-
-    if len(candidates) > max_files:
-        raise ValueError(
-            f"Repo has {len(candidates)} reviewable files (limit: {max_files}). "
-            f"Too large for repo review — use PR reviews or scans instead."
-        )
+    candidates, total_listed, capped = await _select_candidates(
+        adapter, repo, ref, selection, max_files,
+    )
+    skipped_binary = total_listed - (
+        len(candidates) if selection == "all" else total_listed
+    )
+    # For "recent" mode, skipped_binary is calculated differently:
+    # adapter returns raw paths, we filter to candidates, the difference is skips.
+    if selection == "recent":
+        skipped_binary = total_listed - len(candidates)
 
     diff_files: list[DiffFile] = []
     total_bytes = 0
@@ -109,11 +173,14 @@ async def build_repo_diff(
         ))
 
     meta = {
-        "files_listed": len(all_paths),
-        "files_skipped_binary": skipped,
+        "selection": selection,
+        "requested_max_files": max_files,
+        "files_listed": total_listed,
+        "files_skipped_binary": skipped_binary,
         "files_included": len(diff_files),
         "files_truncated": truncated_files,
         "files_read_errors": read_errors,
+        "selection_capped": capped,
         "total_bytes": total_bytes,
     }
     return Diff(files=diff_files), meta
@@ -138,4 +205,3 @@ def build_synthetic_pr(
         head_commit_sha="",
         org="",
     )
-

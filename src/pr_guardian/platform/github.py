@@ -238,6 +238,71 @@ class GitHubAdapter:
         tree = resp.json().get("tree", [])
         return [item["path"] for item in tree if item.get("type") == "blob"]
 
+    async def list_recently_changed_files(
+        self, repo: str, ref: str = "HEAD", limit: int = 300,
+    ) -> list[str]:
+        """Walk recent commits on ``ref`` and return up to ``limit`` unique paths.
+
+        Strategy: list commits newest-first, fetch each commit's file list in
+        parallel (concurrency-limited), accumulate unique paths in commit order.
+        Stops early once we have enough paths.
+        """
+        import asyncio
+
+        client = self._get_client()
+        commit_scan_limit = max(200, limit * 2)
+        per_page = 100
+
+        # 1. List commit SHAs newest-first
+        shas: list[str] = []
+        page = 1
+        params_base: dict = {"per_page": per_page}
+        if ref and ref != "HEAD":
+            params_base["sha"] = ref
+        while len(shas) < commit_scan_limit:
+            params = dict(params_base, page=page)
+            resp = await client.get(f"/repos/{repo}/commits", params=params)
+            resp.raise_for_status()
+            batch = resp.json()
+            if not batch:
+                break
+            shas.extend(c.get("sha", "") for c in batch if c.get("sha"))
+            if len(batch) < per_page:
+                break
+            page += 1
+        shas = shas[:commit_scan_limit]
+
+        # 2. Fetch detail (with files[]) in parallel, bounded concurrency
+        sem = asyncio.Semaphore(8)
+        results: list[list[str] | None] = [None] * len(shas)
+
+        async def _fetch(idx: int, sha: str) -> None:
+            async with sem:
+                try:
+                    r = await client.get(f"/repos/{repo}/commits/{sha}")
+                    r.raise_for_status()
+                    files = r.json().get("files", []) or []
+                    results[idx] = [f.get("filename", "") for f in files if f.get("filename")]
+                except Exception as e:
+                    log.debug("github_commit_detail_failed", sha=sha, error=str(e))
+                    results[idx] = []
+
+        await asyncio.gather(*(_fetch(i, s) for i, s in enumerate(shas)))
+
+        # 3. Dedupe in commit order
+        seen: set[str] = set()
+        ordered: list[str] = []
+        for files in results:
+            if not files:
+                continue
+            for path in files:
+                if path and path not in seen:
+                    seen.add(path)
+                    ordered.append(path)
+                    if len(ordered) >= limit:
+                        return ordered
+        return ordered
+
     async def fetch_compare_diff(
         self, repo: str, base_sha: str, head_sha: str, project: str = "",
     ) -> Diff:

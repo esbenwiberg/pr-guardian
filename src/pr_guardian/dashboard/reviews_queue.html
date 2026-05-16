@@ -21,16 +21,45 @@
 
     <!-- Paste-URL bar -->
     <div class="mb-5">
-      <form id="trigger-form" class="flex items-center gap-2">
-        <div class="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/60 focus-within:border-indigo-400/60">
-          <svg class="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
-          <input id="trigger-url" type="text"
-                 class="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 outline-none"
-                 placeholder="Paste a PR URL  ·  or  owner/repo  for a repo scan"
-                 autocomplete="off"/>
-          <span id="trigger-error" class="hidden text-xs text-red-400"></span>
+      <form id="trigger-form" class="flex flex-col gap-2">
+        <div class="flex items-center gap-2">
+          <div class="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/60 focus-within:border-indigo-400/60">
+            <svg class="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
+            <input id="trigger-url" type="text"
+                   class="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 outline-none"
+                   placeholder="Paste a PR URL  ·  or  owner/repo  (GitHub) / org/project/repo (ADO)  for a repo scan"
+                   autocomplete="off"/>
+            <span id="trigger-error" class="hidden text-xs text-red-400"></span>
+          </div>
+          <button type="submit" id="trigger-btn" class="btn btn-primary text-sm">Review &rarr;</button>
         </div>
-        <button type="submit" id="trigger-btn" class="btn btn-primary text-sm">Review &rarr;</button>
+        <div id="scan-opts" class="hidden flex flex-wrap items-center gap-3 text-xs text-slate-400 pl-1">
+          <span class="text-slate-500">scan options:</span>
+          <label class="flex items-center gap-1">
+            platform
+            <select id="scan-platform" class="form-select text-xs py-0.5 px-1.5 bg-slate-900 border-slate-700">
+              <option value="github">GitHub</option>
+              <option value="ado">Azure DevOps</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1">
+            files
+            <select id="scan-max-files" class="form-select text-xs py-0.5 px-1.5 bg-slate-900 border-slate-700">
+              <option value="100">100</option>
+              <option value="300" selected>300</option>
+              <option value="500">500</option>
+              <option value="1000">1000</option>
+              <option value="2000">2000 (max)</option>
+            </select>
+          </label>
+          <label class="flex items-center gap-1">
+            selection
+            <select id="scan-selection" class="form-select text-xs py-0.5 px-1.5 bg-slate-900 border-slate-700">
+              <option value="all">All (fails if too big)</option>
+              <option value="recent">Recently changed</option>
+            </select>
+          </label>
+        </div>
       </form>
     </div>
 
@@ -279,20 +308,55 @@
     }
   }
 
+  // Detect "scan-like" input and reveal the scan options panel
+  function looksLikeScan(url) {
+    if (!url) return false;
+    if (/\/pull\//.test(url)) return false;
+    if (/\/pullrequest\//.test(url)) return false;
+    if (/^https?:\/\/github\.com\/[^/]+\/[^/]+\/?$/i.test(url)) return true;
+    if (/^https?:\/\/dev\.azure\.com\/[^/]+\/[^/]+\/_git\/[^/]+\/?$/i.test(url)) return true;
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url)) return true; // ADO triple
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url)) return true; // owner/repo
+    return false;
+  }
+  function detectPlatformDefault(url) {
+    if (/dev\.azure\.com/.test(url)) return 'ado';
+    if (/github\.com/.test(url)) return 'github';
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url)) return 'ado';
+    return 'github';
+  }
+  const triggerUrlEl = document.getElementById('trigger-url');
+  const scanOptsEl = document.getElementById('scan-opts');
+  const platformSelect = document.getElementById('scan-platform');
+  triggerUrlEl.addEventListener('input', () => {
+    const url = triggerUrlEl.value.trim();
+    const isScan = looksLikeScan(url);
+    scanOptsEl.classList.toggle('hidden', !isScan);
+    if (isScan) {
+      platformSelect.value = detectPlatformDefault(url);
+    }
+  });
+
   // Trigger form
   document.getElementById('trigger-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     errEl.classList.add('hidden'); errEl.textContent = '';
-    const url = document.getElementById('trigger-url').value.trim();
+    const url = triggerUrlEl.value.trim();
     if (!url) { errEl.textContent = 'Enter a PR URL or owner/repo.'; errEl.classList.remove('hidden'); return; }
-    const isRepoShort = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url);
-    const mode = isRepoShort ? 'scan' : 'pr';
+    const isScan = looksLikeScan(url);
+    const mode = isScan ? 'scan' : 'pr';
+    const body = { url, mode };
+    if (isScan) {
+      body.platform = platformSelect.value;
+      body.max_files = parseInt(document.getElementById('scan-max-files').value, 10);
+      body.selection = document.getElementById('scan-selection').value;
+    }
     const btn = document.getElementById('trigger-btn');
     btn.disabled = true; btn.textContent = 'Triggering…';
     try {
       const r = await fetch('/api/reviews/trigger', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, mode }),
+        body: JSON.stringify(body),
       });
       const data = await r.json();
       if (!r.ok) {
