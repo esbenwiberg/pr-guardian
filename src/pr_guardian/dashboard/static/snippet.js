@@ -1,22 +1,7 @@
-/**
- * snippet.js — shared hunk renderer for review_detail and human_wizard.
- *
- * Exports:
- *   fetchSnippet(reviewId, path, line, context=3) → Promise<hunkData|null>
- *   renderSnippet(container, hunkData)            → void
- *
- * renderSnippet uses the .hunk CSS class defined in human_wizard.html.
- * It is DOM-only — no framework dependency.
- * On failure (404, empty hunk, network error) it renders a muted fallback
- * line rather than throwing.
- */
-
 'use strict';
 
-/**
- * Fetch a diff hunk from the dashboard API.
- * Returns the parsed JSON body on success, null on any failure.
- */
+// fetchSnippet(reviewId, path, line, context=3) → Promise<hunkData|null>
+// renderSnippet(container, hunkData) — DOM-only, reuses .hunk CSS, never throws.
 async function fetchSnippet(reviewId, path, line, context = 3) {
   try {
     const url = `/api/dashboard/reviews/${encodeURIComponent(reviewId)}/diff`
@@ -29,11 +14,6 @@ async function fetchSnippet(reviewId, path, line, context = 3) {
   }
 }
 
-/**
- * Render a hunk into container using .hunk / .hunk-header / .row CSS primitives.
- * If hunkData is null or has no lines, appends a muted "snippet unavailable" line.
- * Calling again on a container that already has a .hunk removes it (toggle).
- */
 function renderSnippet(container, hunkData) {
   const existing = container.querySelector('.hunk');
   if (existing) {
@@ -74,7 +54,7 @@ function renderSnippet(container, hunkData) {
 
     const marker = document.createElement('span');
     marker.className = 'marker';
-    marker.textContent = ln.marker === '+' ? '+' : ln.marker === '-' ? '-' : ' ';
+    marker.textContent = ln.marker;
 
     const content = document.createElement('span');
     content.className = 'content';

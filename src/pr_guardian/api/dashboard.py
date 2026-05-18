@@ -147,15 +147,7 @@ async def dashboard_review_detail(review_id: uuid.UUID):
 
 
 def _parse_patch_lines(patch: str) -> list[dict]:
-    """Parse a unified diff patch string into a flat list of annotated lines.
-
-    Each entry has:
-      new_ln  — new-file line number (None for pure deletions)
-      old_ln  — old-file line number (None for pure additions)
-      marker  — '+', '-', or ' '
-      content — line text without the leading marker character
-      type    — 'add', 'del', or 'ctx'
-    """
+    """Parse unified diff patch into lines with new_ln/old_ln/marker/content/type fields."""
     result: list[dict] = []
     new_ln = old_ln = 0
     for raw in patch.splitlines():

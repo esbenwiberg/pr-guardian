@@ -626,7 +626,6 @@ async function toggleSnippet(btn) {
   const area = card && card.querySelector('.snippet-area');
   if (!area) return;
 
-  // If snippet is already rendered, toggle it off
   if (area.querySelector('.hunk') || area.querySelector('[data-snippet-fallback]')) {
     area.innerHTML = '';
     btn.textContent = 'Show code';
