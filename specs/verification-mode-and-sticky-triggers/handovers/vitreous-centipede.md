@@ -105,3 +105,9 @@ the functions are on `window` (no import required).
   added (out of scope for this brief). Pod 5 or a later pod may want to add
   a `(review_id, head_sha)` cache similar to `_capability_cache` in the same
   file.
+- **`.hunk` CSS is in `styles.css`**: The `.hunk` primitive was originally
+  inline-only in `human_wizard.html` using CSS variables. A concrete-value
+  equivalent was added to `static/styles.css` so the snippet disclosure
+  renders styled on `review_detail.html`. Pod 5 wiring `snippet.js` into
+  `human_wizard.html` can rely on `styles.css` for `.hunk` styling instead
+  of the inline styles (or keep both — specificity is equivalent).
