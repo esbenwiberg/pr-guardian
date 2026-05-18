@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+from pr_guardian.decision.types import StickyTrigger
 from pr_guardian.models.context import RiskTier, RepoRiskClass, TrustTier
 from pr_guardian.models.findings import AgentResult
 
@@ -41,12 +42,12 @@ class ReviewResult:
     combined_score: float = 0.0
     decision: Decision = Decision.HUMAN_REVIEW
 
-    override_reasons: list[str] = field(default_factory=list)
+    sticky_triggers: list[StickyTrigger] = field(default_factory=list)
+    finding_reasons: list[str] = field(default_factory=list)
     summary: str = ""
     pipeline_log: list[dict] = field(default_factory=list)
 
     trust_tier: TrustTier | None = None
-    trust_tier_reasons: list[str] = field(default_factory=list)
     trust_tier_files: dict[str, str] = field(default_factory=dict)
     reviewer_group_override: str | None = None
     escalated_from: str | None = None

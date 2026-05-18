@@ -70,12 +70,22 @@
       </div>
     </div>
 
-    <!-- Override reasons (why human review is required) -->
-    <div id="override-reasons-section" style="display:none" class="mb-6">
+    <!-- Sticky triggers (structural escalation reasons) -->
+    <div id="sticky-triggers-section" style="display:none" class="mb-4">
       <div class="card border-l-[3px] border-l-orange-400/50 bg-orange-400/[0.03]">
         <div class="px-5 py-3.5">
-          <div class="text-sm font-semibold text-orange-400 mb-2">Why This PR Needs Human Review</div>
-          <ul class="space-y-1.5 text-sm text-slate-300" id="override-reasons-list"></ul>
+          <div class="text-sm font-semibold text-orange-400 mb-2">Structural Triggers</div>
+          <ul class="space-y-2 text-sm text-slate-300" id="sticky-triggers-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Finding reasons (finding-derived escalation reasons) -->
+    <div id="finding-reasons-section" style="display:none" class="mb-6">
+      <div class="card border-l-[3px] border-l-amber-400/50 bg-amber-400/[0.03]">
+        <div class="px-5 py-3.5">
+          <div class="text-sm font-semibold text-amber-400 mb-2">Finding Reasons</div>
+          <ul class="space-y-1.5 text-sm text-slate-300" id="finding-reasons-list"></ul>
         </div>
       </div>
     </div>
@@ -261,13 +271,24 @@ function render(d) {
     document.getElementById('summary-text').textContent = d.summary;
   }
 
-  // Override reasons
-  const overrideReasons = d.override_reasons || [];
-  if (overrideReasons.length > 0) {
-    document.getElementById('override-reasons-section').style.display = '';
-    document.getElementById('override-reasons-list').innerHTML = overrideReasons
+  // Sticky triggers (structural)
+  const stickyTriggers = d.sticky_triggers || [];
+  if (stickyTriggers.length > 0) {
+    document.getElementById('sticky-triggers-section').style.display = '';
+    document.getElementById('sticky-triggers-list').innerHTML = stickyTriggers
+      .map(t => `<li class="flex flex-col gap-0.5">
+        <span class="font-medium text-orange-300">${esc(t.label)}</span>
+        <span class="text-slate-400 text-xs">${esc(t.reason)}</span>
+      </li>`).join('');
+  }
+
+  // Finding reasons (finding-derived)
+  const findingReasons = d.finding_reasons || [];
+  if (findingReasons.length > 0) {
+    document.getElementById('finding-reasons-section').style.display = '';
+    document.getElementById('finding-reasons-list').innerHTML = findingReasons
       .map(r => `<li class="flex items-start gap-2">
-        <span class="text-orange-400 mt-0.5 shrink-0">&#9679;</span>
+        <span class="text-amber-400 mt-0.5 shrink-0">&#9679;</span>
         <span>${esc(r)}</span>
       </li>`).join('');
   }
@@ -407,9 +428,11 @@ function renderFinding(ai, fi, f, agentName) {
               <div class="text-xs text-emerald-400 leading-relaxed">${esc(f.suggestion)}</div>
             </div>
           </div>` : ''}
+          ${f.file && f.line ? `<div class="snippet-area mt-2"></div>` : ''}
         </div>
       </div>
       <div class="flex items-center gap-2 px-4 py-3 ml-7" data-dismiss-area="${key}">
+        ${f.file && f.line ? `<button class="text-xs px-2 py-1 rounded border border-slate-600/50 bg-slate-800/50 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors" data-action="show-code" data-file="${esc(f.file)}" data-line="${f.line}" onclick="event.stopPropagation(); toggleSnippet(this)">Show code</button>` : ''}
         ${isDismissed ? renderDismissedBadge(d) : renderDismissButton(f.id)}
       </div>
     </div>`;
@@ -594,6 +617,25 @@ function toggleSuggestion(btn) {
   const box = btn.nextElementSibling;
   const isHidden = box.classList.toggle('hidden');
   btn.innerHTML = isHidden ? 'Show suggestion &#9656;' : 'Hide suggestion &#9662;';
+}
+
+async function toggleSnippet(btn) {
+  const file = btn.dataset.file;
+  const line = parseInt(btn.dataset.line, 10);
+  const card = btn.closest('.finding-card');
+  const area = card && card.querySelector('.snippet-area');
+  if (!area) return;
+
+  if (area.querySelector('.hunk') || area.querySelector('[data-snippet-fallback]')) {
+    area.innerHTML = '';
+    btn.textContent = 'Show code';
+    return;
+  }
+
+  btn.textContent = 'loading…';
+  const data = await fetchSnippet(REVIEW_ID, file, line);
+  renderSnippet(area, data);
+  btn.textContent = 'Hide code';
 }
 
 // --- Export ---
@@ -907,6 +949,7 @@ function formatTimeShort(iso) {
 // Init
 loadReview();
 </script>
+<script src="/static/snippet.js"></script>
 <script src="/static/command-palette.js"></script>
 </body>
 </html>

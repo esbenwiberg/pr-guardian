@@ -190,6 +190,18 @@
   .loading-title { font-size: 17px; font-weight: 600; color: var(--text); }
   .loading-hint { font-size: 13px; color: var(--muted); margin-top: 4px; text-align: center; max-width: 320px; line-height: 1.55; }
   .loading-phase { font-size: 11px; color: var(--dim); margin-top: 8px; min-height: 1.4em; letter-spacing: 0.04em; }
+
+  /* Trigger cards (Verification chapter) */
+  .trigger-card { padding: 18px 20px; border-radius: 10px; background: rgba(2,6,23,0.4); border: 1px solid var(--border); border-left: 3px solid var(--orange); margin-bottom: 16px; transition: border-color 0.15s, background 0.15s; }
+  .trigger-card.decided-accepted { background: rgba(99,102,241,0.04); border-left-color: var(--green); }
+  .trigger-card.decided-fix { background: rgba(249,115,22,0.04); }
+  .trigger-head { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 10px; }
+  .trigger-icon { font-size: 18px; flex-shrink: 0; line-height: 1.4; }
+  .trigger-info { flex: 1; min-width: 0; }
+  .trigger-label { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+  .trigger-source { font-size: 12.5px; color: var(--muted); }
+  .trigger-reason { font-size: 13.5px; line-height: 1.6; color: #d6dde8; padding-top: 4px; border-top: 1px solid var(--border); margin-bottom: 4px; }
+  .snippet-area-trigger { margin-top: 6px; }
 </style>
 </head>
 <body>
@@ -216,12 +228,16 @@
 <main id="step"></main>
 <footer id="nav"></footer>
 
+<script src="/static/snippet.js"></script>
 <script src="/static/review-helpers.js"></script>
 <script src="/static/viewer-shell.js" defer></script>
 <script>
 const { SEV_ORDER, detectRole, escapeHtml } = window.PRG;
 const PATH_PARTS = window.location.pathname.split('/');
 const REVIEW_ID = PATH_PARTS[PATH_PARTS.indexOf('reviews') + 1];
+const _URL_PARAMS = new URLSearchParams(window.location.search);
+const _FOCUS_PARAM = _URL_PARAMS.get('focus') || '';
+const FOCUS_TRIGGER_KIND = _FOCUS_PARAM.startsWith('trigger:') ? _FOCUS_PARAM.slice(8) : null;
 
 const ROLE_TO_LAYER = {
   PRODUCTION: 'Code', TEST: 'Tests', INFRA: 'Infra', DOCS: 'Docs',
@@ -550,6 +566,8 @@ async function loadAndBuild() {
   window.CAPABILITIES = capabilities;
   window.DECISIONS = decisions;
   window.CAPS_SOURCE = capsData?.source || "fallback_no_call";
+  window.STICKY_TRIGGERS = reviewData.sticky_triggers || [];
+  window.FINDING_REASONS = reviewData.finding_reasons || [];
 }
 </script>
 <script>
@@ -557,6 +575,8 @@ async function loadAndBuild() {
 let decisions, capabilities, stats;
 let nonCleanCaps, cleanCaps, steps;
 let decisionState;
+let triggerState = [];
+let visibleTriggers = [];
 let reviewerComment = "";
 let stepIdx = 0;
 
@@ -569,11 +589,38 @@ function initState() {
   decisionState = decisions.map(d => d.initial_state || "pending");
   nonCleanCaps = capabilities.filter(c => !c.clean);
   cleanCaps = capabilities.filter(c => c.clean);
-  steps = [
-    { kind: "briefing", label: "Briefing" },
-    ...nonCleanCaps.map(c => ({ kind: "capability", capId: c.id, label: c.name })),
-    { kind: "wrap", label: "Wrap-up" }
-  ];
+
+  const stickyTriggers = window.STICKY_TRIGGERS || [];
+  const findingReasons = window.FINDING_REASONS || [];
+  const isVerificationMode = findingReasons.length === 0 && stickyTriggers.length > 0;
+
+  // Trigger-focus mode: show only the trigger matching the ?focus=trigger:{kind} param.
+  visibleTriggers = FOCUS_TRIGGER_KIND
+    ? stickyTriggers.filter(t => t.kind === FOCUS_TRIGGER_KIND)
+    : stickyTriggers;
+
+  triggerState = visibleTriggers.map(() => "pending");
+
+  if (FOCUS_TRIGGER_KIND) {
+    steps = [
+      { kind: "verification", label: "Verification" },
+      { kind: "wrap", label: "Wrap-up" },
+    ];
+    stepIdx = 0;
+  } else if (isVerificationMode) {
+    steps = [
+      { kind: "briefing", label: "Briefing" },
+      { kind: "verification", label: "Verification" },
+      { kind: "wrap", label: "Wrap-up" },
+    ];
+  } else {
+    steps = [
+      { kind: "briefing", label: "Briefing" },
+      ...nonCleanCaps.map(c => ({ kind: "capability", capId: c.id, label: c.name })),
+      { kind: "wrap", label: "Wrap-up" },
+    ];
+  }
+
   if (REVIEW_ID) {
     const r = document.getElementById("hdr-review-link");
     const c = document.getElementById("hdr-chapter-link");
@@ -604,6 +651,9 @@ function isStepDone(idx) {
   if (s.kind === "capability") {
     const decs = decsForCap(s.capId);
     return decs.length === 0 || decs.every(({ i }) => decisionState[i] !== "pending");
+  }
+  if (s.kind === "verification") {
+    return triggerState.length > 0 && triggerState.every(st => st !== "pending");
   }
   return false;
 }
@@ -783,6 +833,109 @@ async function applyDecision(idx, act) {
   decisionState[idx] = act;
 }
 
+const _TRIGGER_ICONS = {
+  new_dep: '🔗', path_risk: '⚠', hotspot: '🔥',
+  trust_tier: '🔒', repo_risk: '🏷', high_diff: '📊',
+};
+
+function renderVerification() {
+  const triggers = visibleTriggers || [];
+  const cardsHtml = triggers.map((t, i) => {
+    const st = triggerState[i];
+    const icon = _TRIGGER_ICONS[t.kind] || '•';
+    const hasFile = t.source && t.source.includes('/') && !t.source.includes('://');
+    const decidedTag = st === 'verified'
+      ? `<span class="decided-tag accepted">✓ acknowledged</span>`
+      : st === 'needs_fix'
+      ? `<span class="decided-tag fix">✎ needs fix</span>`
+      : '';
+    const cls = ['trigger-card'];
+    if (st === 'verified') cls.push('decided-accepted');
+    if (st === 'needs_fix') cls.push('decided-fix');
+    return `<div class="${cls.join(' ')}" data-trigger-idx="${i}">
+      <div class="trigger-head">
+        <span class="trigger-icon">${icon}</span>
+        <div class="trigger-info">
+          <div class="trigger-label">${escapeHtml(t.label)}</div>
+          <div class="trigger-source mono">${escapeHtml(t.source)}</div>
+        </div>
+        ${decidedTag}
+      </div>
+      <div class="trigger-reason">${escapeHtml(t.reason)}</div>
+      ${hasFile ? `<div class="snippet-area-trigger" data-trigger-idx="${i}"></div>` : ''}
+      <div class="concern-actions">
+        <button class="primary ${st === 'verified' ? 'active' : ''}" data-tact="acknowledge" data-trigger-idx="${i}">Acknowledge &amp; Approve</button>
+        <button class="danger ${st === 'needs_fix' ? 'active' : ''}" data-tact="needs_fix" data-trigger-idx="${i}">Needs Fix</button>
+        <span class="concern-actions-right">
+          ${st !== 'pending' ? `<button class="clear" data-tact="clear" data-trigger-idx="${i}">clear</button>` : ''}
+          ${hasFile ? `<button class="ghost" data-tact="show-code" data-trigger-idx="${i}" data-file="${escapeHtml(t.source)}">Show code</button>` : ''}
+        </span>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('step').innerHTML = `
+    <div class="verification-chapter">
+      <div class="eyebrow">Step ${stepIdx + 1} of ${steps.length} · Verification</div>
+      <h1 class="step-title">Dev fixed all findings — nice.</h1>
+      <p class="subtitle">These triggers still need a human eye:</p>
+      ${cardsHtml}
+    </div>`;
+
+  document.querySelectorAll('[data-tact]').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const act = btn.dataset.tact;
+      const idx = parseInt(btn.dataset.triggerIdx, 10);
+
+      if (act === 'show-code') {
+        const file = btn.dataset.file;
+        const area = document.querySelector(`.snippet-area-trigger[data-trigger-idx="${idx}"]`);
+        if (area) {
+          const hunk = await fetchSnippet(REVIEW_ID, file, 1, 5);
+          renderSnippet(area, hunk);
+          btn.textContent = area.querySelector('.hunk') ? 'Hide code' : 'Show code';
+        }
+        return;
+      }
+
+      if (act === 'clear') {
+        triggerState[idx] = 'pending';
+        renderVerification();
+        return;
+      }
+
+      const trigger = (visibleTriggers || [])[idx];
+      if (!trigger) return;
+
+      if (act === 'acknowledge') {
+        try {
+          const resp = await fetch(`/api/dashboard/reviews/${REVIEW_ID}/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ trigger_kind: trigger.kind, trigger_source: trigger.source, user: '' }),
+          });
+          if (!resp.ok) {
+            const text = await resp.text();
+            throw new Error(`HTTP ${resp.status} ${text}`);
+          }
+          triggerState[idx] = 'verified';
+        } catch (err) {
+          alert(`Couldn't save: ${(err && err.message) ? err.message : err}`);
+          return;
+        }
+      } else if (act === 'needs_fix') {
+        triggerState[idx] = 'needs_fix';
+      }
+
+      render();
+      if (triggerState.every(s => s !== 'pending')) {
+        setTimeout(() => { stepIdx = steps.length - 1; render(); window.scrollTo({ top: 0, behavior: 'smooth' }); }, 350);
+      }
+    });
+  });
+}
+
 function renderWrap() {
   const accepted = decisionState.filter(s => s === "accepted").length;
   const fixes    = decisionState.filter(s => s === "fix").length;
@@ -872,6 +1025,9 @@ function renderNav() {
     status = `${decided} of ${decs.length} decided · pending decisions are fine, you can revisit`;
   } else if (s.kind === "briefing") {
     status = `${nonCleanCaps.length} capabilities to walk · ${cleanCaps.length} clean (skipped)`;
+  } else if (s.kind === "verification") {
+    const acted = triggerState.filter(st => st !== "pending").length;
+    status = `${acted} of ${triggerState.length} acknowledged`;
   } else {
     status = "Final step — pick your verdict";
   }
@@ -891,6 +1047,7 @@ function render() {
   const s = steps[stepIdx];
   if (s.kind === "briefing") renderBriefing();
   else if (s.kind === "capability") renderCapability(s.capId);
+  else if (s.kind === "verification") renderVerification();
   else renderWrap();
   renderNav();
 }

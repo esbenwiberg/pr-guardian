@@ -68,14 +68,17 @@ async def _run_review_background(
         return
 
     dismissals: list[dict] | None = None
+    prev_review: dict | None = None
     try:
         from pr_guardian.persistence import storage
+        from pr_guardian.persistence.storage import find_review_by_pr_url
         dismissals = await storage.get_active_dismissals(pr.pr_id, pr.repo, pr.platform.value)
+        prev_review = await find_review_by_pr_url(pr.pr_url)
     except Exception:
         pass
 
     try:
-        await run_review(
+        result = await run_review(
             pr, adapter,
             comment_mode=comment_mode,
             base_url=base_url,
@@ -83,6 +86,19 @@ async def _run_review_background(
             pat_name=pat_name,
             existing_review_db_id=review_db_id,
         )
+        if result is not None and dismissals is not None:
+            from pr_guardian.persistence.storage import infer_fixes, finding_signature as _fsig
+            prev_sigs = {
+                _fsig(f.get("file", ""), f.get("category", ""), ar["agent_name"])
+                for ar in (prev_review or {}).get("agent_results", [])
+                for f in ar.get("findings", [])
+            }
+            current_sigs = {
+                _fsig(f.file, f.category, ar.agent_name)
+                for ar in result.agent_results
+                for f in ar.findings
+            }
+            await infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)
     except Exception as e:
         log.error("background_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 

@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import uuid
+from typing import get_args
 from datetime import datetime, timezone
 
 import structlog
@@ -22,8 +24,9 @@ from pr_guardian.core.events import event_bus
 from pr_guardian.decision.finding_triage import tag_findings_with_triage
 from pr_guardian.llm.factory import create_llm_client
 from pr_guardian.models.pr import Platform, PlatformPR
+from pr_guardian.decision.types import StickyTriggerKind
 from pr_guardian.persistence import storage
-from pr_guardian.persistence.storage import finding_signature
+from pr_guardian.persistence.storage import _hash16, finding_signature
 from pr_guardian.platform.factory import create_adapter, create_github_adapter
 from pr_guardian.wizard.capability_clusterer import (
     FileSummary,
@@ -145,12 +148,60 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     return row
 
 
+def _parse_patch_lines(patch: str) -> list[dict]:
+    """Parse unified diff patch into lines with new_ln/old_ln/marker/content/type fields."""
+    result: list[dict] = []
+    new_ln = old_ln = 0
+    for raw in patch.splitlines():
+        if raw.startswith("@@"):
+            m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
+            if m:
+                old_ln = int(m.group(1))
+                new_ln = int(m.group(2))
+            continue
+        if raw.startswith("\\"):
+            continue
+        if raw.startswith("+"):
+            result.append({"new_ln": new_ln, "old_ln": None, "marker": "+", "content": raw[1:], "type": "add"})
+            new_ln += 1
+        elif raw.startswith("-"):
+            result.append({"new_ln": new_ln, "old_ln": old_ln, "marker": "-", "content": raw[1:], "type": "del"})
+            old_ln += 1
+        else:
+            content = raw[1:] if raw else ""
+            result.append({"new_ln": new_ln, "old_ln": old_ln, "marker": " ", "content": content, "type": "ctx"})
+            new_ln += 1
+            old_ln += 1
+    return result
+
+
+def _extract_hunk(patch: str, target_line: int, context: int) -> list[dict]:
+    """Return lines within [target_line - context, target_line + context] of the new file."""
+    lo, hi = target_line - context, target_line + context
+    out = []
+    for ln in _parse_patch_lines(patch):
+        pos = ln["new_ln"]  # del lines carry the new_ln they belong to (next add/ctx)
+        if lo <= pos <= hi:
+            out.append({
+                "ln": ln["old_ln"] if ln["type"] == "del" else ln["new_ln"],
+                "marker": ln["marker"],
+                "content": ln["content"],
+                "type": ln["type"],
+            })
+    return out
+
+
 @router.get("/reviews/{review_id}/diff")
-async def dashboard_review_diff(review_id: uuid.UUID):
+async def dashboard_review_diff(
+    review_id: uuid.UUID,
+    path: str | None = Query(None, description="Filter to a specific file path"),
+    line: int | None = Query(None, ge=1, description="Target line number in the new file"),
+    context: int = Query(3, ge=0, description="Lines of context around the target line"),
+):
     """Fetch the PR diff for a review on-demand from the platform.
 
-    The patch data is not stored in the DB, so we re-fetch it live from
-    GitHub / ADO using the PR URL recorded on the review row.
+    Without query params: returns all files with their full patches.
+    With path+line: extracts a structured hunk window around target_line ± context.
     """
     row = await storage.get_review(review_id)
     if not row:
@@ -172,6 +223,13 @@ async def dashboard_review_diff(review_id: uuid.UUID):
         diff = await adapter.fetch_diff(pr)
     except Exception as e:
         raise HTTPException(502, f"Failed to fetch diff from platform: {e}")
+
+    if path and line is not None:
+        file_obj = next((f for f in diff.files if f.path == path), None)
+        if not file_obj:
+            raise HTTPException(404, f"File not found in diff: {path}")
+        hunk_lines = _extract_hunk(file_obj.patch or "", line, context)
+        return {"file": path, "line": line, "context": context, "lines": hunk_lines}
 
     return {
         "pr_id": row["pr_id"],
@@ -534,6 +592,39 @@ async def undismiss_finding(dismissal_id: uuid.UUID):
 
 
 # ---------------------------------------------------------------------------
+# Sticky-trigger verification (used by the wizard's Verification chapter)
+# ---------------------------------------------------------------------------
+
+_VALID_TRIGGER_KINDS: frozenset[str] = frozenset(get_args(StickyTriggerKind))
+
+
+class VerifyTriggerRequest(BaseModel):
+    trigger_kind: str
+    trigger_source: str
+    user: str = ""
+
+
+@router.post("/reviews/{review_id}/verify")
+async def verify_trigger(review_id: uuid.UUID, body: VerifyTriggerRequest):
+    """Mark a sticky trigger as verified (acknowledged by a human reviewer).
+
+    Idempotent: posting the same (review_id, trigger_kind, trigger_source) twice
+    is a no-op success.
+    """
+    if body.trigger_kind not in _VALID_TRIGGER_KINDS:
+        raise HTTPException(400, f"Unknown trigger_kind {body.trigger_kind!r}. Must be one of: {sorted(_VALID_TRIGGER_KINDS)}")
+
+    row = await storage.get_review(review_id)
+    if not row:
+        raise HTTPException(404, "Review not found")
+
+    pr_id = row["pr_id"]
+    sig = _hash16(f"{pr_id}::{body.trigger_kind}::{body.trigger_source}")
+    await storage.verify_sticky_trigger(pr_id, body.trigger_kind, body.trigger_source, body.user)
+    return {"verified": True, "signature": sig}
+
+
+# ---------------------------------------------------------------------------
 # Human verdict submission (used by the wizard's final-step buttons)
 # ---------------------------------------------------------------------------
 
@@ -695,10 +786,27 @@ async def re_review(review_id: uuid.UUID, request: Request):
         import traceback
         try:
             from pr_guardian.core.orchestrator import run_re_review
-            await run_re_review(
+            from pr_guardian.persistence.storage import (
+                finding_signature as _fsig,
+                infer_fixes,
+            )
+            result = await run_re_review(
                 pr, adapter, original_review=review,
                 post_comment=True, base_url=base_url,
             )
+            if result is None:
+                return
+            prev_sigs = {
+                _fsig(f.get("file", ""), f.get("category", ""), ar["agent_name"])
+                for ar in review.get("agent_results", [])
+                for f in ar.get("findings", [])
+            }
+            current_sigs = {
+                _fsig(f.file, f.category, ar.agent_name)
+                for ar in result.agent_results
+                for f in ar.findings
+            }
+            await infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)
         except Exception as e:
             log.error("re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
