@@ -4,14 +4,17 @@ from pathlib import Path
 import pytest
 
 from pr_guardian.config.schema import GuardianConfig
-from pr_guardian.decision.engine import check_overrides
+from pr_guardian.decision.engine import check_overrides, decide
 from pr_guardian.decision.types import StickyTrigger
 from pr_guardian.models.context import (
     BlastRadius,
     ChangeProfile,
     RepoRiskClass,
     ReviewContext,
+    RiskTier,
     SecuritySurface,
+    TrustTier,
+    TrustTierResult,
 )
 from pr_guardian.models.findings import (
     AgentResult,
@@ -22,7 +25,7 @@ from pr_guardian.models.findings import (
     Verdict,
 )
 from pr_guardian.models.languages import LanguageMap
-from pr_guardian.models.output import ReviewResult
+from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.models.pr import Diff, Platform, PlatformPR
 
 
@@ -196,3 +199,71 @@ class TestBreakCleanlyInvariant:
         )
         assert t.kind == "new_dep"
         assert t.source == "requests==2.32.3"
+
+
+class TestTrustTierStickyTrigger:
+    """Verify the trust_tier sticky trigger emitted inside decide()."""
+
+    def test_mandatory_human_emits_trust_tier_sticky(self):
+        ctx = _ctx()
+        ttr = TrustTierResult(resolved_tier=TrustTier.MANDATORY_HUMAN)
+        result = decide(
+            context=ctx,
+            agent_results=[],
+            risk_tier=RiskTier.LOW,
+            config=CONFIG,
+            trust_tier_result=ttr,
+        )
+
+        trust_tier_triggers = [t for t in result.sticky_triggers if t.kind == "trust_tier"]
+        assert len(trust_tier_triggers) == 1
+        assert trust_tier_triggers[0].source == TrustTier.MANDATORY_HUMAN.value
+        assert result.decision == Decision.HUMAN_REVIEW
+
+    def test_human_primary_emits_trust_tier_sticky(self):
+        ctx = _ctx()
+        ttr = TrustTierResult(
+            resolved_tier=TrustTier.HUMAN_PRIMARY,
+            reviewer_group_override="security-team",
+        )
+        result = decide(
+            context=ctx,
+            agent_results=[],
+            risk_tier=RiskTier.LOW,
+            config=CONFIG,
+            trust_tier_result=ttr,
+        )
+
+        trust_tier_triggers = [t for t in result.sticky_triggers if t.kind == "trust_tier"]
+        assert len(trust_tier_triggers) == 1
+        assert trust_tier_triggers[0].source == TrustTier.HUMAN_PRIMARY.value
+        assert result.decision == Decision.HUMAN_REVIEW
+        assert result.reviewer_group_override == "security-team"
+
+    def test_ai_only_does_not_emit_trust_tier_sticky(self):
+        ctx = _ctx()
+        ttr = TrustTierResult(resolved_tier=TrustTier.AI_ONLY)
+        result = decide(
+            context=ctx,
+            agent_results=[],
+            risk_tier=RiskTier.LOW,
+            config=CONFIG,
+            trust_tier_result=ttr,
+        )
+
+        assert all(t.kind != "trust_tier" for t in result.sticky_triggers)
+        assert result.decision == Decision.AUTO_APPROVE
+
+    def test_spot_check_does_not_emit_trust_tier_sticky(self):
+        ctx = _ctx()
+        ttr = TrustTierResult(resolved_tier=TrustTier.SPOT_CHECK)
+        result = decide(
+            context=ctx,
+            agent_results=[],
+            risk_tier=RiskTier.LOW,
+            config=CONFIG,
+            trust_tier_result=ttr,
+        )
+
+        assert all(t.kind != "trust_tier" for t in result.sticky_triggers)
+        assert result.decision == Decision.AUTO_APPROVE
