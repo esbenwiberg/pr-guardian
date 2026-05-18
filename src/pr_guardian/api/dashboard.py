@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import os
 import re
 import uuid
+from typing import get_args
 from datetime import datetime, timezone
 
 import structlog
@@ -24,8 +24,9 @@ from pr_guardian.core.events import event_bus
 from pr_guardian.decision.finding_triage import tag_findings_with_triage
 from pr_guardian.llm.factory import create_llm_client
 from pr_guardian.models.pr import Platform, PlatformPR
+from pr_guardian.decision.types import StickyTriggerKind
 from pr_guardian.persistence import storage
-from pr_guardian.persistence.storage import finding_signature
+from pr_guardian.persistence.storage import _hash16, finding_signature
 from pr_guardian.platform.factory import create_adapter, create_github_adapter
 from pr_guardian.wizard.capability_clusterer import (
     FileSummary,
@@ -594,7 +595,7 @@ async def undismiss_finding(dismissal_id: uuid.UUID):
 # Sticky-trigger verification (used by the wizard's Verification chapter)
 # ---------------------------------------------------------------------------
 
-_VALID_TRIGGER_KINDS = {"new_dep", "path_risk", "hotspot", "trust_tier", "repo_risk", "high_diff"}
+_VALID_TRIGGER_KINDS: frozenset[str] = frozenset(get_args(StickyTriggerKind))
 
 
 class VerifyTriggerRequest(BaseModel):
@@ -618,7 +619,7 @@ async def verify_trigger(review_id: uuid.UUID, body: VerifyTriggerRequest):
         raise HTTPException(404, "Review not found")
 
     pr_id = row["pr_id"]
-    sig = hashlib.sha256(f"{pr_id}::{body.trigger_kind}::{body.trigger_source}".encode()).hexdigest()[:16]
+    sig = _hash16(f"{pr_id}::{body.trigger_kind}::{body.trigger_source}")
     await storage.verify_sticky_trigger(pr_id, body.trigger_kind, body.trigger_source, body.user)
     return {"verified": True, "signature": sig}
 

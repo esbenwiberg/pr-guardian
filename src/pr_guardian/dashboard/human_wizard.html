@@ -576,6 +576,7 @@ let decisions, capabilities, stats;
 let nonCleanCaps, cleanCaps, steps;
 let decisionState;
 let triggerState = [];
+let visibleTriggers = [];
 let reviewerComment = "";
 let stepIdx = 0;
 
@@ -594,11 +595,11 @@ function initState() {
   const isVerificationMode = findingReasons.length === 0 && stickyTriggers.length > 0;
 
   // Trigger-focus mode: show only the trigger matching the ?focus=trigger:{kind} param.
-  window.VISIBLE_TRIGGERS = FOCUS_TRIGGER_KIND
+  visibleTriggers = FOCUS_TRIGGER_KIND
     ? stickyTriggers.filter(t => t.kind === FOCUS_TRIGGER_KIND)
     : stickyTriggers;
 
-  triggerState = (window.VISIBLE_TRIGGERS || []).map(() => "pending");
+  triggerState = visibleTriggers.map(() => "pending");
 
   if (FOCUS_TRIGGER_KIND) {
     steps = [
@@ -838,7 +839,7 @@ const _TRIGGER_ICONS = {
 };
 
 function renderVerification() {
-  const triggers = window.VISIBLE_TRIGGERS || [];
+  const triggers = visibleTriggers || [];
   const cardsHtml = triggers.map((t, i) => {
     const st = triggerState[i];
     const icon = _TRIGGER_ICONS[t.kind] || '•';
@@ -904,7 +905,7 @@ function renderVerification() {
         return;
       }
 
-      const trigger = (window.VISIBLE_TRIGGERS || [])[idx];
+      const trigger = (visibleTriggers || [])[idx];
       if (!trigger) return;
 
       if (act === 'acknowledge') {
