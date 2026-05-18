@@ -68,9 +68,12 @@ async def _run_review_background(
         return
 
     dismissals: list[dict] | None = None
+    prev_review: dict | None = None
     try:
         from pr_guardian.persistence import storage
+        from pr_guardian.persistence.storage import find_review_by_pr_url
         dismissals = await storage.get_active_dismissals(pr.pr_id, pr.repo, pr.platform.value)
+        prev_review = await find_review_by_pr_url(pr.pr_url)
     except Exception:
         pass
 
@@ -85,9 +88,13 @@ async def _run_review_background(
         )
         if dismissals is not None:
             from pr_guardian.persistence.storage import infer_fixes, finding_signature as _fsig
-            prev_sigs = {d["signature"] for d in dismissals}
+            prev_sigs = {
+                _fsig(f.get("file", ""), f.get("category", ""), ar["agent_name"])
+                for ar in (prev_review or {}).get("agent_results", [])
+                for f in ar.get("findings", [])
+            }
             current_sigs = {
-                _fsig(f.file, f.category, f.primary_agent or ar.agent_name)
+                _fsig(f.file, f.category, ar.agent_name)
                 for ar in result.agent_results
                 for f in ar.findings
             }

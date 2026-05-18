@@ -706,7 +706,7 @@ async def re_review(review_id: uuid.UUID, request: Request):
                 for f in ar.get("findings", [])
             }
             current_sigs = {
-                finding_signature(f.file, f.category, f.primary_agent or ar.agent_name)
+                finding_signature(f.file, f.category, ar.agent_name)
                 for ar in result.agent_results
                 for f in ar.findings
             }

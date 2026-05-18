@@ -11,15 +11,15 @@ every agent run.
 **`src/pr_guardian/api/dashboard.py`** — `_run_bg()` inside `re_review` handler:
 - Captures return value of `run_re_review`
 - Computes `prev_sigs` from `review["agent_results"]` (original review findings, raw dicts)
-- Computes `current_sigs` from `result.agent_results` (typed `Finding` objects)
+- Computes `current_sigs` from `result.agent_results` using `ar.agent_name` (symmetric with stored sigs)
 - Calls `await storage.infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)`
 
 **`src/pr_guardian/api/review.py`** — `_run_review_background()`:
+- Fetches `prev_review = await find_review_by_pr_url(pr.pr_url)` BEFORE running the new review
 - Captures return value of `run_review`
-- Guards on `if dismissals is not None:` (proxy for DB availability — `None` means
-  import/query failed, empty list means DB was reachable with no prior dismissals)
-- Uses existing `dismissals` list sigs as `prev_sigs`
-- Computes `current_sigs` from `result.agent_results`
+- Guards on `if dismissals is not None:` (proxy for DB availability)
+- Computes `prev_sigs` from `prev_review["agent_results"]` using `ar["agent_name"]` (matches stored sigs)
+- Computes `current_sigs` from `result.agent_results` using `ar.agent_name`
 - Calls `await infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)`
 
 **`tests/test_fix_inference.py`** (NEW) — 4 tests:
@@ -59,14 +59,15 @@ that is exactly what was implemented by zany-octopus and called here.
 
 ## Discovered constraints / landmines
 
-- **`prev_sigs` source differs between entrypoints**: In the re-review path,
-  `prev_sigs` comes from the original review's `agent_results` (exact run-N sigs).
-  In the full-review path, `prev_sigs` comes from `dismissals` (all historically
-  known sigs for the PR). The full-review path is slightly broader — a sig that
-  appeared in any previous run and was never dismissed will be in `prev_sigs` even
-  if it wasn't in the immediately preceding run. This is acceptable for the brief's
-  use case (fix/regression detection) and matches the existing dismissal-tracking
-  semantics.
+- **`prev_sigs` source**: Both entrypoints now compute `prev_sigs` from the
+  previous review's stored `agent_results` using `ar["agent_name"]`. The re-review
+  path uses the `original_review` dict passed to the handler. The full-review path
+  fetches the previous completed review via `find_review_by_pr_url(pr.pr_url)`
+  before starting the new run. Both use `ar.agent_name` (not `f.primary_agent`)
+  for `current_sigs` to maintain symmetry with stored signatures.
+
+- **`find_review_by_pr_url` ordering**: Must be called BEFORE `run_review` to
+  avoid returning the newly-saved review as "previous".
 
 - **`infer_fixes` already exists** — zany-octopus (Brief 01) fully implemented the
   helper, including the state machine transitions (mark_fixed, mark_regressed) and
