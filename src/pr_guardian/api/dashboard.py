@@ -700,6 +700,8 @@ async def re_review(review_id: uuid.UUID, request: Request):
                 pr, adapter, original_review=review,
                 post_comment=True, base_url=base_url,
             )
+            if result is None:
+                return
             prev_sigs = {
                 finding_signature(f.get("file", ""), f.get("category", ""), ar["agent_name"])
                 for ar in review.get("agent_results", [])
