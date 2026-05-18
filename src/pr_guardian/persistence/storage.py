@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import secrets
 import uuid
+from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
 from collections.abc import Callable
@@ -127,7 +128,6 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.repo_risk_class = result.repo_risk_class.value
         row.trust_tier = result.trust_tier.value if result.trust_tier else ""
         row.trust_tier_details = {
-            "reasons": result.trust_tier_reasons,
             "files": result.trust_tier_files,
             "reviewer_group_override": result.reviewer_group_override,
             "escalated_from": result.escalated_from,
@@ -135,7 +135,10 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.combined_score = result.combined_score
         row.decision = result.decision.value
         row.mechanical_passed = result.mechanical_passed
-        row.override_reasons = result.override_reasons
+        row.override_reasons = {
+            "sticky_triggers": [asdict(t) for t in result.sticky_triggers],
+            "finding_reasons": result.finding_reasons,
+        }
         row.summary = result.summary
         row.pipeline_log = result.pipeline_log
         row.total_input_tokens = result.total_input_tokens
@@ -1210,6 +1213,22 @@ def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _unpack_override_reasons(raw: dict | list | None) -> dict:
+    """Convert the stored override_reasons blob to the new split-field shape.
+
+    New rows store a dict with sticky_triggers + finding_reasons.
+    Legacy rows may store a plain list; treat those as finding_reasons.
+    """
+    if isinstance(raw, dict):
+        return {
+            "sticky_triggers": raw.get("sticky_triggers", []),
+            "finding_reasons": raw.get("finding_reasons", []),
+        }
+    if isinstance(raw, list):
+        return {"sticky_triggers": [], "finding_reasons": raw}
+    return {"sticky_triggers": [], "finding_reasons": []}
+
+
 def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
     return {
         "id": str(row.id),
@@ -1229,7 +1248,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "combined_score": row.combined_score,
         "decision": row.decision,
         "mechanical_passed": row.mechanical_passed,
-        "override_reasons": row.override_reasons,
+        **_unpack_override_reasons(row.override_reasons),
         "summary": row.summary,
         "stage": row.stage,
         "stage_detail": row.stage_detail,

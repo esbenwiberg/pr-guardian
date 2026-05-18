@@ -426,8 +426,10 @@ async def _run_pipeline(
         _plog("info", "decision",
               f"Total tokens: {total_input_tokens}+{total_output_tokens}. "
               f"Estimated cost: ${total_cost:.4f}.")
-    for reason in result.override_reasons:
-        _plog("info", "decision", f"Override: {reason}")
+    for t in result.sticky_triggers:
+        _plog("info", "decision", f"Sticky trigger [{t.kind}]: {t.reason}")
+    for reason in result.finding_reasons:
+        _plog("info", "decision", f"Finding reason: {reason}")
 
     # Stage 5: Post-decision noise reduction
     # Severity floor: suppress low-value findings per risk tier (display only,
