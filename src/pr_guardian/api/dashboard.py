@@ -695,7 +695,10 @@ async def re_review(review_id: uuid.UUID, request: Request):
         import traceback
         try:
             from pr_guardian.core.orchestrator import run_re_review
-            from pr_guardian.persistence.storage import infer_fixes
+            from pr_guardian.persistence.storage import (
+                finding_signature as _fsig,
+                infer_fixes,
+            )
             result = await run_re_review(
                 pr, adapter, original_review=review,
                 post_comment=True, base_url=base_url,
@@ -703,12 +706,12 @@ async def re_review(review_id: uuid.UUID, request: Request):
             if result is None:
                 return
             prev_sigs = {
-                finding_signature(f.get("file", ""), f.get("category", ""), ar["agent_name"])
+                _fsig(f.get("file", ""), f.get("category", ""), ar["agent_name"])
                 for ar in review.get("agent_results", [])
                 for f in ar.get("findings", [])
             }
             current_sigs = {
-                finding_signature(f.file, f.category, ar.agent_name)
+                _fsig(f.file, f.category, ar.agent_name)
                 for ar in result.agent_results
                 for f in ar.findings
             }
