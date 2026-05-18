@@ -208,17 +208,19 @@ def decide(
     # Start with decision matrix (risk-based)
     decision = _apply_matrix(risk_tier, repo_risk, agent_results, score, config)
 
-    # Trust tier overrides: MANDATORY_HUMAN and HUMAN_PRIMARY force human review
+    # Trust tier overrides: MANDATORY_HUMAN and HUMAN_PRIMARY force human review.
+    # The sticky trigger is recorded unconditionally so the structural audit
+    # trail reflects the restrictive tier even when findings already escalated.
     reviewer_group_override: str | None = None
     if trust_tier in (TrustTier.MANDATORY_HUMAN, TrustTier.HUMAN_PRIMARY):
+        sticky_triggers.append(StickyTrigger(
+            kind="trust_tier",
+            label=f"Trust tier: {trust_tier.value}",
+            source=trust_tier.value,
+            reason=f"Trust tier {trust_tier.value} requires human review",
+        ))
         if decision == Decision.AUTO_APPROVE:
             decision = Decision.HUMAN_REVIEW
-            sticky_triggers.append(StickyTrigger(
-                kind="trust_tier",
-                label=f"Trust tier: {trust_tier.value}",
-                source=trust_tier.value,
-                reason=f"Trust tier {trust_tier.value} requires human review",
-            ))
         if trust_tier == TrustTier.HUMAN_PRIMARY and trust_tier_result:
             reviewer_group_override = trust_tier_result.reviewer_group_override
 

@@ -311,3 +311,42 @@ class TestTrustTierStickyTrigger:
 
         assert all(t.kind != "trust_tier" for t in result.sticky_triggers)
         assert result.decision == Decision.AUTO_APPROVE
+
+    def test_mandatory_human_emits_sticky_even_with_findings(self):
+        # When findings already escalate to HUMAN_REVIEW, the trust_tier sticky
+        # trigger must still be recorded so the structural audit panel reflects
+        # the restrictive tier.
+        ctx = _ctx()
+        agent = _agent_result(findings=[_high_sev_finding()])
+        ttr = TrustTierResult(resolved_tier=TrustTier.MANDATORY_HUMAN)
+        result = decide(
+            context=ctx,
+            agent_results=[agent],
+            risk_tier=RiskTier.LOW,
+            config=CONFIG,
+            trust_tier_result=ttr,
+        )
+
+        trust_tier_triggers = [t for t in result.sticky_triggers if t.kind == "trust_tier"]
+        assert len(trust_tier_triggers) == 1
+        assert trust_tier_triggers[0].source == TrustTier.MANDATORY_HUMAN.value
+        assert len(result.finding_reasons) >= 1
+
+    def test_human_primary_emits_sticky_even_with_findings(self):
+        ctx = _ctx()
+        agent = _agent_result(verdict=Verdict.FLAG_HUMAN)
+        ttr = TrustTierResult(
+            resolved_tier=TrustTier.HUMAN_PRIMARY,
+            reviewer_group_override="security-team",
+        )
+        result = decide(
+            context=ctx,
+            agent_results=[agent],
+            risk_tier=RiskTier.LOW,
+            config=CONFIG,
+            trust_tier_result=ttr,
+        )
+
+        trust_tier_triggers = [t for t in result.sticky_triggers if t.kind == "trust_tier"]
+        assert len(trust_tier_triggers) == 1
+        assert result.reviewer_group_override == "security-team"
