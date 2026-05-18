@@ -5,6 +5,8 @@ import hashlib
 import secrets
 import uuid
 from datetime import datetime, timedelta, timezone
+from enum import StrEnum
+from collections.abc import Callable
 from typing import Any
 
 import structlog
@@ -620,10 +622,13 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _hash16(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+
+
 def finding_signature(file: str, category: str, agent_name: str) -> str:
     """Stable hash that survives line-number shifts."""
-    raw = f"{file}::{category}::{agent_name}"
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+    return _hash16(f"{file}::{category}::{agent_name}")
 
 
 async def upsert_dismissal(
@@ -788,6 +793,151 @@ def _dismissal_to_dict(row: FindingDismissalRow) -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Finding lifecycle
+# ---------------------------------------------------------------------------
+
+
+class FindingState(StrEnum):
+    OPEN = "open"
+    DISMISSED = "dismissed"
+    FIXED = "fixed"
+    REGRESSED = "regressed"
+    VERIFIED = "verified"
+
+
+def _row_to_finding_state(row: FindingDismissalRow) -> FindingState:
+    rk = row.resolution_kind
+    if rk == FindingState.VERIFIED:
+        return FindingState.VERIFIED
+    if rk == FindingState.REGRESSED:
+        return FindingState.REGRESSED
+    if rk == FindingState.FIXED:
+        return FindingState.FIXED
+    return FindingState.DISMISSED
+
+
+async def _get_or_create_dismissal_row(
+    session: AsyncSession,
+    pr_id: str,
+    signature: str,
+) -> FindingDismissalRow:
+    q = (
+        select(FindingDismissalRow)
+        .where(FindingDismissalRow.pr_id == pr_id)
+        .where(FindingDismissalRow.signature == signature)
+    )
+    row = (await session.scalars(q)).first()
+    if row is None:
+        row = FindingDismissalRow(
+            pr_id=pr_id,
+            repo="",
+            platform="",
+            signature=signature,
+            status="",
+        )
+        session.add(row)
+    return row
+
+
+async def _update_finding_row(
+    pr_id: str,
+    signature: str,
+    update_fn: Callable[[FindingDismissalRow, datetime], None],
+    warning_key: str,
+) -> None:
+    try:
+        async with async_session() as session:
+            row = await _get_or_create_dismissal_row(session, pr_id, signature)
+            if row.resolution_kind == FindingState.VERIFIED:
+                return
+            now = datetime.now(timezone.utc)
+            update_fn(row, now)
+            row.updated_at = now
+            await session.commit()
+    except Exception:
+        log.warning(warning_key, hint="DB unavailable")
+
+
+async def mark_fixed(pr_id: str, signature: str, fixed_by_sha: str) -> None:
+    def _apply(row: FindingDismissalRow, now: datetime) -> None:
+        row.resolution_kind = FindingState.FIXED
+        row.fixed_by_sha = fixed_by_sha
+        row.fixed_at = now
+
+    await _update_finding_row(pr_id, signature, _apply, "mark_fixed_failed")
+
+
+async def mark_regressed(pr_id: str, signature: str, sha: str, prev_sha: str) -> None:
+    def _apply(row: FindingDismissalRow, now: datetime) -> None:
+        row.resolution_kind = FindingState.REGRESSED
+        row.regressed_at = now
+        row.regressed_from_sha = prev_sha
+
+    await _update_finding_row(pr_id, signature, _apply, "mark_regressed_failed")
+
+
+async def mark_verified(pr_id: str, signature: str, user: str) -> None:
+    def _apply(row: FindingDismissalRow, now: datetime) -> None:
+        row.resolution_kind = FindingState.VERIFIED
+        row.verified_by = user
+        row.verified_at = now
+
+    await _update_finding_row(pr_id, signature, _apply, "mark_verified_failed")
+
+
+async def get_finding_states(pr_id: str) -> dict[str, FindingState]:
+    try:
+        async with async_session() as session:
+            q = select(FindingDismissalRow).where(FindingDismissalRow.pr_id == pr_id)
+            rows = (await session.scalars(q)).all()
+        return {r.signature: _row_to_finding_state(r) for r in rows}
+    except Exception:
+        log.warning("get_finding_states_failed", hint="DB unavailable")
+        return {}
+
+
+async def infer_fixes(
+    pr_id: str,
+    prev_sigs: set[str],
+    current_sigs: set[str],
+    current_sha: str,
+) -> tuple[set[str], set[str]]:
+    try:
+        async with async_session() as session:
+            q = select(FindingDismissalRow).where(FindingDismissalRow.pr_id == pr_id)
+            rows = (await session.scalars(q)).all()
+
+        state_map = {r.signature: _row_to_finding_state(r) for r in rows}
+        sha_map = {r.signature: r.fixed_by_sha for r in rows}
+
+        previously_fixed = {sig for sig, s in state_map.items() if s == FindingState.FIXED}
+        verified_sigs = {sig for sig, s in state_map.items() if s == FindingState.VERIFIED}
+
+        newly_fixed = (prev_sigs - current_sigs) - verified_sigs
+        regressed = previously_fixed & current_sigs
+
+        for sig in newly_fixed:
+            await mark_fixed(pr_id, sig, current_sha)
+        for sig in regressed:
+            await mark_regressed(pr_id, sig, current_sha, sha_map.get(sig) or current_sha)
+
+        return newly_fixed, regressed
+    except Exception:
+        log.warning("infer_fixes_failed", hint="DB unavailable")
+        return set(), set()
+
+
+async def verify_sticky_trigger(
+    pr_id: str,
+    trigger_kind: str,
+    trigger_source: str,
+    user: str,
+) -> None:
+    sig = _hash16(f"{pr_id}::{trigger_kind}::{trigger_source}")
+    await mark_verified(pr_id, sig, user)
 
 
 # ---------------------------------------------------------------------------

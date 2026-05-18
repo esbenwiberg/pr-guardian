@@ -310,6 +310,14 @@ class FindingDismissalRow(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    resolution_kind: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    fixed_by_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    fixed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    verified_by: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    regressed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    regressed_from_sha: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
 
 # ---------------------------------------------------------------------------
 # Inline comment tracking
