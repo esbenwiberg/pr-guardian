@@ -428,9 +428,11 @@ function renderFinding(ai, fi, f, agentName) {
               <div class="text-xs text-emerald-400 leading-relaxed">${esc(f.suggestion)}</div>
             </div>
           </div>` : ''}
+          ${f.file && f.line ? `<div class="snippet-area mt-2"></div>` : ''}
         </div>
       </div>
       <div class="flex items-center gap-2 px-4 py-3 ml-7" data-dismiss-area="${key}">
+        ${f.file && f.line ? `<button class="text-xs px-2 py-1 rounded border border-slate-600/50 bg-slate-800/50 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors" data-action="show-code" data-file="${esc(f.file)}" data-line="${f.line}" onclick="event.stopPropagation(); toggleSnippet(this)">Show code</button>` : ''}
         ${isDismissed ? renderDismissedBadge(d) : renderDismissButton(f.id)}
       </div>
     </div>`;
@@ -615,6 +617,26 @@ function toggleSuggestion(btn) {
   const box = btn.nextElementSibling;
   const isHidden = box.classList.toggle('hidden');
   btn.innerHTML = isHidden ? 'Show suggestion &#9656;' : 'Hide suggestion &#9662;';
+}
+
+async function toggleSnippet(btn) {
+  const file = btn.dataset.file;
+  const line = parseInt(btn.dataset.line, 10);
+  const card = btn.closest('.finding-card');
+  const area = card && card.querySelector('.snippet-area');
+  if (!area) return;
+
+  // If snippet is already rendered, toggle it off
+  if (area.querySelector('.hunk') || area.querySelector('[data-snippet-fallback]')) {
+    area.innerHTML = '';
+    btn.textContent = 'Show code';
+    return;
+  }
+
+  btn.textContent = 'loading…';
+  const data = await fetchSnippet(REVIEW_ID, file, line);
+  renderSnippet(area, data);
+  btn.textContent = 'Hide code';
 }
 
 // --- Export ---
@@ -928,6 +950,7 @@ function formatTimeShort(iso) {
 // Init
 loadReview();
 </script>
+<script src="/static/snippet.js"></script>
 <script src="/static/command-palette.js"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -145,12 +146,68 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     return row
 
 
+def _parse_patch_lines(patch: str) -> list[dict]:
+    """Parse a unified diff patch string into a flat list of annotated lines.
+
+    Each entry has:
+      new_ln  — new-file line number (None for pure deletions)
+      old_ln  — old-file line number (None for pure additions)
+      marker  — '+', '-', or ' '
+      content — line text without the leading marker character
+      type    — 'add', 'del', or 'ctx'
+    """
+    result: list[dict] = []
+    new_ln = old_ln = 0
+    for raw in patch.splitlines():
+        if raw.startswith("@@"):
+            m = re.match(r"^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@", raw)
+            if m:
+                old_ln = int(m.group(1))
+                new_ln = int(m.group(2))
+            continue
+        if raw.startswith("\\"):
+            continue
+        if raw.startswith("+"):
+            result.append({"new_ln": new_ln, "old_ln": None, "marker": "+", "content": raw[1:], "type": "add"})
+            new_ln += 1
+        elif raw.startswith("-"):
+            result.append({"new_ln": new_ln, "old_ln": old_ln, "marker": "-", "content": raw[1:], "type": "del"})
+            old_ln += 1
+        else:
+            content = raw[1:] if raw else ""
+            result.append({"new_ln": new_ln, "old_ln": old_ln, "marker": " ", "content": content, "type": "ctx"})
+            new_ln += 1
+            old_ln += 1
+    return result
+
+
+def _extract_hunk(patch: str, target_line: int, context: int) -> list[dict]:
+    """Return lines within [target_line - context, target_line + context] of the new file."""
+    lo, hi = target_line - context, target_line + context
+    out = []
+    for ln in _parse_patch_lines(patch):
+        pos = ln["new_ln"]  # del lines carry the new_ln they belong to (next add/ctx)
+        if lo <= pos <= hi:
+            out.append({
+                "ln": ln["old_ln"] if ln["type"] == "del" else ln["new_ln"],
+                "marker": ln["marker"],
+                "content": ln["content"],
+                "type": ln["type"],
+            })
+    return out
+
+
 @router.get("/reviews/{review_id}/diff")
-async def dashboard_review_diff(review_id: uuid.UUID):
+async def dashboard_review_diff(
+    review_id: uuid.UUID,
+    path: str | None = Query(None, description="Filter to a specific file path"),
+    line: int | None = Query(None, ge=1, description="Target line number in the new file"),
+    context: int = Query(3, ge=0, description="Lines of context around the target line"),
+):
     """Fetch the PR diff for a review on-demand from the platform.
 
-    The patch data is not stored in the DB, so we re-fetch it live from
-    GitHub / ADO using the PR URL recorded on the review row.
+    Without query params: returns all files with their full patches.
+    With path+line: extracts a structured hunk window around target_line ± context.
     """
     row = await storage.get_review(review_id)
     if not row:
@@ -172,6 +229,13 @@ async def dashboard_review_diff(review_id: uuid.UUID):
         diff = await adapter.fetch_diff(pr)
     except Exception as e:
         raise HTTPException(502, f"Failed to fetch diff from platform: {e}")
+
+    if path and line is not None:
+        file_obj = next((f for f in diff.files if f.path == path), None)
+        if not file_obj:
+            raise HTTPException(404, f"File not found in diff: {path}")
+        hunk_lines = _extract_hunk(file_obj.patch or "", line, context)
+        return {"file": path, "line": line, "context": context, "lines": hunk_lines}
 
     return {
         "pr_id": row["pr_id"],
