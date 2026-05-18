@@ -233,15 +233,18 @@ class TestUnpackOverrideReasons:
         assert out == {"sticky_triggers": [], "finding_reasons": []}
 
 
+REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
 class TestDashboardFieldCleanness:
     """Verify that the dashboard API layer does not reference removed fields."""
 
     def test_dashboard_py_has_no_override_reasons(self):
-        content = (Path("src/pr_guardian/api/dashboard.py")).read_text()
+        content = (REPO_ROOT / "src/pr_guardian/api/dashboard.py").read_text()
         assert "override_reasons" not in content
 
     def test_dashboard_py_has_no_trust_tier_reasons(self):
-        content = (Path("src/pr_guardian/api/dashboard.py")).read_text()
+        content = (REPO_ROOT / "src/pr_guardian/api/dashboard.py").read_text()
         assert "trust_tier_reasons" not in content
 
 
