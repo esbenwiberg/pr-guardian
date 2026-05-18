@@ -695,10 +695,22 @@ async def re_review(review_id: uuid.UUID, request: Request):
         import traceback
         try:
             from pr_guardian.core.orchestrator import run_re_review
-            await run_re_review(
+            from pr_guardian.persistence.storage import infer_fixes
+            result = await run_re_review(
                 pr, adapter, original_review=review,
                 post_comment=True, base_url=base_url,
             )
+            prev_sigs = {
+                finding_signature(f.get("file", ""), f.get("category", ""), ar["agent_name"])
+                for ar in review.get("agent_results", [])
+                for f in ar.get("findings", [])
+            }
+            current_sigs = {
+                finding_signature(f.file, f.category, f.primary_agent or ar.agent_name)
+                for ar in result.agent_results
+                for f in ar.findings
+            }
+            await infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)
         except Exception as e:
             log.error("re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
 
