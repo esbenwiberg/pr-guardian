@@ -5,6 +5,7 @@ import pytest
 
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.decision.engine import check_overrides, decide
+from pr_guardian.persistence.storage import _unpack_override_reasons
 from pr_guardian.decision.types import StickyTrigger
 from pr_guardian.models.context import (
     BlastRadius,
@@ -199,6 +200,49 @@ class TestBreakCleanlyInvariant:
         )
         assert t.kind == "new_dep"
         assert t.source == "requests==2.32.3"
+
+
+class TestUnpackOverrideReasons:
+    """Unit tests for the three code paths in _unpack_override_reasons()."""
+
+    def test_new_dict_format(self):
+        raw = {
+            "sticky_triggers": [{"kind": "new_dep", "label": "l", "source": "s", "reason": "r"}],
+            "finding_reasons": ["3 high-sev findings"],
+        }
+        out = _unpack_override_reasons(raw)
+        assert out["sticky_triggers"] == raw["sticky_triggers"]
+        assert out["finding_reasons"] == ["3 high-sev findings"]
+
+    def test_empty_dict_format(self):
+        out = _unpack_override_reasons({"sticky_triggers": [], "finding_reasons": []})
+        assert out == {"sticky_triggers": [], "finding_reasons": []}
+
+    def test_legacy_list_format(self):
+        raw = ["Old override reason A", "Old override reason B"]
+        out = _unpack_override_reasons(raw)
+        assert out["sticky_triggers"] == []
+        assert out["finding_reasons"] == raw
+
+    def test_none_input(self):
+        out = _unpack_override_reasons(None)
+        assert out == {"sticky_triggers": [], "finding_reasons": []}
+
+    def test_unexpected_type_returns_empty(self):
+        out = _unpack_override_reasons("unexpected string")
+        assert out == {"sticky_triggers": [], "finding_reasons": []}
+
+
+class TestDashboardFieldCleanness:
+    """Verify that the dashboard API layer does not reference removed fields."""
+
+    def test_dashboard_py_has_no_override_reasons(self):
+        content = (Path("src/pr_guardian/api/dashboard.py")).read_text()
+        assert "override_reasons" not in content
+
+    def test_dashboard_py_has_no_trust_tier_reasons(self):
+        content = (Path("src/pr_guardian/api/dashboard.py")).read_text()
+        assert "trust_tier_reasons" not in content
 
 
 class TestTrustTierStickyTrigger:
