@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
 import re
 import uuid
@@ -587,6 +588,39 @@ async def undismiss_finding(dismissal_id: uuid.UUID):
     if not deleted:
         raise HTTPException(404, "Dismissal not found")
     return {"status": "removed"}
+
+
+# ---------------------------------------------------------------------------
+# Sticky-trigger verification (used by the wizard's Verification chapter)
+# ---------------------------------------------------------------------------
+
+_VALID_TRIGGER_KINDS = {"new_dep", "path_risk", "hotspot", "trust_tier", "repo_risk", "high_diff"}
+
+
+class VerifyTriggerRequest(BaseModel):
+    trigger_kind: str
+    trigger_source: str
+    user: str = ""
+
+
+@router.post("/reviews/{review_id}/verify")
+async def verify_trigger(review_id: uuid.UUID, body: VerifyTriggerRequest):
+    """Mark a sticky trigger as verified (acknowledged by a human reviewer).
+
+    Idempotent: posting the same (review_id, trigger_kind, trigger_source) twice
+    is a no-op success.
+    """
+    if body.trigger_kind not in _VALID_TRIGGER_KINDS:
+        raise HTTPException(400, f"Unknown trigger_kind {body.trigger_kind!r}. Must be one of: {sorted(_VALID_TRIGGER_KINDS)}")
+
+    row = await storage.get_review(review_id)
+    if not row:
+        raise HTTPException(404, "Review not found")
+
+    pr_id = row["pr_id"]
+    sig = hashlib.sha256(f"{pr_id}::{body.trigger_kind}::{body.trigger_source}".encode()).hexdigest()[:16]
+    await storage.verify_sticky_trigger(pr_id, body.trigger_kind, body.trigger_source, body.user)
+    return {"verified": True, "signature": sig}
 
 
 # ---------------------------------------------------------------------------
