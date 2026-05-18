@@ -112,9 +112,18 @@ class TestBucketSplit:
         assert len(sticky) >= 1
         assert any(t.kind == "new_dep" for t in sticky)
         assert len(finding_reasons) >= 1
-        # no overlap: sticky trigger kinds not in finding_reasons text
-        sticky_kinds = {t.kind for t in sticky}
-        assert sticky_kinds.isdisjoint({"detected", "suspected", "flagged"})
+        # No overlap: every sticky trigger's reason/label text must NOT appear
+        # in any finding_reason, and no finding_reason text should describe a
+        # structural condition (e.g. dependency-related wording belongs only to
+        # the sticky bucket). Each escalation reason lives in exactly one bucket.
+        for trigger in sticky:
+            for fr in finding_reasons:
+                assert trigger.reason not in fr
+                assert trigger.label not in fr
+        assert all("dependency" not in fr.lower() for fr in finding_reasons)
+        sticky_text_blob = " ".join(t.reason + " " + t.label for t in sticky).lower()
+        assert "detected certainty" not in sticky_text_blob
+        assert "suspected findings" not in sticky_text_blob
 
     def test_clean_pr(self):
         ctx = _ctx()
