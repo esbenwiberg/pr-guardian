@@ -59,6 +59,7 @@ class TestPRReviewQueueing:
         mock_adapter = _mock_adapter()
         with (
             patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -76,10 +77,50 @@ class TestPRReviewQueueing:
         assert data["repo"] == "esbenwiberg/pr-guardian"
         mock_task.assert_called_once()
 
+    def test_response_includes_review_uuid_when_db_available(self, client):
+        """The response must carry the review UUID so the UI can subscribe to live events.
+
+        Without it, the /live page can't filter SSE events (they're keyed by UUID)
+        and the fallback link to /reviews/{id} returns 422.
+        """
+        import uuid as _uuid
+        mock_adapter = _mock_adapter()
+        fake_id = _uuid.uuid4()
+        with (
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=fake_id),
+        ):
+            resp = client.post(
+                "/api/review",
+                json={"pr_url": "https://github.com/owner/repo/pull/9"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["review_id"] == str(fake_id)
+
+    def test_response_review_id_null_when_db_unavailable(self, client):
+        """If the DB record can't be created, the trigger still succeeds — but the UI
+        knows it can't track the run live."""
+        mock_adapter = _mock_adapter()
+        with (
+            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, side_effect=RuntimeError("no db")),
+        ):
+            resp = client.post(
+                "/api/review",
+                json={"pr_url": "https://github.com/owner/repo/pull/9"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["review_id"] is None
+
     def test_comment_mode_summary_accepted(self, client):
         mock_adapter = _mock_adapter()
         with (
             patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -96,6 +137,7 @@ class TestPRReviewQueueing:
         mock_adapter = _mock_adapter()
         with (
             patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -109,6 +151,7 @@ class TestPRReviewQueueing:
         mock_adapter = _mock_adapter()
         with (
             patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             client.post(
@@ -123,6 +166,7 @@ class TestPRReviewQueueing:
         mock_adapter = _mock_adapter()
         with (
             patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(

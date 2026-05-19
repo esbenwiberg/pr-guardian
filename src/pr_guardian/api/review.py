@@ -46,6 +46,7 @@ class ReviewResponse(BaseModel):
     pr_id: str
     repo: str
     platform: str
+    review_id: str | None = None
     decision: str | None = None
     summary: str | None = None
     risk_tier: str | None = None
@@ -129,13 +130,28 @@ async def manual_review(req: ReviewRequest, request: Request):
 
     log.info("manual_review_started", platform=platform_name, pr_id=stub.pr_id, repo=stub.repo)
     base_url = str(request.base_url).rstrip("/")
-    asyncio.create_task(_run_review_background(stub, adapter, req.comment_mode, base_url, platform_name=platform_name, pat_name=req.pat_name))
+
+    review_db_id: uuid.UUID | None = None
+    try:
+        from pr_guardian.persistence import storage
+        review_db_id = await storage.create_review_record(
+            stub, comment_mode=req.comment_mode, pat_name=req.pat_name,
+        )
+    except Exception as e:
+        log.warning("manual_review_db_create_failed", pr_id=stub.pr_id, error=str(e))
+
+    asyncio.create_task(_run_review_background(
+        stub, adapter, req.comment_mode, base_url,
+        platform_name=platform_name, pat_name=req.pat_name,
+        review_db_id=review_db_id,
+    ))
 
     return ReviewResponse(
         status="queued",
         pr_id=stub.pr_id,
         repo=stub.repo,
         platform=platform_name,
+        review_id=str(review_db_id) if review_db_id else None,
     )
 
 

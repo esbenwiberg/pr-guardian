@@ -370,7 +370,12 @@
         errEl.classList.remove('hidden');
         return;
       }
-      window.location.href = `/reviews/${encodeURIComponent(data.id)}/live`;
+      // Live tracking only works with a real review UUID; without one, fall
+      // back to the queue so the user still sees something useful.
+      const target = data.review_id
+        ? `/reviews/${encodeURIComponent(data.review_id)}/live`
+        : '/reviews';
+      window.location.href = target;
     } catch (e) {
       errEl.textContent = String(e); errEl.classList.remove('hidden');
     } finally {

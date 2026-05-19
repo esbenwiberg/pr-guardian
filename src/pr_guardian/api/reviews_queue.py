@@ -271,7 +271,14 @@ async def trigger_review(req: TriggerRequest, request: Request):
                 ReviewRequest(pr_url=url, comment_mode="none"),
                 request,
             )
-            return {"id": resp.pr_id, "status": resp.status, "platform": resp.platform, "repo": resp.repo}
+            return {
+                "id": resp.review_id or resp.pr_id,
+                "review_id": resp.review_id,
+                "pr_id": resp.pr_id,
+                "status": resp.status,
+                "platform": resp.platform,
+                "repo": resp.repo,
+            }
         except HTTPException:
             raise
         except Exception as e:
