@@ -339,7 +339,9 @@ class ADOAdapter:
         last_exc: httpx.HTTPStatusError | None = None
         for url in candidates:
             try:
-                resp = await client.get(url, params={"api-version": "7.1"})
+                # connectionData is a preview-only resource — passing the
+                # stable "7.1" returns VssInvalidPreviewVersionException.
+                resp = await client.get(url, params={"api-version": "7.1-preview.1"})
                 resp.raise_for_status()
                 user = resp.json().get("authenticatedUser", {})
                 user_id = user.get("id", "")
