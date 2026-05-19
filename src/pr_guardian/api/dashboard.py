@@ -732,10 +732,10 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
         # If we got an httpx error, the default str() drops the response body —
         # pull it out so the operator sees the actual platform error code.
         if isinstance(exc, httpx.HTTPStatusError):
-            body = (exc.response.text or "")[:500]
+            resp_body = (exc.response.text or "")[:500]
             error = (
                 f"{type(exc).__name__}: HTTP {exc.response.status_code} "
-                f"on {exc.request.url} — body={body!r}"
+                f"on {exc.request.url} — body={resp_body!r}"
             )
         log.error("submit_verdict_failed", review_id=str(review_id), error=error)
 

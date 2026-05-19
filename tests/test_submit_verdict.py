@@ -188,3 +188,31 @@ def test_platform_failure_returns_502_and_records_attempt(client, fake_review, m
     assert len(appended) == 1
     assert appended[0]["posted"] is False
     assert "network down" in appended[0]["error"]
+
+
+def test_httpx_status_error_surfaces_platform_body_and_returns_502(client, fake_review, monkeypatch):
+    """When the platform raises httpx.HTTPStatusError, the handler must surface
+    the response body — not swallow it with a 500 from a variable-shadow bug."""
+    import httpx
+
+    request = httpx.Request("POST", "https://dev.azure.com/foo/_apis/git/pullrequests/42/reviewers/me")
+    response = httpx.Response(
+        status_code=400,
+        request=request,
+        text='{"message":"VS403072: cannot vote on own PR"}',
+    )
+    err = httpx.HTTPStatusError("400 Bad Request", request=request, response=response)
+
+    adapter = _make_mock_adapter()
+    adapter.approve_pr = AsyncMock(side_effect=err)
+    appended = _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 502, resp.text
+    assert len(appended) == 1
+    assert appended[0]["posted"] is False
+    assert "VS403072" in appended[0]["error"]
+    assert "HTTP 400" in appended[0]["error"]
