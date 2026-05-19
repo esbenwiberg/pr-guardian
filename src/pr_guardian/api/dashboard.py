@@ -690,6 +690,22 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
     if platform_str not in {p.value for p in Platform}:
         raise HTTPException(400, f"Review has no usable platform field: {platform_str!r}")
 
+    # The reviews table does not persist org/project, so recover them from the
+    # stored pr_url. ADO's reviewer-vote endpoint needs the project segment in
+    # the path — without it the URL becomes .../{org}//_apis/... and ADO 400s
+    # with "A project name is required to reference a Git repository by name".
+    from pr_guardian.api.review import _parse_pr_url
+    org_from_url = ""
+    project_from_url = ""
+    pr_url = review.get("pr_url") or ""
+    if pr_url:
+        try:
+            stub, _ = _parse_pr_url(pr_url)
+            org_from_url = stub.org or ""
+            project_from_url = stub.project or ""
+        except Exception as exc:  # noqa: BLE001 — best-effort recovery
+            log.warn("submit_verdict_url_parse_failed", pr_url=pr_url, error=str(exc))
+
     pr = PlatformPR(
         platform=Platform(platform_str),
         pr_id=review.get("pr_id", ""),
@@ -700,9 +716,16 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
         author=review.get("author", ""),
         title=review.get("title", ""),
         head_commit_sha=review.get("head_commit_sha", ""),
-        org=review.get("org", ""),
-        project=review.get("project", ""),
+        org=review.get("org") or org_from_url,
+        project=review.get("project") or project_from_url,
     )
+
+    if platform_str == "ado" and not pr.project:
+        raise HTTPException(
+            422,
+            "ADO review is missing the project segment and no pr_url is stored — "
+            "cannot construct the reviewer-vote URL.",
+        )
 
     adapter = await create_github_adapter() if platform_str == "github" else create_adapter(platform_str)
     decision_counts = _summarise_decisions(review)

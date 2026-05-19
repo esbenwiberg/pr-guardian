@@ -190,6 +190,66 @@ def test_platform_failure_returns_502_and_records_attempt(client, fake_review, m
     assert "network down" in appended[0]["error"]
 
 
+def test_ado_review_recovers_project_from_pr_url(client, monkeypatch):
+    """The reviews table does not persist org/project. For ADO, the handler
+    must recover them from the stored pr_url so the platform receives a URL
+    with a populated project segment."""
+    ado_review = {
+        "id": str(uuid.uuid4()),
+        "pr_id": "13965",
+        "repo": "IntegrationHub",
+        "platform": "ado",
+        "head_commit_sha": "abc123",
+        "pr_url": "https://dev.azure.com/365projectum/MyProject/_git/IntegrationHub/pullrequest/13965",
+        "source_branch": "feature",
+        "target_branch": "main",
+        "author": "dev",
+        "title": "My PR",
+        "agent_results": [],
+    }
+    adapter = _make_mock_adapter()
+    _patch_endpoint_deps(monkeypatch, ado_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{ado_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # The adapter was called with a PlatformPR carrying the recovered project.
+    called_pr = adapter.approve_pr.await_args.args[0]
+    assert called_pr.project == "MyProject"
+    assert called_pr.org == "365projectum"
+    assert called_pr.repo == "IntegrationHub"
+
+
+def test_ado_review_without_pr_url_returns_422(client, monkeypatch):
+    """If the ADO review has no usable pr_url, surface a clear 422 rather
+    than letting ADO 400 with a confusing 'project name required' error."""
+    ado_review = {
+        "id": str(uuid.uuid4()),
+        "pr_id": "13965",
+        "repo": "IntegrationHub",
+        "platform": "ado",
+        "head_commit_sha": "abc123",
+        "pr_url": "",  # nothing to recover from
+        "source_branch": "feature",
+        "target_branch": "main",
+        "author": "dev",
+        "title": "My PR",
+        "agent_results": [],
+    }
+    adapter = _make_mock_adapter()
+    _patch_endpoint_deps(monkeypatch, ado_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{ado_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 422, resp.text
+    adapter.approve_pr.assert_not_awaited()
+
+
 def test_httpx_status_error_surfaces_platform_body_and_returns_502(client, fake_review, monkeypatch):
     """When the platform raises httpx.HTTPStatusError, the handler must surface
     the response body — not swallow it with a 500 from a variable-shadow bug."""
