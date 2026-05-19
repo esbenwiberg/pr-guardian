@@ -8,6 +8,7 @@ import uuid
 from typing import get_args
 from datetime import datetime, timezone
 
+import httpx
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
@@ -728,6 +729,14 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
     except Exception as exc:  # noqa: BLE001 — surface any platform error to the caller
         posted = False
         error = f"{type(exc).__name__}: {exc}"
+        # If we got an httpx error, the default str() drops the response body —
+        # pull it out so the operator sees the actual platform error code.
+        if isinstance(exc, httpx.HTTPStatusError):
+            body = (exc.response.text or "")[:500]
+            error = (
+                f"{type(exc).__name__}: HTTP {exc.response.status_code} "
+                f"on {exc.request.url} — body={body!r}"
+            )
         log.error("submit_verdict_failed", review_id=str(review_id), error=error)
 
     # Always record the attempt on the review (even on platform failure) so the

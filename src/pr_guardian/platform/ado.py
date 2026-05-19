@@ -4,6 +4,7 @@ import asyncio
 import base64
 import difflib
 import json
+import os
 
 import httpx
 import structlog
@@ -306,17 +307,68 @@ class ADOAdapter:
         resp.raise_for_status()
 
     async def _get_current_user_id(self) -> str:
-        """Return the authenticated user's GUID via connectionData.
+        """Return the authenticated user's GUID needed for /reviewers/{id} voting.
 
         ADO's /reviewers/{id} endpoint requires the real identity GUID — "me"
-        is not a valid path segment and returns 400."""
+        is not a valid path segment and returns 400.
+
+        Resolution order:
+        1. ``ADO_REVIEWER_ID`` env var (explicit override — skips all HTTP calls).
+        2. ``vssps.dev.azure.com/{org}/_apis/connectionData`` — dedicated identity
+           host; this is what official ADO clients call.
+        3. ``dev.azure.com/{org}/_apis/connectionData`` — legacy fallback; some
+           Entra-tenanted orgs return 400/302 here even with a fully valid PAT.
+
+        On HTTP failure we surface the response body in the raised error so the
+        actual ADO error code (TF400813, VS401253, etc.) reaches the operator
+        instead of just "Client error '400 Bad Request'".
+        """
+        override = os.environ.get("ADO_REVIEWER_ID", "").strip()
+        if override:
+            return override
+
         client = self._get_client()
-        resp = await client.get(
-            f"{self._org_url}/_apis/connectionData",
-            params={"api-version": "7.1"},
+        # https://dev.azure.com/{org} -> https://vssps.dev.azure.com/{org}
+        vssps_url = self._org_url.replace(
+            "https://dev.azure.com", "https://vssps.dev.azure.com", 1,
         )
-        resp.raise_for_status()
-        return resp.json()["authenticatedUser"]["id"]
+        candidates = [
+            f"{vssps_url}/_apis/connectionData",
+            f"{self._org_url}/_apis/connectionData",
+        ]
+        last_exc: httpx.HTTPStatusError | None = None
+        for url in candidates:
+            try:
+                resp = await client.get(url, params={"api-version": "7.1"})
+                resp.raise_for_status()
+                user = resp.json().get("authenticatedUser", {})
+                user_id = user.get("id", "")
+                # Anonymous user means the PAT didn't authenticate even though
+                # the request returned 200 — treat as a failure so we fall through.
+                if user_id and user_id != "00000000-0000-0000-0000-000000000000":
+                    return user_id
+                log.warning("ado_connectiondata_anonymous", url=url)
+            except httpx.HTTPStatusError as exc:
+                body = (exc.response.text or "")[:500]
+                log.warning(
+                    "ado_connectiondata_failed",
+                    url=url, status=exc.response.status_code, body=body,
+                )
+                last_exc = exc
+
+        if last_exc is not None:
+            body = (last_exc.response.text or "")[:500]
+            raise RuntimeError(
+                "ADO connectionData failed on both vssps and dev.azure.com — "
+                "cannot resolve reviewer identity for voting. "
+                "Set ADO_REVIEWER_ID env var to your ADO user GUID to bypass. "
+                f"Last response: HTTP {last_exc.response.status_code} body={body!r}"
+            ) from last_exc
+        raise RuntimeError(
+            "ADO connectionData returned anonymous user from both hosts. "
+            "PAT may be invalid or lack Identity (Read) scope. "
+            "Set ADO_REVIEWER_ID env var to bypass."
+        )
 
     async def approve_pr(self, pr: PlatformPR) -> None:
         client = self._get_client()
