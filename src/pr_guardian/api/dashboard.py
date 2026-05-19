@@ -738,9 +738,10 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
         if body.verdict == "approve":
             await adapter.approve_pr(pr)
             actions.append("approve_pr")
-            if body.comment.strip():
-                await adapter.post_comment(pr, comment_body)
-                actions.append("post_comment")
+            # Always post a comment — without it the PR has no audit trail
+            # of who reviewed via PR Guardian or which decisions were made.
+            await adapter.post_comment(pr, comment_body)
+            actions.append("post_comment")
         elif body.verdict == "approve_with_fixes":
             await adapter.approve_pr(pr)
             actions.append("approve_pr")

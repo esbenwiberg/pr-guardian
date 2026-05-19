@@ -78,7 +78,9 @@ def _make_mock_adapter():
     return adapter
 
 
-def test_approve_calls_approve_pr_and_skips_comment_when_blank(client, fake_review, monkeypatch):
+def test_approve_always_posts_comment_for_audit_trail(client, fake_review, monkeypatch):
+    """Even on a clean approve with no personal note, post a comment so the
+    PR carries a record that PR Guardian reviewed it."""
     adapter = _make_mock_adapter()
     appended = _patch_endpoint_deps(monkeypatch, fake_review, adapter)
 
@@ -90,11 +92,14 @@ def test_approve_calls_approve_pr_and_skips_comment_when_blank(client, fake_revi
     body = resp.json()
     assert body["posted"] is True
     assert body["verdict"] == "approve"
-    assert body["platform_actions"] == ["approve_pr"]
+    assert body["platform_actions"] == ["approve_pr", "post_comment"]
 
     adapter.approve_pr.assert_awaited_once()
-    adapter.post_comment.assert_not_awaited()
+    adapter.post_comment.assert_awaited_once()
     adapter.request_changes.assert_not_awaited()
+    # Headline-only body still carries the standard "Reviewed and approved." line.
+    posted_body = adapter.post_comment.await_args.args[1]
+    assert "Reviewed and approved" in posted_body
 
     assert len(appended) == 1
     assert appended[0]["kind"] == "human_verdict"
