@@ -1,0 +1,44 @@
+contract_version: 1
+title: "Infer finding fixes in re-run path"
+depends_on: [02-split-engine-sticky-triggers]
+scenarios:
+  - id: fix-detected-on-rerun
+    given:
+      - "a PR with 3 findings recorded on the previous review"
+    when:
+      - "the developer pushes a fix and triggers POST /re-review"
+      - "the next review surfaces only 1 of the original 3 signatures"
+    then:
+      - "the 2 missing signatures are marked FindingState.FIXED"
+      - "fixed_by_sha equals the current PR HEAD sha"
+  - id: regression-detected-on-rerun
+    given:
+      - "a signature was marked FindingState.FIXED on the previous review"
+    when:
+      - "the next review surfaces that same signature again"
+    then:
+      - "the signature is marked FindingState.REGRESSED"
+      - "regressed_from_sha equals the sha at which it was previously fixed"
+  - id: both-entrypoints-call-helper
+    given:
+      - "the infer_fixes helper exists in storage.py"
+    when:
+      - "either POST /re-review or POST /api/review completes"
+    then:
+      - "infer_fixes is invoked with prev_sigs and current_sigs"
+required_facts:
+  - id: fact-fix-inference-tests
+    proves: [fix-detected-on-rerun, regression-detected-on-rerun]
+    kind: unit-test
+    artifact:
+      path: tests/test_fix_inference.py
+      change: create
+    command: python -m pytest tests/test_fix_inference.py -q
+  - id: fact-both-entrypoints-grep
+    proves: [both-entrypoints-call-helper]
+    kind: structural-check
+    artifact:
+      path: src/pr_guardian/api/dashboard.py
+      change: update
+    command: grep -l "infer_fixes" src/pr_guardian/api/dashboard.py src/pr_guardian/api/review.py
+human_review: []

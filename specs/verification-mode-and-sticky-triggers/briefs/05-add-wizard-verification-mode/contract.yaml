@@ -1,0 +1,54 @@
+contract_version: 1
+title: "Add wizard verification + trigger-focus modes"
+depends_on:
+  - 01-add-finding-lifecycle-storage
+  - 02-split-engine-sticky-triggers
+  - 03-infer-finding-fixes
+  - 04-add-snippet-disclosure
+scenarios:
+  - id: verification-chapter-renders
+    given:
+      - "a PR with 0 finding_reasons and 1 sticky_trigger of kind=new_dep"
+    when:
+      - "the user opens /reviews/{id}?mode=wizard"
+    then:
+      - "the Verification chapter is visible"
+      - "exactly one trigger card is rendered with kind=new_dep"
+  - id: verify-acknowledge-completes-wizard
+    given:
+      - "the Verification chapter is visible with one trigger card"
+    when:
+      - "the user clicks [Acknowledge & Approve]"
+    then:
+      - "the wizard advances to wrap-up"
+      - "GET /api/dashboard/reviews/{id} shows the trigger marked verified"
+  - id: trigger-focus-deeplink
+    given:
+      - "a PR with multiple sticky_triggers"
+    when:
+      - "the user opens /reviews/{id}?mode=wizard&focus=trigger:new_dep"
+    then:
+      - "only the new_dep trigger card is rendered"
+required_facts:
+  - id: fact-verify-chapter-renders
+    proves: [verification-chapter-renders]
+    kind: browser-test
+    artifact:
+      path: src/pr_guardian/dashboard/human_wizard.html
+      change: update
+    command: validate_in_browser '/reviews/{id}?mode=wizard' 'assert[.verification-chapter .trigger-card]'
+  - id: fact-verify-completes
+    proves: [verify-acknowledge-completes-wizard]
+    kind: browser-test
+    artifact:
+      path: src/pr_guardian/dashboard/human_wizard.html
+      change: update
+    command: validate_in_browser '/reviews/{id}?mode=wizard' 'click[data-action=acknowledge]; assert[.wrap-up]'
+  - id: fact-verify-endpoint
+    proves: [verification-chapter-renders, verify-acknowledge-completes-wizard, trigger-focus-deeplink]
+    kind: integration-test
+    artifact:
+      path: tests/test_verify_endpoint.py
+      change: create
+    command: python -m pytest tests/test_verify_endpoint.py -q
+human_review: []

@@ -1,0 +1,37 @@
+contract_version: 1
+title: "Split engine sticky-trigger bucket"
+depends_on: [01-add-finding-lifecycle-storage]
+scenarios:
+  - id: bucket-split-roundtrip
+    given:
+      - "a PR seeded with one new dependency AND one high-sev finding"
+    when:
+      - "GET /api/dashboard/reviews/{id} is requested"
+    then:
+      - "sticky_triggers contains an entry with kind=new_dep"
+      - "finding_reasons contains the high-sev count entry"
+      - "the two lists do not overlap"
+  - id: old-fields-removed
+    given:
+      - "the new sticky_triggers and finding_reasons fields are in place"
+    when:
+      - "DecisionResult is inspected and the dashboard payload is rendered"
+    then:
+      - "override_reasons and trust_tier_reasons are not present on DecisionResult"
+      - "review_detail.html does not reference override_reasons in its rendering code"
+required_facts:
+  - id: fact-bucket-api
+    proves: [bucket-split-roundtrip]
+    kind: integration-test
+    artifact:
+      path: tests/test_engine_sticky_split.py
+      change: create
+    command: python -m pytest tests/test_engine_sticky_split.py -q
+  - id: fact-old-fields-gone
+    proves: [old-fields-removed]
+    kind: structural-check
+    artifact:
+      path: src/pr_guardian/dashboard/review_detail.html
+      change: update
+    command: "! grep -E '(override_reasons|trust_tier_reasons)' src/pr_guardian/dashboard/review_detail.html src/pr_guardian/decision/engine.py"
+human_review: []

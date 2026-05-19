@@ -1,0 +1,43 @@
+contract_version: 1
+title: "Add finding lifecycle storage"
+scenarios:
+  - id: mark-fixed-roundtrip
+    given:
+      - "an open finding for (pr_id, signature)"
+    when:
+      - "mark_fixed(pr_id, signature, sha) is called"
+    then:
+      - "get_finding_states(pr_id)[signature] == FindingState.FIXED"
+      - "fixed_by_sha == sha"
+  - id: mark-regressed-after-fixed
+    given:
+      - "a finding previously marked fixed at sha_a"
+    when:
+      - "mark_regressed(pr_id, signature, sha_b, prev_sha=sha_a) is called"
+    then:
+      - "get_finding_states(pr_id)[signature] == FindingState.REGRESSED"
+      - "regressed_from_sha == sha_a"
+  - id: migration-applies
+    given:
+      - "a database at migration 017"
+    when:
+      - "alembic upgrade head runs"
+    then:
+      - "the database is at migration 018"
+      - "new columns exist on finding_dismissals"
+required_facts:
+  - id: fact-lifecycle-tests
+    proves: [mark-fixed-roundtrip, mark-regressed-after-fixed]
+    kind: unit-test
+    artifact:
+      path: tests/test_finding_lifecycle.py
+      change: create
+    command: python -m pytest tests/test_finding_lifecycle.py -q
+  - id: fact-migration-applies
+    proves: [migration-applies]
+    kind: integration-test
+    artifact:
+      path: alembic/versions/018_add_finding_lifecycle.py
+      change: create
+    command: python -m alembic upgrade head
+human_review: []

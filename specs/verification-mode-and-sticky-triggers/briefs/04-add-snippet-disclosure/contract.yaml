@@ -1,0 +1,35 @@
+contract_version: 1
+title: "Add snippet disclosure to finding cards"
+depends_on: [03-infer-finding-fixes]
+scenarios:
+  - id: snippet-disclosure-renders
+    given:
+      - "a completed review with at least one finding on a real diff line"
+    when:
+      - "the user opens /reviews/{id} and clicks 'Show code' on the finding card"
+    then:
+      - "a .hunk element renders inline below the card"
+      - "the hunk contains the finding's line plus 3 lines of context above and below"
+  - id: snippet-endpoint-honors-params
+    given:
+      - "the dashboard diff endpoint"
+    when:
+      - "GET /api/dashboard/reviews/{id}/diff?path=X&line=10&context=2 is called"
+    then:
+      - "the response is the requested hunk window"
+required_facts:
+  - id: fact-snippet-ui
+    proves: [snippet-disclosure-renders]
+    kind: browser-test
+    artifact:
+      path: src/pr_guardian/dashboard/review_detail.html
+      change: update
+    command: validate_in_browser /reviews/{id} 'click[data-action=show-code]; assert[.hunk]'
+  - id: fact-snippet-endpoint
+    proves: [snippet-endpoint-honors-params]
+    kind: integration-test
+    artifact:
+      path: tests/test_snippet_endpoint.py
+      change: create
+    command: python -m pytest tests/test_snippet_endpoint.py -q
+human_review: []
