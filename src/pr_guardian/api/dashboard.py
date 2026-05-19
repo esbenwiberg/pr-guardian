@@ -694,17 +694,8 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
     # stored pr_url. ADO's reviewer-vote endpoint needs the project segment in
     # the path — without it the URL becomes .../{org}//_apis/... and ADO 400s
     # with "A project name is required to reference a Git repository by name".
-    from pr_guardian.api.review import _parse_pr_url
-    org_from_url = ""
-    project_from_url = ""
-    pr_url = review.get("pr_url") or ""
-    if pr_url:
-        try:
-            stub, _ = _parse_pr_url(pr_url)
-            org_from_url = stub.org or ""
-            project_from_url = stub.project or ""
-        except Exception as exc:  # noqa: BLE001 — best-effort recovery
-            log.warn("submit_verdict_url_parse_failed", pr_url=pr_url, error=str(exc))
+    from pr_guardian.api.review import recover_org_project_from_pr_url
+    org_from_url, project_from_url = recover_org_project_from_pr_url(review.get("pr_url") or "")
 
     pr = PlatformPR(
         platform=Platform(platform_str),

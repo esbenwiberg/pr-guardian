@@ -446,6 +446,13 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
         from pr_guardian.models.pr import Platform, PlatformPR
         from pr_guardian.platform.factory import create_adapter, create_github_adapter
         from pr_guardian.models.findings import Finding, Severity, Certainty
+        from pr_guardian.api.review import recover_org_project_from_pr_url
+
+        # The reviews table does not persist org/project. ADO's reviewer-vote
+        # and threads endpoints need the project segment, so recover it from
+        # the stored pr_url. Without this the URL collapses to .../{org}//...
+        # and ADO 400s with "A project name is required...".
+        org_from_url, project_from_url = recover_org_project_from_pr_url(platform_url)
 
         pr = PlatformPR(
             platform=Platform(platform_str),
@@ -457,9 +464,16 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
             author=review.get("author", ""),
             title=review.get("title", ""),
             head_commit_sha=review.get("head_commit_sha", ""),
-            org=review.get("org", ""),
-            project=review.get("project", ""),
+            org=review.get("org") or org_from_url,
+            project=review.get("project") or project_from_url,
         )
+
+        if platform_str == "ado" and not pr.project:
+            raise HTTPException(
+                422,
+                "ADO review is missing the project segment and no pr_url is "
+                "stored — cannot construct platform URLs.",
+            )
 
         adapter = (
             await create_github_adapter()
@@ -499,7 +513,10 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
             if body.verdict == "approve":
                 await adapter.approve_pr(pr)
                 actions.append("approve_pr")
-                if body.comment_mode != "none" and (body.comment_to_author.strip() or fix_findings):
+                # Always post the summary unless the reviewer explicitly chose
+                # "none" — otherwise the PR has no record of who approved or
+                # which findings were addressed.
+                if body.comment_mode != "none":
                     await adapter.post_comment(pr, summary)
                     actions.append("post_comment")
             elif body.verdict == "request_changes":

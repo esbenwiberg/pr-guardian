@@ -32,6 +32,23 @@ _ADO_PR_RE = re.compile(
 )
 
 
+def recover_org_project_from_pr_url(pr_url: str) -> tuple[str, str]:
+    """Best-effort (org, project) recovery from a stored PR URL.
+
+    The reviews table does not persist org/project columns. ADO platform
+    calls need the project segment in the URL path, so callers that build
+    a PlatformPR from a review row must recover it from the stored pr_url
+    (or fail loudly). Returns ("", "") on any parsing failure.
+    """
+    if not pr_url:
+        return "", ""
+    try:
+        stub, _ = _parse_pr_url(pr_url)
+        return stub.org or "", stub.project or ""
+    except Exception:
+        return "", ""
+
+
 class ReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
