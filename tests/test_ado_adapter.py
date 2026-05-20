@@ -176,6 +176,82 @@ async def test_body_already_set_skips_pr_get():
     assert commits == ["feat: cached"]
 
 
+# ---------------------------------------------------------------------------
+# request_changes — vote + comment contract
+# ---------------------------------------------------------------------------
+
+
+def _adapter_rw(put_resp: MagicMock, post_resp: MagicMock | None = None) -> ADOAdapter:
+    """Adapter wired for request_changes: mock put (vote) and post (comment)."""
+    adapter = ADOAdapter(pat="test-pat", org_url="https://dev.azure.com/org")
+    mock_client = AsyncMock()
+    # connectionData call for _get_current_user_id
+    conn_resp = _resp({"authenticatedUser": {"id": "user-guid-1234"}})
+    mock_client.get = AsyncMock(return_value=conn_resp)
+    mock_client.put = AsyncMock(return_value=put_resp)
+    mock_client.post = AsyncMock(return_value=post_resp or _resp({}))
+    adapter._client = mock_client
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_request_changes_puts_reject_vote():
+    adapter = _adapter_rw(_resp({}))
+    pr = _pr()
+    await adapter.request_changes(pr, "Please fix the auth flow.")
+    adapter._client.put.assert_awaited_once()
+    call_json = adapter._client.put.await_args.kwargs["json"]
+    assert call_json["vote"] == -5
+    assert call_json["id"] == "user-guid-1234"
+
+
+@pytest.mark.asyncio
+async def test_request_changes_posts_comment_when_body_present():
+    adapter = _adapter_rw(_resp({}))
+    pr = _pr()
+    await adapter.request_changes(pr, "Please fix the auth flow.")
+    adapter._client.post.assert_awaited_once()
+    posted_body = adapter._client.post.await_args.kwargs["json"]
+    assert "Please fix the auth flow" in posted_body["comments"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_request_changes_skips_comment_when_body_empty():
+    adapter = _adapter_rw(_resp({}))
+    await adapter.request_changes(_pr(), "")
+    adapter._client.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_request_changes_skips_comment_when_body_whitespace():
+    adapter = _adapter_rw(_resp({}))
+    await adapter.request_changes(_pr(), "   \n  ")
+    adapter._client.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_request_changes_vote_failure_propagates():
+    adapter = _adapter_rw(_resp({}, status_code=403))
+    with pytest.raises(httpx.HTTPStatusError):
+        await adapter.request_changes(_pr(), "some comment")
+    # comment must NOT be posted if vote failed
+    adapter._client.post.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_request_changes_comment_failure_raises_after_vote():
+    """Vote succeeded but comment POST fails — exception must propagate so callers
+    know the body was not delivered even though the vote was cast."""
+    comment_resp = _resp({}, status_code=500)
+    adapter = _adapter_rw(_resp({}), post_resp=comment_resp)
+    with pytest.raises(httpx.HTTPStatusError):
+        await adapter.request_changes(_pr(), "needs rework")
+    # vote was cast
+    adapter._client.put.assert_awaited_once()
+    # comment was attempted
+    adapter._client.post.assert_awaited_once()
+
+
 @pytest.mark.asyncio
 async def test_empty_body_already_hydrated_skips_pr_get():
     """body='' means _hydrate_pr ran and the PR genuinely has no description.
