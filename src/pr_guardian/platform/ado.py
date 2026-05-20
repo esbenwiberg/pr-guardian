@@ -400,6 +400,8 @@ class ADOAdapter:
             params={"api-version": "7.1"},
         )
         resp.raise_for_status()
+        if body.strip():
+            await self.post_comment(pr, body)
 
     async def add_label(self, pr: PlatformPR, label: str) -> None:
         client = self._get_client()
