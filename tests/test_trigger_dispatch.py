@@ -90,7 +90,7 @@ class TestTriggerRouteScanDispatch:
         # would raise if the real function ran instead, because the real function
         # requires platform credentials and would 500.
         mock_trigger.assert_awaited_once()
-        call_req = mock_trigger.call_args[0][0]
+        call_req = mock_trigger.call_args.args[0]
         assert call_req.repo == "octocat/spoon"
         assert call_req.platform == "github"
 
@@ -109,7 +109,7 @@ class TestTriggerRouteScanDispatch:
 
         assert resp.status_code == 200
         mock_trigger.assert_awaited_once()
-        call_req = mock_trigger.call_args[0][0]
+        call_req = mock_trigger.call_args.args[0]
         assert call_req.repo == "octocat/spoon"
         assert call_req.platform == "github"
 
@@ -134,6 +134,6 @@ class TestTriggerRouteScanDispatch:
         assert data["repo"] == "myproj/myrepo"
         assert data["platform"] == "ado"
         mock_trigger.assert_awaited_once()
-        call_req = mock_trigger.call_args[0][0]
+        call_req = mock_trigger.call_args.args[0]
         assert call_req.repo == "myproj/myrepo"
         assert call_req.platform == "ado"
