@@ -401,7 +401,17 @@ class ADOAdapter:
         )
         resp.raise_for_status()
         if body.strip():
-            await self.post_comment(pr, body)
+            try:
+                await self.post_comment(pr, body)
+            except Exception as exc:
+                log.error(
+                    "ado_request_changes_comment_failed",
+                    pr_id=pr.pr_id,
+                    repo=pr.repo,
+                    vote_cast=-5,
+                    error=str(exc),
+                )
+                raise
 
     async def add_label(self, pr: PlatformPR, label: str) -> None:
         client = self._get_client()

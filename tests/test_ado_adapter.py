@@ -239,6 +239,20 @@ async def test_request_changes_vote_failure_propagates():
 
 
 @pytest.mark.asyncio
+async def test_request_changes_comment_failure_raises_after_vote():
+    """Vote succeeded but comment POST fails — exception must propagate so callers
+    know the body was not delivered even though the vote was cast."""
+    comment_resp = _resp({}, status_code=500)
+    adapter = _adapter_rw(_resp({}), post_resp=comment_resp)
+    with pytest.raises(httpx.HTTPStatusError):
+        await adapter.request_changes(_pr(), "needs rework")
+    # vote was cast
+    adapter._client.put.assert_awaited_once()
+    # comment was attempted
+    adapter._client.post.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_empty_body_already_hydrated_skips_pr_get():
     """body='' means _hydrate_pr ran and the PR genuinely has no description.
     The adapter must NOT fire a second GET — the empty string is a valid fetched
