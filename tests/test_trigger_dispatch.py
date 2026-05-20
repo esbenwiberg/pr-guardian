@@ -44,12 +44,18 @@ class TestResolveRepoScanTarget:
 
 
 class TestTriggerRouteScanDispatch:
-    """POST /api/reviews/trigger with scan mode calls manual_repo_review with canonical repo/platform."""
+    """POST /api/reviews/trigger with scan mode calls manual_repo_review with canonical repo/platform.
+
+    The trigger route uses a lazy `from pr_guardian.api.review import manual_repo_review`
+    inside the function body, so patching the definition site
+    (pr_guardian.api.review.manual_repo_review) is correct — the lazy import
+    fetches the name from the module's namespace at call time, picking up the mock.
+    """
 
     @pytest.fixture()
     def client(self):
         from pr_guardian.main import app
-        with TestClient(app, raise_server_exceptions=False) as c:
+        with TestClient(app) as c:
             yield c
 
     def _mock_repo_resp(self, repo="octocat/spoon", platform="github"):
@@ -80,6 +86,9 @@ class TestTriggerRouteScanDispatch:
         data = resp.json()
         assert data["repo"] == "octocat/spoon"
         assert data["platform"] == "github"
+        # Prove the mock was actually called (not vacuous): assert_awaited_once
+        # would raise if the real function ran instead, because the real function
+        # requires platform credentials and would 500.
         mock_trigger.assert_awaited_once()
         call_req = mock_trigger.call_args[0][0]
         assert call_req.repo == "octocat/spoon"
@@ -99,6 +108,7 @@ class TestTriggerRouteScanDispatch:
             )
 
         assert resp.status_code == 200
+        mock_trigger.assert_awaited_once()
         call_req = mock_trigger.call_args[0][0]
         assert call_req.repo == "octocat/spoon"
         assert call_req.platform == "github"
@@ -123,6 +133,7 @@ class TestTriggerRouteScanDispatch:
         data = resp.json()
         assert data["repo"] == "myproj/myrepo"
         assert data["platform"] == "ado"
+        mock_trigger.assert_awaited_once()
         call_req = mock_trigger.call_args[0][0]
         assert call_req.repo == "myproj/myrepo"
         assert call_req.platform == "ado"
