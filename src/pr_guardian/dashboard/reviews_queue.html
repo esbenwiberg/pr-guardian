@@ -65,6 +65,7 @@
               <option value="recent">Recently changed</option>
             </select>
           </label>
+          <span id="scan-preview" class="hidden text-slate-400 italic ml-2"></span>
         </div>
       </form>
     </div>
@@ -334,6 +335,42 @@
   const triggerUrlEl = document.getElementById('trigger-url');
   const scanOptsEl = document.getElementById('scan-opts');
   const platformSelect = document.getElementById('scan-platform');
+  const scanPreviewEl = document.getElementById('scan-preview');
+
+  function resolveRepoScanPreview(url, platform) {
+    let m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url);
+    if (m) return { repo: m[1] + '/' + m[2], platform: 'github' };
+
+    m = /^https?:\/\/dev\.azure\.com\/[^/]+\/([^/]+)\/_git\/([^/]+?)(?:\.git)?\/?$/i.exec(url);
+    if (m) return { repo: m[1] + '/' + m[2], platform: 'ado' };
+
+    m = /^[A-Za-z0-9_.-]+\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(url);
+    if (m) return { repo: m[1] + '/' + m[2], platform: 'ado' };
+
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url)) {
+      return { repo: url, platform: platform || 'github' };
+    }
+    return null;
+  }
+
+  function updateScanPreview() {
+    const url = triggerUrlEl.value.trim();
+    if (!looksLikeScan(url)) {
+      scanPreviewEl.textContent = '';
+      scanPreviewEl.classList.add('hidden');
+      return;
+    }
+    const result = resolveRepoScanPreview(url, platformSelect.value);
+    if (result) {
+      const label = result.platform === 'ado' ? 'Azure DevOps' : 'GitHub';
+      scanPreviewEl.textContent = 'Will scan ' + label + ' repo: ' + result.repo;
+      scanPreviewEl.classList.remove('hidden');
+    } else {
+      scanPreviewEl.textContent = '';
+      scanPreviewEl.classList.add('hidden');
+    }
+  }
+
   triggerUrlEl.addEventListener('input', () => {
     const url = triggerUrlEl.value.trim();
     const isScan = looksLikeScan(url);
@@ -341,7 +378,10 @@
     if (isScan) {
       platformSelect.value = detectPlatformDefault(url);
     }
+    updateScanPreview();
   });
+
+  platformSelect.addEventListener('change', updateScanPreview);
 
   // Trigger form
   document.getElementById('trigger-form').addEventListener('submit', async (e) => {
@@ -385,6 +425,7 @@
 
   applyFilter();
   loadQueue();
+  updateScanPreview();
 })();
 </script>
 
