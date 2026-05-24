@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import dataclasses
+import typing
 
 from pr_guardian.models.findings import AgentResult, Finding, Severity, Certainty, Verdict
 
@@ -34,8 +35,8 @@ class TestFindingQuoteField:
         assert finding.quote == "+ return user.is_admin or allow_all"
 
     def test_quote_is_string_type(self):
-        fields = {f.name: f for f in dataclasses.fields(Finding)}
-        assert fields["quote"].type is str or fields["quote"].default == ""
+        hints = typing.get_type_hints(Finding)
+        assert hints["quote"] is str
 
 
 class TestAgentResultStatusField:

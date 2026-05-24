@@ -91,3 +91,18 @@ class TestChangeProfile:
             ["src/components/Button.tsx", "src/utils/sort.ts", "src/auth/login.py"],
             diff, SecuritySurface(), BlastRadius(), FileRolesConfig(),
         )
+        assert profile.crosses_architecture_boundary
+
+    def test_architecture_boundary_implies_architecture_agent_not_old_name(self):
+        """crossing architecture boundaries implies 'architecture', never 'architecture_intent'."""
+        diff = Diff(files=[
+            DiffFile(path="src/components/Button.tsx", status="modified"),
+            DiffFile(path="src/utils/sort.ts", status="modified"),
+            DiffFile(path="src/auth/login.py", status="modified"),
+        ])
+        profile = build_change_profile(
+            ["src/components/Button.tsx", "src/utils/sort.ts", "src/auth/login.py"],
+            diff, SecuritySurface(), BlastRadius(), FileRolesConfig(),
+        )
+        assert "architecture" in profile.implied_agents
+        assert "architecture_intent" not in profile.implied_agents
