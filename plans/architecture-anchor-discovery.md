@@ -43,7 +43,7 @@ it's at best a convention, possibly noise.
 
 | Signal | Class | What it tells the agent | Notes |
 |---|---|---|---|
-| `.pr-guardian.yml :: architecture_docs` | Rule | Explicit team-declared anchor file list | **Always wins.** Team has opted in. |
+| `review.yml :: architecture_docs` | Rule | Explicit team-declared anchor file list | **Always wins.** Team has opted in. |
 | `docs/adr/`, `docs/architecture/decisions/`, `doc/adr/`, `adr/` | Rule | One decision per file, dated, typically with Status: Accepted | MADR / Nygard format. Read all with Status != Superseded. |
 | `ARCHITECTURE.md` (root) | Rule or Convention | Depends on content — imperative vs. descriptive | Per matklad's pattern: orientation + module map. Treat as rule when imperative. |
 | `AGENTS.md` (root) | Convention | Author intent for AI agents — usually mixes architecture, build, test commands | **Filter:** only the architecture-relevant subset counts. Reject if it's only Claude Code instructions. |
@@ -75,7 +75,7 @@ When multiple signals are present, higher-precedence ones win on conflict.
 
 | Rank | Source | Rationale |
 |---|---|---|
-| 1 | `.pr-guardian.yml :: architecture_docs` | Explicit opt-in. Team named these files; trust them. |
+| 1 | `review.yml :: architecture_docs` | Explicit opt-in. Team named these files; trust them. |
 | 2 | Machine-enforced architecture tests (ArchUnit / ts-arch / NetArchTest / dependency-cruiser) | CI already enforces these. Aligning the LLM with the linter is free correctness. |
 | 3 | ADRs with `Status: Accepted` | Versioned, dated, atomic decisions. The gold standard. |
 | 4 | `ARCHITECTURE.md` (when imperative) | Single source of truth when it exists and is current. |
@@ -102,7 +102,7 @@ Findings cite at least one anchor. The anchor's weight feeds the finding's
 | Anchor class | Weight | Certainty floor in finding |
 |---|---|---|
 | Machine-enforced (rank 2) | 1.0 | high |
-| ADR (rank 3) or `.pr-guardian.yml`-declared rule doc | 0.9 | high |
+| ADR (rank 3) or `review.yml`-declared rule doc | 0.9 | high |
 | `ARCHITECTURE.md` / `CONVENTIONS.md` (rank 4–5) | 0.7 | medium |
 | C4 / Structurizr (rank 6) | 0.7 | medium |
 | `AGENTS.md` / `CLAUDE.md` (rank 7) | 0.5 | medium |
@@ -147,7 +147,7 @@ Walk cheap-first. Stop early once mode is locked in.
 function discover_anchors(repo_root, changed_paths) -> AnchorSet:
 
     # Stage 0 — explicit override (cheapest, decides everything)
-    if exists(repo_root / ".pr-guardian.yml"):
+    if exists(repo_root / "review.yml"):
         cfg = parse_yaml(...)
         if cfg.architecture_docs:
             return AnchorSet(
@@ -274,7 +274,7 @@ architecture section while its "how to run tests" section is ignored.
 
 ---
 
-## Configuration Surface (`.pr-guardian.yml`)
+## Configuration Surface (`review.yml`)
 
 New optional field, parsed by `src/pr_guardian/config/schema.py`:
 

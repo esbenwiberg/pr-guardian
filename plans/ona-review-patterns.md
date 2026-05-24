@@ -241,7 +241,7 @@ pattern worth pulling.
 
 | # | Borrow | Why | Effort |
 |---|---|---|---|
-| 1 | **Codify per-engineer review styles as named personas.** Ship Guardian's six specialists as a *default set*, but allow teams to drop additional named review styles into `.pr-guardian/reviewers/<name>.md`. The dashboard surfaces them as togglable extra agents. The slash-command UI is unnecessary (Guardian isn't an interactive agent), but the *file format* of "one named reviewer = one prompt" is reusable. | Lets a team encode "review like our security lead" as a Guardian agent without forking any specialist. Bottom-up complement to the top-down `.pr-guardian.yml` config. | M |
+| 1 | **Codify per-engineer review styles as named personas.** Ship Guardian's six specialists as a *default set*, but allow teams to drop additional named review styles into `.pr-guardian/reviewers/<name>.md`. The dashboard surfaces them as togglable extra agents. The slash-command UI is unnecessary (Guardian isn't an interactive agent), but the *file format* of "one named reviewer = one prompt" is reusable. | Lets a team encode "review like our security lead" as a Guardian agent without forking any specialist. Bottom-up complement to the top-down `review.yml` config. | M |
 | 2 | **Document an explicit auto-approval policy template.** Borrow Ona's exact framing — non-self-classifiable, named criteria, governed model changes — and ship it as a sample `.pr-guardian/policy.md` that teams paste into their repo. Guardian already computes the triage tier; the missing piece is the *policy text* that justifies the gate to skeptical reviewers. Ona's policy reads as a model. | Auto-approval lives or dies on trust. A policy that says "this AI cannot be gamed; here are the exact criteria; the model is locked" is the unlock. Pure docs / template work — no code. | XS |
 | 3 | **Add "the same review prompt can take inline steering arguments" to the re-review flow.** When the author re-reviews after dismissing findings (per `finding-feedback-loop.md`), let them add a one-line steering note that gets injected into every specialist's user message — `<reviewer_note>` block alongside `<previously_dismissed>`. Equivalent to Ona's `/review-like-mads Focus on auth/`. | Tiny addition to the feedback-loop plan. Adds zero new agent code, just one more XML block in `build_agent_context`. | XS |
 
@@ -318,7 +318,7 @@ follow-up.
 ### 5.5 Skills as a third config surface
 
 Guardian today has two config surfaces: the built-in specialist prompts
-(shipped with the code) and the planned `.pr-guardian.yml` (per-repo
+(shipped with the code) and the planned `review.yml` (per-repo
 overrides). Ona shows a third tier: **per-repo *additional* agents**
 contributed as `SKILL.md`-style files in the repo, auto-discovered by
 the orchestrator. This is what proposal #1 in §4 above formalizes.

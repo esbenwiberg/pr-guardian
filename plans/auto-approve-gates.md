@@ -1,6 +1,6 @@
 # Auto-Approve Gate Hardening
 
-> Make auto-approve explicit opt-in via `.pr-guardian.yml`, add a hot-path
+> Make auto-approve explicit opt-in via `review.yml`, add a hot-path
 > gate, and replace the stubbed nightly hotspot computation with on-demand
 > per-file lookups so the gate works on day 1 for any repo.
 
@@ -9,7 +9,7 @@
 Three problems with the current auto-approve path:
 
 1. **Silent-default risk.** `AutoApproveConfig.enabled` defaults to `True`.
-   A repo with no `.pr-guardian.yml` at all can have PRs auto-approved
+   A repo with no `review.yml` at all can have PRs auto-approved
    using built-in defaults. The team never declared they wanted this.
 2. **No hot-path gate.** Guardian's TrustTier system blocks auto-approve
    based on path sensitivity (security-critical, infra, config). It does
@@ -31,11 +31,11 @@ Three problems with the current auto-approve path:
 | Change | Today | After |
 |---|---|---|
 | `AutoApproveConfig.enabled` default | `True` | `False` |
-| Behavior with no `.pr-guardian.yml` | Auto-approve possible | Auto-approve impossible |
-| Behavior with `.pr-guardian.yml` but no explicit `auto_approve.enabled` | Defaults applied (auto-approve possible) | Default `False` (auto-approve impossible) |
+| Behavior with no `review.yml` | Auto-approve possible | Auto-approve impossible |
+| Behavior with `review.yml` but no explicit `auto_approve.enabled` | Defaults applied (auto-approve possible) | Default `False` (auto-approve impossible) |
 | `repo_risk_class` default | `"standard"` | No default — must be explicit when `auto_approve.enabled: true` |
 
-Net rule: **auto-approve fires only if the repo's `.pr-guardian.yml`
+Net rule: **auto-approve fires only if the repo's `review.yml`
 explicitly sets `auto_approve.enabled: true` AND explicitly sets
 `repo_risk_class`.** Anything else (weights, thresholds, branch lists)
 can still default — those are tuning knobs, not consent.
@@ -128,7 +128,7 @@ After these changes, auto-approve fires only if **all** of:
 
 | Gate | Source |
 |---|---|
-| `.pr-guardian.yml` exists with explicit `auto_approve.enabled: true` | New |
+| `review.yml` exists with explicit `auto_approve.enabled: true` | New |
 | `repo_risk_class` explicitly set | New |
 | Target branch matches `allowed_target_branches` | Existing |
 | CI checks pass (`require_all_checks_pass`) | Existing |

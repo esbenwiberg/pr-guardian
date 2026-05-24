@@ -74,7 +74,7 @@ Grouped by purpose. Each row is "what the technique is" + "who recommends it"
 
 | Pattern | Sources | Code-review-specific note |
 |---|---|---|
-| **High-priority repo-local instruction file** | Anthropic `REVIEW.md` ("injected directly into every agent... as highest-priority instruction block"); Greptile `greptile.json` instructions; CodeRabbit `.coderabbit.yaml` | Maps onto `agent-redesign.md`'s `.pr-guardian.yml::architecture_docs` proposal but is broader — per-class severity overrides, skip rules, repo-specific must-checks. |
+| **High-priority repo-local instruction file** | Anthropic `REVIEW.md` ("injected directly into every agent... as highest-priority instruction block"); Greptile `greptile.json` instructions; CodeRabbit `.coderabbit.yaml` | Maps onto `agent-redesign.md`'s `review.yml::architecture_docs` proposal but is broader — per-class severity overrides, skip rules, repo-specific must-checks. |
 | **Re-review convergence rule** | Anthropic REVIEW.md example: *"after the first review, suppress new nits and post Important findings only"* | Directly relevant to `finding-feedback-loop.md`. The re-review stage should not produce a fresh nit storm. |
 
 ---
@@ -339,7 +339,7 @@ Things the leaders use but where the evidence-for-Guardian is weaker.
 | **Asking the model to self-rate confidence and then post-filter on that** | Recall-vs-precision tradeoffs (Gap 6) | The model's confidence is correlated with truth but not strongly. Don't trust it as an absolute threshold. | Use confidence as one input to validator + dashboard ranking, never as a hard cutoff in the specialist itself. Anthropic Code Review uses 80/100 as default but lets the user tune. |
 | **"According to the diff..." prompt prefix** | Improves quoting accuracy in research tasks (paper: arXiv 2305.13252) | Untested for code review specifically | Lower-effort version of Gap 4 (require quote). If quote-as-schema-field is too heavy, try this first. |
 | **Multi-agent debate / dueling reviewers** | High-stakes domains where false negatives matter most | Latency + cost roughly 2x; modest quality gain for code review per Ellipsis's experience ("we use *filters* not debate") | Guardian's six specialists + validator already provide the diversity; don't add a duelling layer. |
-| **Repo-local `REVIEW.md` style override file** | Teams with strong opinions about severity calibration, skip rules, repo-specific checks | Adds a config surface to maintain; small teams won't use it | The `agent-redesign.md` plan already proposes `.pr-guardian.yml::architecture_docs`. Worth generalising to `.pr-guardian.yml::review_overrides` once the prompt fixes above land — leverages the highest-priority-injection pattern Anthropic uses. |
+| **Repo-local `REVIEW.md` style override file** | Teams with strong opinions about severity calibration, skip rules, repo-specific checks | Adds a config surface to maintain; small teams won't use it | The `agent-redesign.md` plan already proposes `review.yml::architecture_docs`. Worth generalising to `review.yml::review_overrides` once the prompt fixes above land — leverages the highest-priority-injection pattern Anthropic uses. |
 
 ---
 
