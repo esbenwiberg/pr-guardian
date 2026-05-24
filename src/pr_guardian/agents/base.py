@@ -23,6 +23,10 @@ from pr_guardian.models.findings import (
 
 log = structlog.get_logger()
 
+# The exact category string used by the intent agent for PR-level scope-opacity findings.
+# These are the only findings permitted to have line=null with a non-diff quote.
+SCOPE_OPACITY_CATEGORY = "scope-opacity"
+
 AGENT_OUTPUT_SCHEMA = """
 IMPORTANT — EVIDENCE RULES:
 - Only report findings based on code you can actually see in the diff below.
@@ -35,6 +39,11 @@ IMPORTANT — SCOPE RULES:
 - Do NOT flag pre-existing patterns, style issues, or code smells in context lines (lines starting with ` ` or `-`). These are handled by separate scheduled scans.
 - Exception: you MAY flag surrounding context if the NEW code in this PR creates a risk that did not exist before — e.g., new code that misuses an existing variable in an unsafe way. In that case, explain in the description why this is a NEW risk introduced by this change, not a pre-existing issue.
 - Findings about pre-existing code that is not affected by this change will be discarded.
+
+IMPORTANT — QUOTE RULES:
+- Every finding MUST include a "quote" field containing the exact verbatim text of the `+` diff line that grounds the finding (strip the leading `+` character).
+- The quote must be an exact match of a visible added line in that file's diff. Findings with a missing, empty, or mismatched quote will be automatically discarded.
+- Exception: category "scope-opacity" findings with line=null may set quote to a description of the missing/vague PR anchor (e.g. "PR title/body lacks a useful intent anchor").
 
 Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching this schema:
 {
@@ -49,6 +58,7 @@ Respond with ONLY raw valid JSON (no markdown fences, no commentary) matching th
       "language": "string",
       "file": "string",
       "line": null or integer,
+      "quote": "exact verbatim text of the + diff line grounding this finding (strip the leading +)",
       "description": "string",
       "suggestion": "string",
       "cwe": "CWE-xxx or null",
@@ -233,6 +243,8 @@ class BaseAgent:
         model = resolve_model(self.config, self.agent_name)
         llm = self._get_llm()
 
+        diff_map = {df.path: df.patch for df in context.diff.files}
+
         try:
             response = await llm.complete(
                 system=system_prompt,
@@ -242,7 +254,7 @@ class BaseAgent:
                 temperature=self.config.llm.temperature,
                 response_format="json",
             )
-            result = self._parse_response(response.content, languages)
+            result = self._parse_response(response.content, languages, diff_map=diff_map)
             result.extras["model"] = model
             result.extras["response_length"] = len(response.content)
             result.extras["input_tokens"] = response.input_tokens
@@ -258,6 +270,35 @@ class BaseAgent:
                 error=str(e),
                 extras={"model": model},
             )
+
+    @staticmethod
+    def _extract_added_lines(patch: str) -> frozenset[str]:
+        """Return stripped text of all visible added lines from a diff patch.
+
+        Skips the `+++` file-header line; strips the leading `+` and surrounding
+        whitespace so comparisons are whitespace-insensitive on both sides.
+        """
+        return frozenset(
+            line[1:].strip()
+            for line in patch.splitlines()
+            if line.startswith("+") and not line.startswith("+++")
+        )
+
+    @staticmethod
+    def _is_valid_finding(finding: Finding, diff_map: dict[str, str]) -> bool:
+        """Return True when the finding satisfies the quote contract.
+
+        Normal findings must have file, line, and a quote that matches a visible
+        added line in the diff.  The sole exception is the intent scope-opacity
+        category with line=None, which supplies a PR-anchor description as quote.
+        """
+        if finding.category == SCOPE_OPACITY_CATEGORY and finding.line is None:
+            return bool(finding.quote)
+        if not finding.file or finding.line is None or not finding.quote:
+            return False
+        patch = diff_map.get(finding.file, "")
+        added = BaseAgent._extract_added_lines(patch)
+        return finding.quote.strip() in added
 
     @staticmethod
     def _extract_json(raw: str) -> str:
@@ -363,8 +404,17 @@ class BaseAgent:
 
         return text
 
-    def _parse_response(self, raw: str, languages: list[str]) -> AgentResult:
-        """Parse LLM JSON response into AgentResult."""
+    def _parse_response(
+        self,
+        raw: str,
+        languages: list[str],
+        diff_map: dict[str, str] | None = None,
+    ) -> AgentResult:
+        """Parse LLM JSON response into AgentResult.
+
+        When diff_map is provided, findings that fail the quote contract are
+        dropped before the AgentResult is returned.
+        """
         extracted = self._extract_json(raw)
         try:
             data = json.loads(extracted)
@@ -390,6 +440,20 @@ class BaseAgent:
         findings = [self._parse_finding(f) for f in data.get("findings", [])]
         cross_lang = [self._parse_finding(f) for f in data.get("cross_language_findings", [])]
 
+        if diff_map is not None:
+            valid_findings = [f for f in findings if self._is_valid_finding(f, diff_map)]
+            dropped = len(findings) - len(valid_findings)
+            if dropped:
+                log.info(
+                    "agent_findings_dropped_ungrounded",
+                    agent=self.agent_name,
+                    dropped=dropped,
+                )
+            findings = valid_findings
+
+            valid_cross = [f for f in cross_lang if self._is_valid_finding(f, diff_map)]
+            cross_lang = valid_cross
+
         return AgentResult(
             agent_name=self.agent_name,
             verdict=verdict,
@@ -409,6 +473,7 @@ class BaseAgent:
             file=data.get("file", ""),
             line=data.get("line"),
             description=data.get("description", ""),
+            quote=data.get("quote", ""),
             suggestion=data.get("suggestion", ""),
             cwe=data.get("cwe"),
             compliance=data.get("compliance"),

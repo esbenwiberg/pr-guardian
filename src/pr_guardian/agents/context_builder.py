@@ -110,13 +110,18 @@ def build_agent_context(
     parts: list[str] = []
 
     # PR metadata
-    parts.append(f"## PR: {context.pr.title}")
+    parts.append(f"## PR Metadata")
+    parts.append(f"- Title: {context.pr.title}")
     parts.append(f"- Author: {context.pr.author}")
     parts.append(f"- Branch: {context.pr.source_branch} → {context.pr.target_branch}")
     parts.append(f"- Repo: {context.pr.repo}")
     parts.append(f"- Languages: {', '.join(context.language_map.languages.keys())}")
     parts.append(f"- Files changed: {len(context.changed_files)}")
     parts.append(f"- Lines changed: {context.lines_changed}")
+
+    # PR description — included for all agents; required by intent verification
+    if context.pr.body:
+        parts.append(f"\n## PR Description\n{context.pr.body}")
 
     # Security surface context
     if context.security_surface.has_hits():
@@ -145,7 +150,8 @@ def build_agent_context(
     prioritized = _prioritize_files(context)
     diff_parts = _build_diff_section(prioritized, diff_budget)
 
-    parts.append("\n## Diff\n")
+    parts.append("\n## Diff")
+    parts.append("*Legend: `+` added (cite these as quotes), `-` deleted, ` ` context (read-only)*\n")
     parts.extend(diff_parts)
 
     # Append dismissal context from previous review feedback

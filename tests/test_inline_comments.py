@@ -639,6 +639,61 @@ def test_build_inline_comment_body_low_severity_uppercased():
     assert body.startswith("**[LOW] Lint**")
 
 
+def test_build_inline_comment_body_quote_free():
+    """Inline comment body must not contain the finding's quote field."""
+    quote_text = "return user.is_admin or allow_all"
+    f = Finding(
+        severity=Severity.HIGH,
+        certainty=Certainty.DETECTED,
+        category="Auth",
+        language="python",
+        file="src/app.py",
+        line=10,
+        description="Unsafe admin bypass.",
+        suggestion="Remove the allow_all path.",
+        quote=quote_text,
+    )
+    body = build_inline_comment_body([f])
+    # Quote must not appear in the inline comment
+    assert quote_text not in body
+    # Required fields must still be present
+    assert "[HIGH]" in body
+    assert "Auth" in body
+    assert "Unsafe admin bypass." in body
+    assert "Remove the allow_all path." in body
+
+
+def test_build_inline_comment_body_quote_free_multiple_findings():
+    """With multiple findings, none of their quotes appear in the body."""
+    f1 = Finding(
+        severity=Severity.HIGH,
+        certainty=Certainty.DETECTED,
+        category="Auth",
+        language="python",
+        file="src/app.py",
+        line=10,
+        description="Auth bypass.",
+        suggestion="Fix it.",
+        quote="return user.is_admin or allow_all",
+    )
+    f2 = Finding(
+        severity=Severity.MEDIUM,
+        certainty=Certainty.SUSPECTED,
+        category="SQL",
+        language="python",
+        file="src/app.py",
+        line=10,
+        description="SQL injection risk.",
+        suggestion="Use parameterised queries.",
+        quote="cursor.execute(f'SELECT * FROM users WHERE id={user_id}')",
+    )
+    body = build_inline_comment_body([f1, f2])
+    assert f1.quote not in body
+    assert f2.quote not in body
+    assert "[HIGH]" in body
+    assert "[MEDIUM]" in body
+
+
 # ---------------------------------------------------------------------------
 # Orchestrator _post_inline_and_summary — mechanical findings path
 # ---------------------------------------------------------------------------
