@@ -26,8 +26,8 @@ _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     "claude-opus": (15.0, 75.0),
     "claude-sonnet": (3.0, 15.0),
     "claude-haiku": (0.80, 4.0),
-    "gpt-4o": (2.50, 10.0),
     "gpt-4o-mini": (0.15, 0.60),
+    "gpt-4o": (2.50, 10.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 
