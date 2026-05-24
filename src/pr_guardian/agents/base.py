@@ -452,6 +452,13 @@ class BaseAgent:
             findings = valid_findings
 
             valid_cross = [f for f in cross_lang if self._is_valid_finding(f, diff_map)]
+            dropped_cross = len(cross_lang) - len(valid_cross)
+            if dropped_cross:
+                log.info(
+                    "agent_cross_language_findings_dropped_ungrounded",
+                    agent=self.agent_name,
+                    dropped=dropped_cross,
+                )
             cross_lang = valid_cross
 
         return AgentResult(
