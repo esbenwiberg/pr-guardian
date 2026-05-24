@@ -21,7 +21,7 @@ Introduced the shared contracts that the remainder of the agent redesign depends
 
 ### `src/pr_guardian/models/findings.py`
 - `AgentStatus = Literal["ran", "skipped"]` type alias added at module level.
-- `Finding.quote: str = ""` inserted after `line: int | None` and before `description`.
+- `Finding.quote: str = ""` inserted after `description: str` and before `suggestion: str = ""`. Note: the spec shows `quote` without a default (before `description`), but since existing callers construct `Finding` without `quote`, the field must carry a default. Python dataclass rules require default-valued fields to follow non-default fields, so `quote` comes after `description`.
 - `AgentResult.status: AgentStatus = "ran"` and `AgentResult.status_reason: str | None = None` inserted after `verdict` and before `languages_reviewed`.
 
 ### `src/pr_guardian/config/schema.py`
