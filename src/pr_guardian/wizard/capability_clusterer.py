@@ -17,6 +17,7 @@ inside a locked scaffold:
 This module provides an `async cluster_capabilities(...)` entry point.
 3b wires it into the wizard's data path; 3a only ships the module + tests.
 """
+
 from __future__ import annotations
 
 import json
@@ -62,6 +63,7 @@ _MAX_PATCH_PER_FILE = 600
 @dataclass(frozen=True)
 class FileSummary:
     """Per-file context fed to the LLM."""
+
     path: str
     role: str
     locs: int
@@ -71,6 +73,7 @@ class FileSummary:
 @dataclass(frozen=True)
 class FindingSummary:
     """Per-finding context fed to the LLM (just enough to spot risk hot-spots)."""
+
     file: str
     severity: str
     category: str
@@ -87,6 +90,7 @@ class Capability:
 @dataclass
 class ClusterResult:
     """Outcome of clustering. `source` makes the fallback path observable."""
+
     capabilities: list[Capability]
     source: str  # "llm" | "fallback_small_pr" | "fallback_no_files" | "fallback_error"
     briefing: dict[str, str] | None = None
@@ -126,15 +130,22 @@ async def cluster_capabilities(
 
     system = _build_system_prompt(soft_cap)
     user = _build_user_prompt(
-        files, findings, pr_title, pr_body,
+        files,
+        findings,
+        pr_title,
+        pr_body,
         commit_messages=commit_messages or [],
         file_patches=file_patches or {},
     )
 
     try:
         response = await llm_client.complete(
-            system=system, user=user, model=model,
-            max_tokens=6144, temperature=0.1, response_format="json",
+            system=system,
+            user=user,
+            model=model,
+            max_tokens=6144,
+            temperature=0.1,
+            response_format="json",
         )
     except Exception as exc:  # noqa: BLE001 — the goal is graceful fallback
         log.warning("capability_clusterer_llm_call_failed", error=str(exc))
@@ -145,9 +156,13 @@ async def cluster_capabilities(
         )
 
     try:
-        capabilities, briefing = _parse_and_validate(response.content, files=files, soft_cap=soft_cap)
+        capabilities, briefing = _parse_and_validate(
+            response.content, files=files, soft_cap=soft_cap
+        )
     except _ParseError as exc:
-        log.warning("capability_clusterer_parse_failed", error=str(exc), raw=response.content[:500])
+        log.warning(
+            "capability_clusterer_parse_failed", error=str(exc), raw=response.content[:500]
+        )
         return ClusterResult(
             capabilities=[_single_capability(files)],
             source="fallback_error",
@@ -184,7 +199,7 @@ def _build_system_prompt(soft_cap: int) -> str:
         f"- Output between 1 and {soft_cap} capabilities. Fewer is better.\n"
         "- Every input file must appear in exactly one capability.\n"
         "- Capability names should reveal *what the change does*, not where the "
-        "files live (e.g. \"Microsoft Graph integration\" not \"Infrastructure/Graph\").\n"
+        'files live (e.g. "Microsoft Graph integration" not "Infrastructure/Graph").\n'
         "- A capability's `intent` is one or two sentences explaining what the "
         "capability delivers and the role it plays in the PR.\n"
         f"- A capability's `layers` is a subset of this fixed vocabulary: {layers}. "
@@ -262,7 +277,7 @@ def _build_user_prompt(
             patch = (file_patches.get(f.path) or "").strip()
             if not patch:
                 continue
-            excerpt = patch[:min(_MAX_PATCH_PER_FILE, patch_budget)]
+            excerpt = patch[: min(_MAX_PATCH_PER_FILE, patch_budget)]
             patch_budget -= len(excerpt)
             patch_lines.append(f"\n--- {f.path} ---")
             patch_lines.append(excerpt)
@@ -321,14 +336,16 @@ def _parse_and_validate(
         if not name or not intent:
             continue
         cap_files = tuple(
-            p for p in (entry.get("files") or [])
+            p
+            for p in (entry.get("files") or [])
             if isinstance(p, str) and p in valid_paths and p not in seen_paths
         )
         if not cap_files:
             continue
         cap_layers = tuple(
-            l for l in (entry.get("layers") or [])
-            if isinstance(l, str) and l in LAYER_VOCAB_SET
+            layer
+            for layer in (entry.get("layers") or [])
+            if isinstance(layer, str) and layer in LAYER_VOCAB_SET
         )
         seen_paths.update(cap_files)
         out.append(Capability(name=name, intent=intent, files=cap_files, layers=cap_layers))
@@ -377,7 +394,7 @@ def _strip_fences(raw: str) -> str:
         if first_newline > 0:
             s = s[first_newline + 1 :]
         if s.endswith("```"):
-            s = s[: -3]
+            s = s[:-3]
     return s.strip()
 
 

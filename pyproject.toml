@@ -9,6 +9,7 @@ description = "Automated PR review pipeline — auto-approves low-risk PRs, esca
 requires-python = ">=3.12"
 dependencies = [
     "fastapi",
+    "starlette>=1.0.1",  # PYSEC-2026-161 — pin transitive
     "uvicorn[standard]",
     "httpx",
     "pyyaml",
@@ -52,6 +53,9 @@ asyncio_mode = "auto"
 [tool.ruff]
 line-length = 99
 target-version = "py312"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/test_inline_comments.py" = ["E402"]  # intentional mid-file imports per section
 
 [tool.pip-audit]
 strict = true
