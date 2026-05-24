@@ -1,0 +1,35 @@
+contract_version: 1
+title: "Clean stale hotspot documentation"
+depends_on: [02-add-hotspot-evaluator]
+scenarios:
+  - id: stale-hotspot-docs-removed
+    given:
+      - "the targeted hotspot docs are scanned"
+    when:
+      - "the docs regression test checks hotspot sections"
+    then:
+      - "hotspot docs no longer reference nightly refreshes, precomputed hotspot files, .pr-guardian/hotspots.json, or 80th percentile hotspot rules"
+  - id: on-demand-hotspot-docs-present
+    given:
+      - "the targeted hotspot docs are scanned"
+    when:
+      - "the docs regression test checks required current semantics"
+    then:
+      - "docs describe on-demand path-history evaluation"
+      - "docs mention the 90-day window, thresholds 8 and 0.3, 24 hour in-memory cache, reasoned exemptions, and fail-closed lookup failures"
+required_facts:
+  - id: fact-hotspot-docs-remove-nightly
+    proves: [stale-hotspot-docs-removed]
+    kind: unit-test
+    artifact:
+      path: tests/test_hotspot_docs.py
+      change: create
+    command: python -m pytest tests/test_hotspot_docs.py::test_hotspot_docs_do_not_reference_nightly_refresh -q
+  - id: fact-hotspot-docs-current-defaults
+    proves: [on-demand-hotspot-docs-present]
+    kind: unit-test
+    artifact:
+      path: tests/test_hotspot_docs.py
+      change: create
+    command: python -m pytest tests/test_hotspot_docs.py::test_hotspot_docs_describe_on_demand_defaults -q
+human_review: []

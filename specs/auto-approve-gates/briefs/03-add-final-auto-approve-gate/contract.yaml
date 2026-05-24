@@ -1,0 +1,76 @@
+contract_version: 1
+title: "Add shared final auto-approval gate"
+depends_on: [01-add-config-consent, 02-add-hotspot-evaluator]
+scenarios:
+  - id: current-root-config-edit-blocks
+    given:
+      - "a PR that is otherwise a candidate for auto-approval"
+      - "one changed file has current path exactly review.yml"
+    when:
+      - "the final auto-approval gate runs"
+    then:
+      - "the decision is downgraded to human_review"
+      - "a config_policy sticky trigger is present with root_config_changed details"
+  - id: dismissed-findings-rereview-is-gated
+    given:
+      - "a re-review where every original finding has been dismissed"
+      - "a final-gate blocker such as missing explicit consent exists"
+    when:
+      - "the re-review completes"
+    then:
+      - "the result is not platform-approved"
+      - "the blocker appears as a sticky trigger"
+  - id: resolved-findings-rereview-is-gated
+    given:
+      - "a re-review where all re-evaluated findings are resolved"
+      - "a final-gate blocker such as a hotspot lookup failure exists"
+    when:
+      - "the re-review completes"
+    then:
+      - "the result is not platform-approved"
+      - "the blocker appears as a sticky trigger"
+  - id: trigger-details-contract
+    given:
+      - "a hotspot or config_policy sticky trigger includes details"
+    when:
+      - "the trigger is serialized for storage/API payloads and validation"
+    then:
+      - "details round-trip without being dropped"
+      - "config_policy is an accepted trigger kind"
+required_facts:
+  - id: fact-root-review-yml-current-path-blocks
+    proves: [current-root-config-edit-blocks]
+    kind: unit-test
+    artifact:
+      path: tests/test_auto_approve_final_gate.py
+      change: create
+    command: python -m pytest tests/test_auto_approve_final_gate.py::test_root_review_yml_current_path_adds_config_policy_trigger -q
+  - id: fact-dismissed-rereview-gated
+    proves: [dismissed-findings-rereview-is-gated]
+    kind: integration-test
+    artifact:
+      path: tests/test_auto_approve_final_gate.py
+      change: create
+    command: python -m pytest tests/test_auto_approve_final_gate.py::test_dismissed_findings_rereview_still_runs_final_auto_approve_gate -q
+  - id: fact-resolved-rereview-gated
+    proves: [resolved-findings-rereview-is-gated]
+    kind: integration-test
+    artifact:
+      path: tests/test_auto_approve_final_gate.py
+      change: create
+    command: python -m pytest tests/test_auto_approve_final_gate.py::test_resolved_findings_rereview_still_runs_final_auto_approve_gate -q
+  - id: fact-trigger-details-round-trip
+    proves: [trigger-details-contract]
+    kind: contract-test
+    artifact:
+      path: tests/test_engine_sticky_split.py
+      change: update
+    command: python -m pytest tests/test_engine_sticky_split.py::test_sticky_trigger_details_round_trip -q
+  - id: fact-config-policy-kind-accepted
+    proves: [trigger-details-contract]
+    kind: contract-test
+    artifact:
+      path: tests/test_verify_endpoint.py
+      change: update
+    command: python -m pytest tests/test_verify_endpoint.py::test_config_policy_trigger_kind_is_allowed -q
+human_review: []

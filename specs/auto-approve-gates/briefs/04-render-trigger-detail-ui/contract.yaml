@@ -1,0 +1,50 @@
+contract_version: 1
+title: "Render structural trigger details in existing UI"
+depends_on: [03-add-final-auto-approve-gate]
+scenarios:
+  - id: review-detail-hotspot-visible
+    given:
+      - "a review payload contains a hotspot sticky trigger with details"
+    when:
+      - "the review detail page renders"
+    then:
+      - "the Structural Triggers section shows file path, 90-day counts, fix ratio, thresholds, cache state, and computed timestamp"
+  - id: wizard-hotspot-visible
+    given:
+      - "a wizard payload contains a hotspot sticky trigger with details"
+    when:
+      - "the wizard renders the trigger card"
+    then:
+      - "the card shows the hotspot details"
+      - "Show code, Acknowledge & Approve, and Needs Fix actions remain available"
+  - id: config-policy-visible
+    given:
+      - "a review payload contains a config_policy sticky trigger with details"
+    when:
+      - "review detail and wizard surfaces render it"
+    then:
+      - "both surfaces show a readable config-policy label and message"
+      - "older triggers without details still render"
+required_facts:
+  - id: fact-review-detail-hotspot-details-browser
+    proves: [review-detail-hotspot-visible]
+    kind: browser-test
+    artifact:
+      path: tests/browser/auto_approve_trigger_details.spec.mjs
+      change: create
+    command: node tests/browser/auto_approve_trigger_details.spec.mjs --view=review-detail
+  - id: fact-wizard-hotspot-details-browser
+    proves: [wizard-hotspot-visible]
+    kind: browser-test
+    artifact:
+      path: tests/browser/auto_approve_trigger_details.spec.mjs
+      change: create
+    command: node tests/browser/auto_approve_trigger_details.spec.mjs --view=wizard
+  - id: fact-config-policy-details-context
+    proves: [config-policy-visible]
+    kind: unit-test
+    artifact:
+      path: tests/test_dashboard_triage_enrichment.py
+      change: update
+    command: python -m pytest tests/test_dashboard_triage_enrichment.py::test_config_policy_trigger_details_render_context -q
+human_review: []

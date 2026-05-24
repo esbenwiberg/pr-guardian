@@ -1,0 +1,53 @@
+contract_version: 1
+title: "Add explicit target-branch auto-approve consent"
+depends_on: []
+scenarios:
+  - id: defaults-deny-auto-approve
+    given:
+      - "service defaults and schema defaults are loaded without repo overrides"
+    when:
+      - "auto_approve config is inspected"
+    then:
+      - "auto_approve.enabled is false"
+      - "respect_hotspots is true"
+      - "hotspot thresholds default to 8 commits in 90 days and 0.3 fix ratio"
+      - "hotspot_exemptions defaults to an empty list"
+  - id: target-branch-consent
+    given:
+      - "a PR whose head changes review.yml but whose target branch review.yml is missing or incomplete"
+    when:
+      - "the orchestrator loads repo config for review"
+    then:
+      - "config consent is evaluated from the target branch ref"
+      - "the PR-head review.yml cannot grant auto-approve consent"
+  - id: explicit-fields-required
+    given:
+      - "target branch review.yml exists but omits auto_approve.enabled or repo_risk_class"
+    when:
+      - "repo config is loaded"
+    then:
+      - "the load result marks the omitted field as not explicit"
+      - "has_auto_approve_consent is false"
+required_facts:
+  - id: fact-auto-approve-defaults-off
+    proves: [defaults-deny-auto-approve]
+    kind: unit-test
+    artifact:
+      path: tests/test_auto_approve_config.py
+      change: create
+    command: python -m pytest tests/test_auto_approve_config.py::test_defaults_disable_auto_approve -q
+  - id: fact-target-branch-review-yml-controls-consent
+    proves: [target-branch-consent]
+    kind: integration-test
+    artifact:
+      path: tests/test_repo_config_loading.py
+      change: create
+    command: python -m pytest tests/test_repo_config_loading.py::test_target_branch_review_yml_controls_auto_approve -q
+  - id: fact-explicit-fields-required
+    proves: [explicit-fields-required]
+    kind: unit-test
+    artifact:
+      path: tests/test_repo_config_loading.py
+      change: create
+    command: python -m pytest tests/test_repo_config_loading.py::test_auto_approve_requires_explicit_enabled_and_repo_risk -q
+human_review: []

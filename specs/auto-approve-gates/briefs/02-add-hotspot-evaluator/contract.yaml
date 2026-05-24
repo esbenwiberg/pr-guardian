@@ -1,0 +1,74 @@
+contract_version: 1
+title: "Add on-demand hotspot evaluator"
+depends_on: [01-add-config-consent]
+scenarios:
+  - id: hotspot-threshold-details
+    given:
+      - "a changed file with at least 8 commits in the last 90 days"
+      - "at least 30 percent of those commit messages look like fixes"
+    when:
+      - "hotspot evaluation runs for the PR"
+    then:
+      - "the file is marked as a hotspot"
+      - "the result includes commit count, fix count, fix ratio, thresholds, cache status, computed timestamp, and reason"
+  - id: hotspot-exemption
+    given:
+      - "a changed generated file that would otherwise cross hotspot thresholds"
+      - "auto_approve.hotspot_exemptions contains a matching pattern and reason"
+    when:
+      - "hotspot evaluation runs"
+    then:
+      - "the file does not produce a hotspot trigger candidate"
+      - "the exemption reason is preserved in diagnostics"
+  - id: hotspot-failure-fail-closed
+    given:
+      - "auto_approve.respect_hotspots is true"
+      - "platform path history lookup fails for a changed file"
+    when:
+      - "hotspot evaluation runs"
+    then:
+      - "the failure is represented so the final gate can block auto-approval"
+  - id: adapter-path-history-shape
+    given:
+      - "GitHub and Azure DevOps adapters receive a path-history request"
+    when:
+      - "the request includes path, since, ref, and per-page inputs"
+    then:
+      - "adapter responses include normalized commit message and committer date fields"
+required_facts:
+  - id: fact-hotspot-threshold-details
+    proves: [hotspot-threshold-details]
+    kind: unit-test
+    artifact:
+      path: tests/test_hotspots.py
+      change: create
+    command: python -m pytest tests/test_hotspots.py::test_on_demand_hotspot_threshold_details -q
+  - id: fact-hotspot-exemption
+    proves: [hotspot-exemption]
+    kind: unit-test
+    artifact:
+      path: tests/test_hotspots.py
+      change: create
+    command: python -m pytest tests/test_hotspots.py::test_reasoned_hotspot_exemption_skips_generated_file -q
+  - id: fact-hotspot-failure-fail-closed
+    proves: [hotspot-failure-fail-closed]
+    kind: unit-test
+    artifact:
+      path: tests/test_hotspots.py
+      change: create
+    command: python -m pytest tests/test_hotspots.py::test_lookup_failure_fails_closed_when_respected -q
+  - id: fact-hotspot-cache
+    proves: [hotspot-threshold-details]
+    kind: unit-test
+    artifact:
+      path: tests/test_hotspots.py
+      change: create
+    command: python -m pytest tests/test_hotspots.py::test_hotspot_cache_uses_process_local_ttl -q
+  - id: fact-adapter-path-history-shape
+    proves: [adapter-path-history-shape]
+    kind: contract-test
+    artifact:
+      path: tests/test_github_adapter.py
+      change: update
+    command: python -m pytest tests/test_github_adapter.py::test_fetch_commits_for_path_supports_since_ref_and_message tests/test_ado_adapter.py::test_fetch_commits_for_path_supports_since_ref_and_message -q
+human_review: []
