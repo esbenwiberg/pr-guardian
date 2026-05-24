@@ -54,8 +54,6 @@ _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     "claude-haiku":  (0.80,   4.0),
     # OpenAI — specific prefixes before their substrings
     "gpt-4.5":       (75.0, 150.0),
-    "gpt-4o-mini":   (0.15,   0.60),
-    "gpt-4o":        (2.50,  10.0),
     "o4-mini":       (1.10,   4.40),
     "o3-mini":       (1.10,   4.40),
     "o3":            (10.0,  40.0),
