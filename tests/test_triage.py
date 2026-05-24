@@ -153,6 +153,20 @@ class TestIntentScheduling:
         assert result.risk_tier == RiskTier.LOW
         assert "intent" not in result.agent_set
 
+    def test_intent_scheduled_for_medium(self):
+        """Intent agent is included in the agent set for medium-risk PRs."""
+        from pr_guardian.models.context import BlastRadius
+        ctx = _make_context(
+            change_profile=ChangeProfile(
+                file_roles={"src/main.py": {FileRole.PRODUCTION}},
+                has_production_changes=True,
+                touches_data_layer=True,  # medium signal
+            ),
+        )
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier == RiskTier.MEDIUM
+        assert "intent" in result.agent_set
+
     def test_intent_scheduled_for_high(self):
         """Intent agent is included in the agent set for high-risk PRs."""
         surface = SecuritySurface()

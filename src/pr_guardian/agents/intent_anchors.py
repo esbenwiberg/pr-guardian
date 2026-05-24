@@ -104,8 +104,13 @@ async def load_intent_anchors(
                 content = await adapter.fetch_file_content(repo, spec_path, ref=ref)
                 if content:
                     referenced_specs[spec_path] = content
-            except Exception:
-                pass  # Unfetchable → not a useful anchor
+            except Exception as exc:
+                log.debug(
+                    "intent_spec_fetch_failed",
+                    spec_path=spec_path,
+                    repo=repo,
+                    error=str(exc),
+                )
 
     if referenced_specs:
         return IntentAnchorContext(
