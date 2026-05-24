@@ -41,5 +41,8 @@ jobs:
       - name: Tests (pytest)
         run: python -m pytest -q
 
+      - name: Architecture fitness (import-linter)
+        run: lint-imports
+
       - name: Dependency audit (pip-audit)
         run: pip-audit --strict

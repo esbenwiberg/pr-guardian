@@ -36,6 +36,7 @@ dev = [
     "aiosqlite",
     "pip-audit",
     "pre-commit",
+    "import-linter",
 ]
 
 [project.scripts]
@@ -60,3 +61,32 @@ target-version = "py312"
 [tool.pip-audit]
 strict = true
 require-hashes = false
+
+[tool.importlinter]
+root_package = "pr_guardian"
+
+[[tool.importlinter.contracts]]
+name = "Mechanical gates must not depend on LLM layer (invariant 3)"
+type = "forbidden"
+source_modules = ["pr_guardian.mechanical"]
+forbidden_modules = ["pr_guardian.llm"]
+
+[[tool.importlinter.contracts]]
+name = "Decision engine must stay IO-free"
+type = "forbidden"
+source_modules = ["pr_guardian.decision"]
+forbidden_modules = [
+    "pr_guardian.api",
+    "pr_guardian.persistence",
+    "pr_guardian.platform",
+    "pr_guardian.dashboard",
+]
+
+[[tool.importlinter.contracts]]
+name = "Core orchestrator must not depend on API or dashboard"
+type = "forbidden"
+source_modules = ["pr_guardian.core"]
+forbidden_modules = [
+    "pr_guardian.api",
+    "pr_guardian.dashboard",
+]

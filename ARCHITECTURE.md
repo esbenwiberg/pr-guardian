@@ -64,9 +64,11 @@ Prompts live in `prompts/<agent>/`. Code stubs live in `src/pr_guardian/agents/`
 
 - `api/` may call `core/`, `persistence/`, `platform/`, `auth/`.
 - `core/` may call any pipeline stage but never `api/` or `dashboard/`.
-- `agents/` may call `llm/`, `models/`, `prompts/` (via the renderer). It may
-  not touch `persistence/` directly — go through the orchestrator.
-- `mechanical/` may not call `llm/`. (See invariant 3.)
+- `agents/` may call `llm/`, `models/`, `prompts/` (via the renderer).
+  `agents/base.py` touches `persistence/` for prompt overrides; new agent
+  code should otherwise route storage access through the orchestrator.
+- `mechanical/` may not call `llm/`. (See invariant 3 — enforced by
+  import-linter.)
 - `decision/` reads `AgentResult` + `MechanicalResult`. It is pure logic over
   data — no IO.
 

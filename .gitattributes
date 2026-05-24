@@ -1,0 +1,15 @@
+# Lockfiles — large by necessity, never read end-to-end
+uv.lock linguist-generated=true
+package-lock.json linguist-generated=true
+
+# Prototype / static doc snapshots — kept for reference, not source of truth
+prototypes/* linguist-documentation=true
+docs/screenshots/*.png binary linguist-documentation=true
+
+# Long-form planning docs — reference-only, not the source code an agent edits
+docs/plan/** linguist-documentation=true
+investigations/** linguist-documentation=true
+plans/** linguist-documentation=true
+
+# Generated dashboard CSS
+src/pr_guardian/dashboard/static/styles.css linguist-generated=true

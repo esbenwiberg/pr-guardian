@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
+    SelectionMode,
     build_synthetic_pr,
     build_repo_diff,
     clamp_max_files,
@@ -268,7 +269,7 @@ async def _run_repo_review_background(
     ref: str,
     max_files: int,
     *,
-    selection: str = "all",
+    selection: SelectionMode = "all",
     pat_name: str | None = None,
 ) -> None:
     """Run a full repo review in the background.
@@ -312,7 +313,7 @@ async def _run_repo_review_background(
             adapter,
             repo,
             ref=ref,
-            selection=selection,  # type: ignore[arg-type]
+            selection=selection,
             max_files=max_files,
         )
         log.info(
