@@ -108,6 +108,7 @@ def combined_score(
         total_weighted += score * weight
         total_weight += weight
 
+    # Guard: all-skipped or no agents → total_weight stays 0.0; return 0 not ZeroDivisionError.
     if total_weight == 0:
         return 0.0
     return total_weighted / total_weight
