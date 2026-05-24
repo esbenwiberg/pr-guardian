@@ -80,6 +80,13 @@ async def apply_global_settings(config: GuardianConfig) -> GuardianConfig:
         if provider:
             provider.api_key = anthropic_key
 
+    # Default model override (applies to the active provider)
+    default_model = settings.get("llm.default_model", "")
+    if default_model:
+        active_provider = config.llm.providers.get(config.llm.default_provider)
+        if active_provider:
+            active_provider.default_model = default_model
+
     log.debug("global_settings_applied", active_provider=config.llm.default_provider)
     return config
 

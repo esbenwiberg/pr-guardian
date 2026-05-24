@@ -64,6 +64,24 @@
         </div>
       </div>
 
+      <!-- Model -->
+      <div class="mt-5 pt-5 border-t border-slate-700/50">
+        <label class="text-xs font-medium text-slate-300 block mb-1">Default Model</label>
+        <select id="default-model" class="form-input w-full">
+          <optgroup label="Anthropic">
+            <option value="claude-sonnet-4-6">Claude Sonnet 4 (claude-sonnet-4-6)</option>
+            <option value="claude-opus-4-7">Claude Opus 4 (claude-opus-4-7)</option>
+          </optgroup>
+          <optgroup label="OpenAI GPT-5">
+            <option value="gpt-5">GPT-5</option>
+            <option value="gpt-5.2">GPT-5.2</option>
+            <option value="gpt-5.4">GPT-5.4</option>
+            <option value="gpt-5.5">GPT-5.5</option>
+          </optgroup>
+        </select>
+        <p class="text-2xs text-slate-500 mt-1">Applied to all agents unless overridden per-agent in <code class="text-slate-400">review.yml</code>.</p>
+      </div>
+
       <!-- Save -->
       <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-700/50">
         <button class="btn btn-primary btn-sm" onclick="saveSettings()">Save Settings</button>
@@ -141,6 +159,9 @@ async function loadSettings() {
     currentProvider = settingsData.active_provider || 'anthropic';
     renderProvider();
     renderKeyStatuses();
+    if (settingsData.default_model) {
+      document.getElementById('default-model').value = settingsData.default_model;
+    }
   } catch (e) {
     console.error('Failed to load settings', e);
   }
@@ -194,6 +215,7 @@ async function saveSettings() {
 
   const body = {
     active_provider: currentProvider,
+    default_model: document.getElementById('default-model').value,
   };
 
   const anthropicKey = document.getElementById('anthropic-key').value.trim();
