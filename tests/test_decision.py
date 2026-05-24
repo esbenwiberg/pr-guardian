@@ -263,7 +263,11 @@ class TestSkippedAgent:
         assert result.agent_results[names.index("architecture")].status == "skipped"
 
     def test_skipped_agent_does_not_add_finding_reasons(self):
-        # A skipped agent with FLAG_HUMAN verdict should not generate finding reasons
+        # A skipped agent with FLAG_HUMAN verdict must not generate finding reasons via
+        # check_overrides — even when other agents ran and decide() runs the full pipeline.
+        # Pair the skipped agent with a passing ran agent at LOW tier so check_overrides
+        # is actually exercised against the skipped agent's verdict.
+        ran = AgentResult(agent_name="security_privacy", verdict=Verdict.PASS)
         skipped = AgentResult(
             agent_name="architecture",
             verdict=Verdict.FLAG_HUMAN,
@@ -271,7 +275,9 @@ class TestSkippedAgent:
             status_reason="no architecture context found",
         )
         ctx = _make_context()
-        result = decide(ctx, [skipped], RiskTier.TRIVIAL, GuardianConfig())
+        result = decide(ctx, [ran, skipped], RiskTier.LOW, GuardianConfig())
+        # Without the skip guard in check_overrides, this would contain
+        # "Agent architecture flagged for human review".
         assert not any("architecture" in r for r in result.finding_reasons)
 
     def test_skipped_agent_trivial_tier_still_auto_approves(self):
