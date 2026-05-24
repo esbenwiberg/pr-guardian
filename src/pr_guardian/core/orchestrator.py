@@ -43,22 +43,17 @@ from pr_guardian.triage.trust_escalation import maybe_escalate_trust
 
 log = structlog.get_logger()
 
-# Per-million-token pricing (input, output) — best-effort estimates.
-# Users can override via config in the future; this covers common models.
-# More-specific prefixes must come before shorter ones that are substrings
-# of them (e.g. "gpt-4o-mini" before "gpt-4o", "o1-mini" before "o1").
+# Per-million-token pricing (input, output) per million tokens.
+# More-specific prefixes must come before shorter substrings (gpt-5.5 before gpt-5).
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     # Anthropic
     "claude-opus":   (15.0,  75.0),
     "claude-sonnet": (3.0,   15.0),
-    "claude-haiku":  (0.80,   4.0),
-    # OpenAI — specific prefixes before their substrings
-    "gpt-4.5":       (75.0, 150.0),
-    "o4-mini":       (1.10,   4.40),
-    "o3-mini":       (1.10,   4.40),
-    "o3":            (10.0,  40.0),
-    "o1-mini":       (3.0,   12.0),
-    "o1":            (15.0,  60.0),
+    # OpenAI GPT-5 family — longest prefix first
+    "gpt-5.5":       (5.0,   30.0),
+    "gpt-5.4":       (2.50,  15.0),
+    "gpt-5.2":       (0.875,  7.0),
+    "gpt-5":         (0.625,  5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)  # fallback
 

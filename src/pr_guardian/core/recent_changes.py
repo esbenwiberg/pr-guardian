@@ -25,13 +25,10 @@ log = structlog.get_logger()
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     "claude-opus":   (15.0,  75.0),
     "claude-sonnet": (3.0,   15.0),
-    "claude-haiku":  (0.80,   4.0),
-    "gpt-4.5":       (75.0, 150.0),
-    "o4-mini":       (1.10,   4.40),
-    "o3-mini":       (1.10,   4.40),
-    "o3":            (10.0,  40.0),
-    "o1-mini":       (3.0,   12.0),
-    "o1":            (15.0,  60.0),
+    "gpt-5.5":       (5.0,   30.0),
+    "gpt-5.4":       (2.50,  15.0),
+    "gpt-5.2":       (0.875,  7.0),
+    "gpt-5":         (0.625,  5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 
