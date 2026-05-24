@@ -1006,8 +1006,11 @@ async def get_settings(identity: Identity = Depends(require_admin)):
     azure_key = azure_db_key or azure_env_key
     azure_endpoint = config.get("llm.azure_ai_foundry.endpoint_url", "")
 
+    default_model = config.get("llm.default_model", "claude-sonnet-4-6")
+
     return {
         "active_provider": active,
+        "default_model": default_model,
         "anthropic": {
             "api_key_masked": _mask_key(anthropic_key),
             "api_key_source": "settings" if anthropic_db_key else ("env" if anthropic_env_key else ""),
@@ -1022,6 +1025,7 @@ async def get_settings(identity: Identity = Depends(require_admin)):
 
 class SettingsUpdate(BaseModel):
     active_provider: str  # "anthropic" or "azure-ai-foundry"
+    default_model: str | None = None
     anthropic_api_key: str | None = None  # blank = keep existing
     azure_endpoint_url: str | None = None
     azure_api_key: str | None = None  # blank = keep existing
@@ -1052,6 +1056,9 @@ async def update_settings(body: SettingsUpdate, identity: Identity = Depends(req
             return {"status": "error", "detail": "Azure AI Foundry API key is required"}
 
     await storage.set_global_config("llm.active_provider", body.active_provider)
+
+    if body.default_model:
+        await storage.set_global_config("llm.default_model", body.default_model)
 
     if body.anthropic_api_key:
         await storage.set_global_config("llm.anthropic.api_key", body.anthropic_api_key)

@@ -22,11 +22,12 @@ from pr_guardian.platform.protocol import PlatformAdapter
 log = structlog.get_logger()
 
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus": (15.0, 75.0),
-    "claude-sonnet": (3.0, 15.0),
-    "claude-haiku": (0.80, 4.0),
-    "gpt-4o": (2.50, 10.0),
-    "gpt-4o-mini": (0.15, 0.60),
+    "claude-opus":   (15.0,  75.0),
+    "claude-sonnet": (3.0,   15.0),
+    "gpt-5.5":       (5.0,   30.0),
+    "gpt-5.4":       (2.50,  15.0),
+    "gpt-5.2":       (0.875,  7.0),
+    "gpt-5":         (0.625,  5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 

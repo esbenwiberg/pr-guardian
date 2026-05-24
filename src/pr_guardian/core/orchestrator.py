@@ -43,17 +43,17 @@ from pr_guardian.triage.trust_escalation import maybe_escalate_trust
 
 log = structlog.get_logger()
 
-# Per-million-token pricing (input, output) — best-effort estimates.
-# Users can override via config in the future; this covers common models.
+# Per-million-token pricing (input, output) per million tokens.
+# More-specific prefixes must come before shorter substrings (gpt-5.5 before gpt-5).
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus":      (15.0, 75.0),
-    "claude-sonnet":    (3.0, 15.0),
-    "claude-haiku":     (0.80, 4.0),
-    "gpt-4o":           (2.50, 10.0),
-    "gpt-4o-mini":      (0.15, 0.60),
-    "gpt-4-turbo":      (10.0, 30.0),
-    "gpt-4":            (30.0, 60.0),
-    "gpt-3.5":          (0.50, 1.50),
+    # Anthropic
+    "claude-opus":   (15.0,  75.0),
+    "claude-sonnet": (3.0,   15.0),
+    # OpenAI GPT-5 family — longest prefix first
+    "gpt-5.5":       (5.0,   30.0),
+    "gpt-5.4":       (2.50,  15.0),
+    "gpt-5.2":       (0.875,  7.0),
+    "gpt-5":         (0.625,  5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)  # fallback
 
@@ -460,7 +460,7 @@ async def _run_pipeline(
             total_output_tokens += val_out
             if val_in or val_out:
                 val_cost = _estimate_cost(
-                    config.validator.model_override or "", val_in, val_out,
+                    validator_meta.get("model") or config.validator.model_override or "", val_in, val_out,
                 )
                 total_cost += val_cost
             result.total_input_tokens = total_input_tokens

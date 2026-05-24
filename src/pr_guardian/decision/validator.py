@@ -307,6 +307,7 @@ async def validate_findings(
             downgraded=downgraded,
             merged=merged,
             clusters_found=len(set(clusters.values())) if clusters else 0,
+            model=model,
             input_tokens=response.input_tokens,
             output_tokens=response.output_tokens,
         )
