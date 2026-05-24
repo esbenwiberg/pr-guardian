@@ -128,8 +128,11 @@ class TestAnchorHeuristic:
             adapter=FakeAdapter(),
             repo="org/repo",
         )
-        # Falls through to title/body check — short text, should be missing
-        assert ctx.anchor_kind in ("title_body", "missing")
+        # Title+body combined = "Fix stuff See specs/missing.md" → 27 non-ws chars,
+        # well below the 80-char threshold → must classify as missing.
+        assert ctx.anchor_kind == "missing"
+        assert ctx.has_useful_anchor is False
+        assert ctx.referenced_specs == {}
 
     @pytest.mark.asyncio
     async def test_anchor_heuristic_80_concrete_chars_is_useful(self):

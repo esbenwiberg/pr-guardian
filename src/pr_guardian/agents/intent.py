@@ -76,12 +76,9 @@ class IntentAgent(BaseAgent):
             )
 
         # No useful anchor — check size gate before emitting scope-opacity finding.
-        files_threshold: int = getattr(iv, "size_gate_files", 5)
-        lines_threshold: int = getattr(iv, "size_gate_lines", 150)
-
         meets_gate = (
-            len(context.changed_files) >= files_threshold
-            or context.lines_changed >= lines_threshold
+            len(context.changed_files) >= iv.size_gate_files
+            or context.lines_changed >= iv.size_gate_lines
         )
 
         if not meets_gate:
