@@ -10,7 +10,7 @@ import httpx
 import structlog
 
 from pr_guardian.models.findings import Finding
-from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
+from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
 
@@ -223,7 +223,7 @@ class ADOAdapter:
             for change in change_entries:
                 item = change.get("item", {})
                 change_type = change.get("changeType") or "edit"
-                status_map = {
+                status_map: dict[str, FileStatus] = {
                     "add": "added",
                     "delete": "deleted",
                     "edit": "modified",
@@ -867,7 +867,9 @@ class ADOAdapter:
         project: str = "",
     ) -> Diff:
         """Fetch diff between two commits. ADO uses the commits diff API."""
-        proj = project or self._default_project
+        if not project:
+            raise ValueError("ADO fetch_compare_diff requires a project")
+        proj = project
         client = self._get_client()
         resp = await client.get(
             f"{self._org_url}/{proj}/_apis/git/repositories/{repo}/diffs/commits",
@@ -889,7 +891,7 @@ class ADOAdapter:
             if item.get("isFolder"):
                 continue
             change_type = change.get("changeType", "edit").lower()
-            status_map = {
+            status_map: dict[str, FileStatus] = {
                 "add": "added",
                 "delete": "deleted",
                 "edit": "modified",

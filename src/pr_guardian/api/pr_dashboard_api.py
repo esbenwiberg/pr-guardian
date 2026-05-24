@@ -283,12 +283,14 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
 
     # Start a new review in the background
     try:
-        adapter = create_adapter(platform_name)
+        from pr_guardian.platform.protocol import PlatformAdapter
+
+        bg_adapter: PlatformAdapter = create_adapter(platform_name)
         base_url = str(request.base_url)
         asyncio.create_task(
             _run_review_background(
                 stub,
-                adapter,
+                bg_adapter,
                 "none",
                 base_url,
                 platform_name=platform_name,

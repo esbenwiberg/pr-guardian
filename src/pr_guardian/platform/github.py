@@ -6,7 +6,7 @@ import httpx
 import structlog
 
 from pr_guardian.models.findings import Finding
-from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
+from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
 
@@ -33,7 +33,7 @@ def _compute_ci_status(runs: list[dict]) -> str:
 class GitHubAdapter:
     """GitHub platform adapter using REST API."""
 
-    def __init__(self, token: str = "", app_id: str = "", private_key: str = ""):
+    def __init__(self, token: str = ""):
         self._token = token
         self._client: httpx.AsyncClient | None = None
 
@@ -88,7 +88,7 @@ class GitHubAdapter:
 
         diff_files: list[DiffFile] = []
         for f in files_data:
-            status_map = {
+            status_map: dict[str, FileStatus] = {
                 "added": "added",
                 "removed": "deleted",
                 "modified": "modified",
@@ -339,7 +339,7 @@ class GitHubAdapter:
 
         diff_files: list[DiffFile] = []
         for f in data.get("files", []):
-            status_map = {
+            status_map: dict[str, FileStatus] = {
                 "added": "added",
                 "removed": "deleted",
                 "modified": "modified",

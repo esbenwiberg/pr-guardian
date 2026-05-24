@@ -43,12 +43,15 @@ class PlatformPR:
         return ""
 
 
+FileStatus = Literal["added", "modified", "deleted", "renamed"]
+
+
 @dataclass
 class DiffFile:
     """A single file in a diff."""
 
     path: str
-    status: Literal["added", "modified", "deleted", "renamed"]
+    status: FileStatus
     old_path: str | None = None  # for renames
     additions: int = 0
     deletions: int = 0

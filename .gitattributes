@@ -4,7 +4,7 @@ package-lock.json linguist-generated=true
 
 # Prototype / static doc snapshots — kept for reference, not source of truth
 prototypes/* linguist-documentation=true
-docs/screenshots/*.png binary linguist-documentation=true
+assets/*.png binary linguist-documentation=true
 
 # Long-form planning docs — reference-only, not the source code an agent edits
 docs/plan/** linguist-documentation=true

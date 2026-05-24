@@ -32,7 +32,7 @@ from pr_guardian.languages.detector import detect_languages
 from pr_guardian.mechanical.runner import all_checks_passed, run_mechanical_checks
 from pr_guardian.models.context import RepoRiskClass, ReviewContext
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
-from pr_guardian.models.output import Decision, ReviewResult
+from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.triage.classifier import classify
@@ -926,8 +926,8 @@ async def _run_re_review_pipeline(
 
     finding_files: set[str] = set()
     for fs in agent_findings.values():
-        for f in fs:
-            file_path = f.get("file", "")
+        for finding in fs:
+            file_path = finding.get("file", "")
             if file_path:
                 finding_files.add(file_path)
 
@@ -941,12 +941,12 @@ async def _run_re_review_pipeline(
             repo_arg = f"{pr.project}/{pr.repo}"
         for fpath in file_paths_ordered:
             fetch_tasks.append(adapter.fetch_file_content(repo_arg, fpath, ref=new_sha))
-        results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
-        for fpath, result in zip(file_paths_ordered, results):
-            if isinstance(result, Exception):
-                _plog("debug", "discovery", f"Could not fetch {fpath} at {new_sha[:8]}: {result}")
-            elif result:
-                current_file_contents[fpath] = result
+        fetched = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        for fpath, content in zip(file_paths_ordered, fetched):
+            if isinstance(content, BaseException):
+                _plog("debug", "discovery", f"Could not fetch {fpath} at {new_sha[:8]}: {content}")
+            elif content:
+                current_file_contents[fpath] = content
 
         _plog(
             "info",
@@ -1178,10 +1178,8 @@ async def _save_result(storage, review_db_id, result, _emit) -> None:
     _emit("complete", f"Decision: {result.decision.value}", score=result.combined_score)
 
 
-def _convert_mechanical(r) -> object:
+def _convert_mechanical(r) -> MechanicalResult:
     """Convert MechanicalCheckResult to the output model."""
-    from pr_guardian.models.output import MechanicalResult
-
     return MechanicalResult(
         tool=r.tool,
         passed=r.passed,

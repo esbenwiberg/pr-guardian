@@ -37,6 +37,9 @@ dev = [
     "pip-audit",
     "pre-commit",
     "import-linter",
+    "build",  # `python -m build` for sdist/wheel — wired so repofit's build.clean passes
+    "vulture",  # dead-code detection (see CONTRIBUTING.md)
+    "types-PyYAML",  # mypy stubs for yaml
 ]
 
 [project.scripts]
@@ -58,9 +61,25 @@ target-version = "py312"
 [tool.ruff.lint.per-file-ignores]
 "tests/test_inline_comments.py" = ["E402"]  # intentional mid-file imports per section
 
+[tool.mypy]
+# `mypy src` is the canonical CI invocation; `mypy .` (used by repofit's
+# types.clean probe) should also type-check only src. Tests use heavy
+# patching/duck-typing that doesn't pay for mypy coverage today.
+files = ["src"]
+exclude = ["^tests/", "^alembic/", "^scripts/", "^prototypes/"]
+
 [tool.pip-audit]
 strict = true
 require-hashes = false
+
+[tool.vulture]
+# Dead-code detector. Confidence ≥ 80 trims most false positives from
+# FastAPI route handlers, Pydantic models, click commands, and dataclass
+# fields. Anything that gets through is genuinely unreferenced.
+min_confidence = 80
+paths = ["src"]
+exclude = ["src/pr_guardian/dashboard/static/"]
+sort_by_size = true
 
 [tool.importlinter]
 root_package = "pr_guardian"

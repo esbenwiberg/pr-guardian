@@ -379,11 +379,17 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
     created: list[dict] = []
     errors: list[str] = []
 
+    from typing import cast
+
+    from pr_guardian.platform.ado import ADOAdapter
+    from pr_guardian.platform.github import GitHubAdapter
+
     for title, group_finding_ids, findings in groups:
         body = _compose_issue_body(findings, scan)
         try:
             if scan["platform"] == "github":
-                result = await adapter.create_issue(
+                gh_adapter = cast(GitHubAdapter, adapter)
+                result = await gh_adapter.create_issue(
                     repo=repo,
                     title=title,
                     body=body,
@@ -392,9 +398,10 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
                 issue_url = result.get("url", "")
                 issue_number = str(result.get("number", ""))
             else:
+                ado_adapter = cast(ADOAdapter, adapter)
                 # ADO: project/repo format → extract project
                 project = repo.split("/")[0] if "/" in repo else repo
-                result = await adapter.create_work_item(
+                result = await ado_adapter.create_work_item(
                     project=project,
                     title=title,
                     body=body,

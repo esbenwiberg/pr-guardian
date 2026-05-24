@@ -19,6 +19,7 @@ from pr_guardian.core.repo_review import (
 )
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.factory import create_adapter, create_github_adapter
+from pr_guardian.platform.protocol import PlatformAdapter
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/api", tags=["review"])
@@ -143,6 +144,7 @@ async def manual_review(req: ReviewRequest, request: Request):
     Returns immediately so the caller can track progress via the active reviews panel.
     """
     stub, platform_name = _parse_pr_url(req.pr_url)
+    adapter: PlatformAdapter
     if platform_name == "github":
         try:
             adapter = await create_github_adapter(req.pat_name)
@@ -402,6 +404,7 @@ async def manual_repo_review(req: RepoReviewRequest):
             detail="Repo must be in owner/repo (GitHub) or project/repo (ADO) format.",
         )
 
+    adapter: PlatformAdapter
     if req.platform == "github":
         try:
             adapter = await create_github_adapter(req.pat_name)

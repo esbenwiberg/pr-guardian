@@ -7,8 +7,8 @@ pre-1.0 — versions move freely until the API stabilizes.
 ## [Unreleased]
 
 ### Added
-- CI workflow (`.github/workflows/ci.yml`) — ruff, mypy, pytest, pip-audit,
-  and import-linter on push and PR.
+- CI workflow (`.github/workflows/ci.yml`) — ruff, mypy (now strict),
+  pytest, pip-audit, import-linter, and vulture on push and PR.
 - Pre-commit hooks — gitleaks, ruff, large-file and private-key guards.
 - `ARCHITECTURE.md` — pipeline shape, layer boundaries, invariants.
 - `CONTRIBUTING.md` — branch / commit / PR conventions.
@@ -19,15 +19,34 @@ pre-1.0 — versions move freely until the API stabilizes.
 - import-linter contracts enforce three architecture invariants in CI
   (mechanical ⊥ llm, decision IO-free, core ⊥ api/dashboard).
 - `.claude/commands/` skills: `/smoke`, `/commit`, `/new-agent`.
+- `scripts/repofit-check.sh` — wraps `repofit check` with the project venv on
+  PATH so the executed-tier probes (format/lint/tests/types/build clean) find
+  ruff/pytest/mypy/python -m build.
+- Dev deps gained `build`, `vulture`, and `types-PyYAML` to support
+  `python -m build`, dead-code detection, and PyYAML type stubs.
+- `FileStatus` type alias (`models/pr.py`) so all DiffFile call-sites share
+  the same `Literal["added", "modified", "deleted", "renamed"]`.
 
 ### Changed
 - `CLAUDE.md` expanded into a real agent guide (command table, layout,
   conventions, invariants). `AGENTS.md` forwards to it so the two stay aligned.
 - One-shot ruff format pass across 130 files to align with the declared
   ruff config.
-- Moved 34 screenshot PNGs from repo root into `docs/screenshots/`.
+- Moved 34 screenshot PNGs from repo root into `assets/` (kept out of `docs/`
+  so doc-link probes don't try to parse PNG bytes as markdown links).
 - Tightened `selection: str` → `SelectionMode` in `api/review.py`, removing
   the only `# type: ignore` in `src/`.
+- Resolved the 22 pre-existing mypy errors across `platform/*`, `core/orchestrator`,
+  `decision/validator`, and the API layer. CI's `mypy src` is no longer soft.
+
+### Fixed
+- ADO `fetch_compare_diff` no longer references a non-existent
+  `self._default_project`; project is now required.
+- `api/agent_api.dismiss_finding` previously called `upsert_dismissal` with
+  the wrong keyword arguments (would have raised at runtime); aligned with
+  the canonical signature used by the dashboard.
+- `GitHubAdapter.__init__` dropped unused `app_id` / `private_key` parameters
+  (dead surface; never read).
 
 ### Security
 - Pin `starlette >= 1.0.1` to clear PYSEC-2026-161.

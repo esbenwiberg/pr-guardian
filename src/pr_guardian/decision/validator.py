@@ -276,8 +276,10 @@ async def validate_findings(
     model = validator_cfg.model_override or resolve_model(config, "validator")
     llm = llm_client or create_llm_client(config)
 
-    # Load agent weights for merge priority
-    agent_weights = config.weights if hasattr(config, "weights") else None
+    # Load agent weights for merge priority — convert WeightsConfig to plain dict
+    agent_weights: dict[str, float] | None = (
+        config.weights.model_dump() if hasattr(config, "weights") else None
+    )
 
     try:
         response = await llm.complete(

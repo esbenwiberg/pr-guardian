@@ -21,6 +21,7 @@ a human, hard-blocks the dangerous ones. Hosted service — not a CI step.
 | Apply DB migrations | `alembic upgrade head` |
 | New DB migration | `alembic revision -m "msg" --autogenerate` |
 | Health check | `GET /api/health` |
+| Agent-fitness audit | `bash scripts/repofit-check.sh --include executed` |
 
 Pre-commit hooks (gitleaks, ruff, large-file checks) live in
 `.pre-commit-config.yaml`. Install with `pre-commit install` once per clone.

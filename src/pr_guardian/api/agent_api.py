@@ -81,31 +81,23 @@ async def dismiss_finding(
     """Dismiss a finding."""
     from pr_guardian.api.dashboard import _find_review_for_finding
 
-    result = await _find_review_for_finding(finding_id)
-    if not result:
+    review = await _find_review_for_finding(finding_id)
+    if not review:
         raise HTTPException(404, "Finding not found")
 
-    review, finding, agent_name = result["review"], result["finding"], result["agent_name"]
-    from pr_guardian.persistence.storage import finding_signature
-
-    sig = finding_signature(finding.get("file", ""), finding.get("category", ""), agent_name)
+    finding_dict = review["_matched_finding"]
+    agent_name = review["_matched_agent"]
 
     dismissal_id = await storage.upsert_dismissal(
         pr_id=review["pr_id"],
         repo=review["repo"],
         platform=review["platform"],
-        signature=sig,
+        finding=finding_dict,
+        agent_name=agent_name,
         status=body.status,
         comment=f"[{identity.display_name}] {body.comment}"
         if body.comment
         else f"[{identity.display_name}]",
-        source_finding={
-            "finding_id": str(finding_id),
-            "agent_name": agent_name,
-            "file": finding.get("file", ""),
-            "category": finding.get("category", ""),
-            "severity": finding.get("severity", ""),
-        },
     )
 
     log.info("agent_dismissed_finding", finding_id=str(finding_id), by=identity.display_name)

@@ -34,15 +34,19 @@ jobs:
         run: ruff format --check .
 
       - name: Typecheck (mypy)
-        # 22 pre-existing errors tracked in Tier 5 followup — keep soft until clean
         run: mypy src
-        continue-on-error: true
+
+      - name: Dead-code detection (vulture)
+        run: vulture
 
       - name: Tests (pytest)
         run: python -m pytest -q
 
       - name: Architecture fitness (import-linter)
         run: lint-imports
+
+      - name: Build (sdist + wheel)
+        run: python -m build --sdist --wheel
 
       - name: Dependency audit (pip-audit)
         run: pip-audit --strict

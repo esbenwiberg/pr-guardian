@@ -303,8 +303,10 @@ async def trigger_review(req: TriggerRequest, request: Request):
             REPO_REVIEW_MAX_FILES,
         )
 
+        from pr_guardian.core.repo_review import SelectionMode
+
         repo, platform = _resolve_repo_scan_target(url, req.platform)
-        selection = req.selection if req.selection in ("all", "recent") else "all"
+        selection: SelectionMode = "recent" if req.selection == "recent" else "all"
         try:
             resp = await manual_repo_review(
                 RepoReviewRequest(
@@ -515,9 +517,9 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                     except Exception:
                         severity = Severity.MEDIUM
                     try:
-                        certainty = Certainty((f.get("certainty") or "likely").lower())
+                        certainty = Certainty((f.get("certainty") or "suspected").lower())
                     except Exception:
-                        certainty = Certainty.LIKELY
+                        certainty = Certainty.SUSPECTED
                     inline_findings.append(
                         Finding(
                             severity=severity,
