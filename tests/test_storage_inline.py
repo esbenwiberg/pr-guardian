@@ -1,4 +1,5 @@
 """Tests for save_inline_comment_ids / load_inline_comment_ids storage helpers."""
+
 from __future__ import annotations
 
 import uuid

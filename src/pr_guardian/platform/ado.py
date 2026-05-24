@@ -25,8 +25,10 @@ def _unified_diff(old: str, new: str, path: str) -> str:
     new_lines = new.splitlines(keepends=True)
     return "".join(
         difflib.unified_diff(
-            old_lines, new_lines,
-            fromfile=f"a/{path}", tofile=f"b/{path}",
+            old_lines,
+            new_lines,
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
         )
     )
 
@@ -52,7 +54,10 @@ class ADOAdapter:
         return self._client
 
     async def resolve_branch_head(
-        self, project: str, repo: str, branch: str,
+        self,
+        project: str,
+        repo: str,
+        branch: str,
     ) -> str:
         """Fetch the actual HEAD commit SHA of a branch via the refs API.
 
@@ -111,9 +116,7 @@ class ADOAdapter:
     ) -> str | None:
         """Fetch a single file's content at a given version. Returns None on failure."""
         async with sem:
-            url = (
-                f"{self._org_url}/{project}/_apis/git/repositories/{repo}/items"
-            )
+            url = f"{self._org_url}/{project}/_apis/git/repositories/{repo}/items"
             params = {
                 "path": f"/{path}",
                 "versionDescriptor.version": version,
@@ -160,9 +163,7 @@ class ADOAdapter:
         # the latest push yet, so the last iteration's sourceRefCommit lags
         # behind the real branch HEAD (pr.head_commit_sha, resolved via refs).
         iteration_stale = (
-            pr.head_commit_sha
-            and iter_source_sha
-            and iter_source_sha != pr.head_commit_sha
+            pr.head_commit_sha and iter_source_sha and iter_source_sha != pr.head_commit_sha
         )
 
         if iteration_stale:
@@ -181,7 +182,9 @@ class ADOAdapter:
             if target_version_type == "branch":
                 try:
                     t_head = await self.resolve_branch_head(
-                        pr.project, pr.repo, target_version,
+                        pr.project,
+                        pr.repo,
+                        target_version,
                     )
                     if t_head:
                         target_version = t_head
@@ -189,7 +192,9 @@ class ADOAdapter:
                 except Exception:
                     pass
             fallback_diff = await self.fetch_compare_diff(
-                pr.repo, target_version, pr.head_commit_sha,
+                pr.repo,
+                target_version,
+                pr.head_commit_sha,
                 project=pr.project,
             )
             diff_files = fallback_diff.files
@@ -218,15 +223,22 @@ class ADOAdapter:
             for change in change_entries:
                 item = change.get("item", {})
                 change_type = change.get("changeType") or "edit"
-                status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
+                status_map = {
+                    "add": "added",
+                    "delete": "deleted",
+                    "edit": "modified",
+                    "rename": "renamed",
+                }
                 raw_path = item.get("path") or ""
-                diff_files.append(DiffFile(
-                    path=raw_path.lstrip("/"),
-                    status=status_map.get(change_type.lower(), "modified"),
-                    old_path=change.get("sourceServerItem"),
-                    additions=0,
-                    deletions=0,
-                ))
+                diff_files.append(
+                    DiffFile(
+                        path=raw_path.lstrip("/"),
+                        status=status_map.get(change_type.lower(), "modified"),
+                        old_path=change.get("sourceServerItem"),
+                        additions=0,
+                        deletions=0,
+                    )
+                )
 
         log.debug(
             "ado_diff_versions",
@@ -244,8 +256,13 @@ class ADOAdapter:
         async def _enrich(df: DiffFile) -> None:
             if df.status == "added":
                 content = await self._fetch_file_content(
-                    client, sem, pr.project, pr.repo, df.path,
-                    source_version, source_version_type,
+                    client,
+                    sem,
+                    pr.project,
+                    pr.repo,
+                    df.path,
+                    source_version,
+                    source_version_type,
                 )
                 if content is not None:
                     lines = content.splitlines(keepends=True)
@@ -253,8 +270,13 @@ class ADOAdapter:
                     df.additions = len(lines)
             elif df.status == "deleted":
                 content = await self._fetch_file_content(
-                    client, sem, pr.project, pr.repo, df.path,
-                    target_version, target_version_type,
+                    client,
+                    sem,
+                    pr.project,
+                    pr.repo,
+                    df.path,
+                    target_version,
+                    target_version_type,
                 )
                 if content is not None:
                     lines = content.splitlines(keepends=True)
@@ -264,12 +286,22 @@ class ADOAdapter:
                 old_path = df.old_path.lstrip("/") if df.old_path else df.path
                 old_content, new_content = await asyncio.gather(
                     self._fetch_file_content(
-                        client, sem, pr.project, pr.repo, old_path,
-                        target_version, target_version_type,
+                        client,
+                        sem,
+                        pr.project,
+                        pr.repo,
+                        old_path,
+                        target_version,
+                        target_version_type,
                     ),
                     self._fetch_file_content(
-                        client, sem, pr.project, pr.repo, df.path,
-                        source_version, source_version_type,
+                        client,
+                        sem,
+                        pr.project,
+                        pr.repo,
+                        df.path,
+                        source_version,
+                        source_version_type,
                     ),
                 )
                 if old_content is not None and new_content is not None:
@@ -330,7 +362,9 @@ class ADOAdapter:
         client = self._get_client()
         # https://dev.azure.com/{org} -> https://vssps.dev.azure.com/{org}
         vssps_url = self._org_url.replace(
-            "https://dev.azure.com", "https://vssps.dev.azure.com", 1,
+            "https://dev.azure.com",
+            "https://vssps.dev.azure.com",
+            1,
         )
         candidates = [
             f"{vssps_url}/_apis/connectionData",
@@ -354,7 +388,9 @@ class ADOAdapter:
                 body = (exc.response.text or "")[:500]
                 log.warning(
                     "ado_connectiondata_failed",
-                    url=url, status=exc.response.status_code, body=body,
+                    url=url,
+                    status=exc.response.status_code,
+                    body=body,
                 )
                 last_exc = exc
 
@@ -495,7 +531,9 @@ class ADOAdapter:
                 if exc.response.status_code == 422:
                     log.debug(
                         "ado_inline_comment_skipped",
-                        file=file, line=line, reason="line_not_in_diff",
+                        file=file,
+                        line=line,
+                        reason="line_not_in_diff",
                     )
                 else:
                     raise
@@ -553,7 +591,12 @@ class ADOAdapter:
         return repo, repo
 
     async def fetch_recent_commits(
-        self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
+        self,
+        repo: str,
+        branch: str,
+        since: str,
+        until: str | None = None,
+        per_page: int = 100,
     ) -> list[dict]:
         """Fetch commits on branch since a date (ISO 8601).
 
@@ -582,29 +625,34 @@ class ADOAdapter:
                 break
             # Normalize each commit to GitHub-like shape
             for c in batch:
-                all_commits.append({
-                    "sha": c.get("commitId", ""),
-                    "commit": {
-                        "message": c.get("comment", ""),
-                        "author": {
-                            "name": c.get("author", {}).get("name", ""),
-                            "email": c.get("author", {}).get("email", ""),
-                            "date": c.get("author", {}).get("date", ""),
+                all_commits.append(
+                    {
+                        "sha": c.get("commitId", ""),
+                        "commit": {
+                            "message": c.get("comment", ""),
+                            "author": {
+                                "name": c.get("author", {}).get("name", ""),
+                                "email": c.get("author", {}).get("email", ""),
+                                "date": c.get("author", {}).get("date", ""),
+                            },
+                            "committer": {
+                                "name": c.get("committer", {}).get("name", ""),
+                                "date": c.get("committer", {}).get("date", ""),
+                            },
                         },
-                        "committer": {
-                            "name": c.get("committer", {}).get("name", ""),
-                            "date": c.get("committer", {}).get("date", ""),
-                        },
-                    },
-                    "author": {"login": c.get("author", {}).get("name", "")},
-                })
+                        "author": {"login": c.get("author", {}).get("name", "")},
+                    }
+                )
             if len(batch) < per_page:
                 break
             skip += len(batch)
         return all_commits
 
     async def fetch_merged_prs(
-        self, repo: str, since: str, base: str = "main",
+        self,
+        repo: str,
+        since: str,
+        base: str = "main",
     ) -> list[dict]:
         """Fetch recently merged (completed) PRs.
 
@@ -612,9 +660,7 @@ class ADOAdapter:
         """
         client = self._get_client()
         project, repo_name = self._parse_repo(repo)
-        url = (
-            f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/pullrequests"
-        )
+        url = f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/pullrequests"
         params: dict = {
             "searchCriteria.status": "completed",
             "searchCriteria.targetRefName": f"refs/heads/{base}",
@@ -630,20 +676,25 @@ class ADOAdapter:
         for pr in all_prs:
             closed_date = pr.get("closedDate", "")
             if closed_date and closed_date >= since:
-                merged.append({
-                    "number": pr.get("pullRequestId"),
-                    "title": pr.get("title", ""),
-                    "user": {"login": pr.get("createdBy", {}).get("uniqueName", "")},
-                    "created_at": pr.get("creationDate"),
-                    "merged_at": closed_date,
-                    "base": {"ref": base},
-                    "_ado_project": project,
-                    "_ado_repo": repo_name,
-                })
+                merged.append(
+                    {
+                        "number": pr.get("pullRequestId"),
+                        "title": pr.get("title", ""),
+                        "user": {"login": pr.get("createdBy", {}).get("uniqueName", "")},
+                        "created_at": pr.get("creationDate"),
+                        "merged_at": closed_date,
+                        "base": {"ref": base},
+                        "_ado_project": project,
+                        "_ado_repo": repo_name,
+                    }
+                )
         return merged
 
     async def fetch_file_content(
-        self, repo: str, path: str, ref: str = "HEAD",
+        self,
+        repo: str,
+        path: str,
+        ref: str = "HEAD",
     ) -> str:
         """Fetch file content from the repo."""
         client = self._get_client()
@@ -662,7 +713,13 @@ class ADOAdapter:
 
         if version:
             content = await self._fetch_file_content(
-                client, sem, project, repo_name, path, version, version_type,
+                client,
+                sem,
+                project,
+                repo_name,
+                path,
+                version,
+                version_type,
             )
         else:
             # No version specified — fetch from default branch
@@ -682,7 +739,10 @@ class ADOAdapter:
         return content or ""
 
     async def list_repo_files(
-        self, repo: str, ref: str = "HEAD", path: str = "",
+        self,
+        repo: str,
+        ref: str = "HEAD",
+        path: str = "",
     ) -> list[str]:
         """List files in repo (recursive tree)."""
         client = self._get_client()
@@ -712,7 +772,10 @@ class ADOAdapter:
         ]
 
     async def list_recently_changed_files(
-        self, repo: str, ref: str = "HEAD", limit: int = 300,
+        self,
+        repo: str,
+        ref: str = "HEAD",
+        limit: int = 300,
     ) -> list[str]:
         """Walk recent commits on ``ref`` and return up to ``limit`` unique paths.
 
@@ -725,9 +788,7 @@ class ADOAdapter:
         commit_scan_limit = max(200, limit * 2)
         top = min(commit_scan_limit, 100)
 
-        commits_url = (
-            f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/commits"
-        )
+        commits_url = f"{self._org_url}/{project}/_apis/git/repositories/{repo_name}/commits"
 
         # 1. List commit IDs newest-first
         ids: list[str] = []
@@ -799,7 +860,11 @@ class ADOAdapter:
         return ordered
 
     async def fetch_compare_diff(
-        self, repo: str, base_sha: str, head_sha: str, project: str = "",
+        self,
+        repo: str,
+        base_sha: str,
+        head_sha: str,
+        project: str = "",
     ) -> Diff:
         """Fetch diff between two commits. ADO uses the commits diff API."""
         proj = project or self._default_project
@@ -824,16 +889,28 @@ class ADOAdapter:
             if item.get("isFolder"):
                 continue
             change_type = change.get("changeType", "edit").lower()
-            status_map = {"add": "added", "delete": "deleted", "edit": "modified", "rename": "renamed"}
-            diff_files.append(DiffFile(
-                path=path,
-                status=status_map.get(change_type, "modified"),
-                old_path=change.get("sourceServerItem", {}).get("path") if change_type == "rename" else None,
-            ))
+            status_map = {
+                "add": "added",
+                "delete": "deleted",
+                "edit": "modified",
+                "rename": "renamed",
+            }
+            diff_files.append(
+                DiffFile(
+                    path=path,
+                    status=status_map.get(change_type, "modified"),
+                    old_path=change.get("sourceServerItem", {}).get("path")
+                    if change_type == "rename"
+                    else None,
+                )
+            )
         return Diff(files=diff_files)
 
     async def fetch_pr_files(
-        self, repo: str, pr_id: int | str, project: str = "",
+        self,
+        repo: str,
+        pr_id: int | str,
+        project: str = "",
     ) -> list[dict]:
         """Fetch changed files for a PR.
 
@@ -869,16 +946,22 @@ class ADOAdapter:
         for change in change_entries:
             item = change.get("item", {})
             raw_path = (item.get("path") or "").lstrip("/")
-            files.append({
-                "filename": raw_path,
-                "additions": 0,
-                "deletions": 0,
-                "status": change.get("changeType", "edit").lower(),
-            })
+            files.append(
+                {
+                    "filename": raw_path,
+                    "additions": 0,
+                    "deletions": 0,
+                    "status": change.get("changeType", "edit").lower(),
+                }
+            )
         return files
 
     async def fetch_commits_for_path(
-        self, repo: str, path: str, per_page: int = 1, project: str = "",
+        self,
+        repo: str,
+        path: str,
+        per_page: int = 1,
+        project: str = "",
     ) -> list[dict]:
         """Fetch recent commits that touched a specific file path.
 
@@ -912,7 +995,8 @@ class ADOAdapter:
         ]
 
     async def fetch_pr_body_and_commits(
-        self, pr: PlatformPR,
+        self,
+        pr: PlatformPR,
     ) -> tuple[str, list[str]]:
         """Fetch the PR description and commit messages for capability clustering.
 

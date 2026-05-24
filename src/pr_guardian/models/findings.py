@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Literal
 
 
 class Severity(str, Enum):
@@ -27,6 +26,7 @@ class Verdict(str, Enum):
 @dataclass
 class EvidenceBasis:
     """Structured evidence supporting a finding."""
+
     saw_full_context: bool = False
     pattern_match: bool = False
     cwe_id: str | None = None
@@ -38,6 +38,7 @@ class EvidenceBasis:
 @dataclass
 class Finding:
     """A single finding from an AI agent."""
+
     severity: Severity
     certainty: Certainty
     category: str
@@ -59,6 +60,7 @@ class Finding:
 @dataclass
 class AgentResult:
     """Output from a single AI agent."""
+
     agent_name: str
     verdict: Verdict
     languages_reviewed: list[str] = field(default_factory=list)

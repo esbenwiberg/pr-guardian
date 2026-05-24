@@ -5,6 +5,7 @@ in files that the path rules classified as low-sensitivity. Escalation is
 one-way upward (never lowers the tier) and fully deterministic — no extra
 LLM call, just inspecting existing agent output through a trust-tier lens.
 """
+
 from __future__ import annotations
 
 from copy import deepcopy
@@ -57,20 +58,17 @@ def maybe_escalate_trust(
         # Trigger 2: Agent verdict FLAG_HUMAN
         if agent.verdict == Verdict.FLAG_HUMAN:
             result.resolved_tier = max_trust_tier(
-                result.resolved_tier, TrustTier.MANDATORY_HUMAN,
+                result.resolved_tier,
+                TrustTier.MANDATORY_HUMAN,
             )
-            result.escalation_reasons.append(
-                f"Agent {agent.agent_name} verdict FLAG_HUMAN"
-            )
+            result.escalation_reasons.append(f"Agent {agent.agent_name} verdict FLAG_HUMAN")
 
         for finding in agent.findings:
             # Trigger 3: Critical severity + DETECTED certainty
-            if (
-                finding.severity == Severity.CRITICAL
-                and finding.certainty == Certainty.DETECTED
-            ):
+            if finding.severity == Severity.CRITICAL and finding.certainty == Certainty.DETECTED:
                 result.resolved_tier = max_trust_tier(
-                    result.resolved_tier, TrustTier.MANDATORY_HUMAN,
+                    result.resolved_tier,
+                    TrustTier.MANDATORY_HUMAN,
                 )
                 result.escalation_reasons.append(
                     f"Critical+detected finding in {finding.file}: {finding.category}"
@@ -86,7 +84,8 @@ def maybe_escalate_trust(
                 # Escalate this file
                 result.file_tiers[finding.file] = TrustTier.MANDATORY_HUMAN
                 result.resolved_tier = max_trust_tier(
-                    result.resolved_tier, TrustTier.MANDATORY_HUMAN,
+                    result.resolved_tier,
+                    TrustTier.MANDATORY_HUMAN,
                 )
                 result.escalation_reasons.append(
                     f"Security-relevant finding ({finding.category}) "
@@ -98,13 +97,11 @@ def maybe_escalate_trust(
         result.escalated = True
         result.escalation_reasons.insert(
             0,
-            f"Trust tier escalated from {original_tier.value} "
-            f"to {result.resolved_tier.value}",
+            f"Trust tier escalated from {original_tier.value} to {result.resolved_tier.value}",
         )
         # Propagate triggering files
         result.triggering_files = [
-            fp for fp, ft in result.file_tiers.items()
-            if ft == result.resolved_tier
+            fp for fp, ft in result.file_tiers.items() if ft == result.resolved_tier
         ]
         log.info(
             "trust_tier_escalated",

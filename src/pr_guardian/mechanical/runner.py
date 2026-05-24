@@ -33,9 +33,9 @@ async def run_mechanical_checks(
     tasks.append(asyncio.create_task(run_gitleaks(repo_path)))
     tasks.append(asyncio.create_task(run_semgrep(repo_path)))
     tasks.append(asyncio.create_task(run_pii_scanner(repo_path, changed_files)))
-    tasks.append(asyncio.create_task(
-        run_api_contract_check(repo_path, changed_files, target_branch)
-    ))
+    tasks.append(
+        asyncio.create_task(run_api_contract_check(repo_path, changed_files, target_branch))
+    )
     tasks.append(asyncio.create_task(run_migration_safety(repo_path, changed_files)))
 
     # Language-conditional checks
@@ -56,10 +56,13 @@ async def run_mechanical_checks(
             final.append(r)
         elif isinstance(r, Exception):
             log.error("mechanical_check_failed", error=str(r))
-            final.append(MechanicalCheckResult(
-                tool="unknown", passed=False,
-                error=str(r),
-            ))
+            final.append(
+                MechanicalCheckResult(
+                    tool="unknown",
+                    passed=False,
+                    error=str(r),
+                )
+            )
 
     log.info(
         "mechanical_checks_complete",

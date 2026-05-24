@@ -13,6 +13,7 @@ class CheckSeverity(str, Enum):
 @dataclass
 class CheckFinding:
     """A single finding from a mechanical check."""
+
     file: str
     line: int | None
     rule: str
@@ -23,6 +24,7 @@ class CheckFinding:
 @dataclass
 class MechanicalCheckResult:
     """Result from a single mechanical check tool."""
+
     tool: str
     passed: bool
     severity: CheckSeverity = CheckSeverity.INFO

@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 @dataclass
 class LanguageToolConfig:
     """Tools available for a specific language."""
+
     semgrep_rules: list[str] = field(default_factory=list)
     mechanical_tools: dict[str, bool] = field(default_factory=dict)
     security_prompt: str = ""

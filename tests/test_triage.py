@@ -18,15 +18,25 @@ def _make_context(**overrides) -> ReviewContext:
     """Create a minimal ReviewContext for testing."""
     defaults = dict(
         pr=PlatformPR(
-            platform=Platform.GITHUB, pr_id="1", repo="test/repo",
-            repo_url="", source_branch="feature/test", target_branch="develop",
-            author="testuser", title="Test PR", head_commit_sha="abc123",
+            platform=Platform.GITHUB,
+            pr_id="1",
+            repo="test/repo",
+            repo_url="",
+            source_branch="feature/test",
+            target_branch="develop",
+            author="testuser",
+            title="Test PR",
+            head_commit_sha="abc123",
         ),
         repo_path=Path("/tmp/test"),
-        diff=Diff(files=[DiffFile(path="src/main.py", status="modified", additions=10, deletions=5)]),
+        diff=Diff(
+            files=[DiffFile(path="src/main.py", status="modified", additions=10, deletions=5)]
+        ),
         changed_files=["src/main.py"],
         lines_changed=15,
-        language_map=LanguageMap(languages={"python": ["src/main.py"]}, primary_language="python", language_count=1),
+        language_map=LanguageMap(
+            languages={"python": ["src/main.py"]}, primary_language="python", language_count=1
+        ),
         primary_language="python",
         cross_stack=False,
         repo_config={},

@@ -1,7 +1,8 @@
 """Tests for /api/reviews/trigger: scan/PR routing across GitHub and ADO."""
+
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -21,7 +22,8 @@ class TestResolveRepoScanTarget:
 
     def test_ado_full_url(self):
         repo, plat = _resolve_repo_scan_target(
-            "https://dev.azure.com/myorg/myproj/_git/myrepo", None,
+            "https://dev.azure.com/myorg/myproj/_git/myrepo",
+            None,
         )
         assert (repo, plat) == ("myproj/myrepo", "ado")
 
@@ -55,11 +57,13 @@ class TestTriggerRouteScanDispatch:
     @pytest.fixture()
     def client(self):
         from pr_guardian.main import app
+
         with TestClient(app) as c:
             yield c
 
     def _mock_repo_resp(self, repo="octocat/spoon", platform="github"):
         from pr_guardian.api.review import RepoReviewResponse
+
         return RepoReviewResponse(
             status="queued",
             repo=repo,

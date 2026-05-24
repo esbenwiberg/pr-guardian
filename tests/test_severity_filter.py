@@ -38,38 +38,60 @@ class TestSeverityFloorLowTier:
     """LOW risk tier: suppress all LOW-severity findings by default."""
 
     def test_low_severity_suppressed(self):
-        results = [_agent("code_quality_observability", [
-            _finding(Severity.LOW),
-            _finding(Severity.MEDIUM),
-        ])]
+        results = [
+            _agent(
+                "code_quality_observability",
+                [
+                    _finding(Severity.LOW),
+                    _finding(Severity.MEDIUM),
+                ],
+            )
+        ]
         filtered, count = filter_findings(results, RiskTier.LOW, GuardianConfig())
         assert count == 1
         assert len(filtered[0].findings) == 1
         assert filtered[0].findings[0].severity == Severity.MEDIUM
 
     def test_medium_severity_kept(self):
-        results = [_agent("code_quality_observability", [
-            _finding(Severity.MEDIUM),
-            _finding(Severity.HIGH),
-        ])]
+        results = [
+            _agent(
+                "code_quality_observability",
+                [
+                    _finding(Severity.MEDIUM),
+                    _finding(Severity.HIGH),
+                ],
+            )
+        ]
         filtered, count = filter_findings(results, RiskTier.LOW, GuardianConfig())
         assert count == 0
         assert len(filtered[0].findings) == 2
 
     def test_all_low_suppressed_downgrades_verdict(self):
-        results = [_agent("code_quality_observability", [
-            _finding(Severity.LOW),
-            _finding(Severity.LOW),
-        ], verdict=Verdict.WARN)]
+        results = [
+            _agent(
+                "code_quality_observability",
+                [
+                    _finding(Severity.LOW),
+                    _finding(Severity.LOW),
+                ],
+                verdict=Verdict.WARN,
+            )
+        ]
         filtered, count = filter_findings(results, RiskTier.LOW, GuardianConfig())
         assert count == 2
         assert filtered[0].verdict == Verdict.PASS
         assert len(filtered[0].findings) == 0
 
     def test_flag_human_verdict_preserved_even_if_all_suppressed(self):
-        results = [_agent("security_privacy", [
-            _finding(Severity.LOW),
-        ], verdict=Verdict.FLAG_HUMAN)]
+        results = [
+            _agent(
+                "security_privacy",
+                [
+                    _finding(Severity.LOW),
+                ],
+                verdict=Verdict.FLAG_HUMAN,
+            )
+        ]
         filtered, _ = filter_findings(results, RiskTier.LOW, GuardianConfig())
         assert filtered[0].verdict == Verdict.FLAG_HUMAN
 
@@ -84,11 +106,16 @@ class TestSeverityFloorMediumTier:
     """MEDIUM risk tier: suppress LOW+UNCERTAIN findings by default."""
 
     def test_low_uncertain_suppressed(self):
-        results = [_agent("code_quality_observability", [
-            _finding(Severity.LOW, Certainty.UNCERTAIN),
-            _finding(Severity.LOW, Certainty.DETECTED),
-            _finding(Severity.MEDIUM, Certainty.UNCERTAIN),
-        ])]
+        results = [
+            _agent(
+                "code_quality_observability",
+                [
+                    _finding(Severity.LOW, Certainty.UNCERTAIN),
+                    _finding(Severity.LOW, Certainty.DETECTED),
+                    _finding(Severity.MEDIUM, Certainty.UNCERTAIN),
+                ],
+            )
+        ]
         filtered, count = filter_findings(results, RiskTier.MEDIUM, GuardianConfig())
         assert count == 1  # only LOW+UNCERTAIN suppressed
         assert len(filtered[0].findings) == 2
@@ -104,10 +131,15 @@ class TestSeverityFloorHighTier:
     """HIGH risk tier: no suppression by default."""
 
     def test_nothing_suppressed(self):
-        results = [_agent("test", [
-            _finding(Severity.LOW, Certainty.UNCERTAIN),
-            _finding(Severity.LOW, Certainty.DETECTED),
-        ])]
+        results = [
+            _agent(
+                "test",
+                [
+                    _finding(Severity.LOW, Certainty.UNCERTAIN),
+                    _finding(Severity.LOW, Certainty.DETECTED),
+                ],
+            )
+        ]
         filtered, count = filter_findings(results, RiskTier.HIGH, GuardianConfig())
         assert count == 0
         assert len(filtered[0].findings) == 2
@@ -143,11 +175,16 @@ class TestSeverityFloorCustomRules:
                 ],
             ),
         )
-        results = [_agent("test", [
-            _finding(Severity.LOW, Certainty.DETECTED),
-            _finding(Severity.MEDIUM, Certainty.SUSPECTED),
-            _finding(Severity.MEDIUM, Certainty.DETECTED),
-        ])]
+        results = [
+            _agent(
+                "test",
+                [
+                    _finding(Severity.LOW, Certainty.DETECTED),
+                    _finding(Severity.MEDIUM, Certainty.SUSPECTED),
+                    _finding(Severity.MEDIUM, Certainty.DETECTED),
+                ],
+            )
+        ]
         filtered, count = filter_findings(results, RiskTier.LOW, config)
         assert count == 2
         assert len(filtered[0].findings) == 1

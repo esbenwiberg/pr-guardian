@@ -1,4 +1,5 @@
 """API endpoints for the PR Dashboard feature."""
+
 from __future__ import annotations
 
 import asyncio
@@ -235,6 +236,7 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
                 github_handle = user_id.get("github_handle")
                 if github_handle:
                     from pr_guardian.platform.github import GitHubAdapter
+
                     token = os.environ.get("GITHUB_TOKEN", "")
                     adapter = GitHubAdapter(token=token)
                     try:
@@ -284,7 +286,14 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
         adapter = create_adapter(platform_name)
         base_url = str(request.base_url)
         asyncio.create_task(
-            _run_review_background(stub, adapter, "none", base_url, platform_name=platform_name, review_db_id=review_db_id)
+            _run_review_background(
+                stub,
+                adapter,
+                "none",
+                base_url,
+                platform_name=platform_name,
+                review_db_id=review_db_id,
+            )
         )
     except Exception as exc:
         log.warning("start_wizard_review_launch_failed", error=str(exc))

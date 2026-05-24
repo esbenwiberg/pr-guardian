@@ -18,6 +18,7 @@ class Decision(str, Enum):
 @dataclass
 class MechanicalResult:
     """Result from a single mechanical check."""
+
     tool: str
     passed: bool
     severity: str = "info"  # info, warning, error
@@ -28,6 +29,7 @@ class MechanicalResult:
 @dataclass
 class ReviewResult:
     """Final output of the entire review pipeline."""
+
     pr_id: str
     repo: str
     risk_tier: RiskTier

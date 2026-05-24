@@ -30,7 +30,8 @@ async def run_api_contract_check(
     spec_files = [f for f in changed_files if _is_api_spec(f)]
     if not spec_files:
         return MechanicalCheckResult(
-            tool="api-contracts", passed=True,
+            tool="api-contracts",
+            passed=True,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -39,10 +40,14 @@ async def run_api_contract_check(
     for spec_file in spec_files:
         try:
             proc = await asyncio.create_subprocess_exec(
-                "oasdiff", "breaking",
-                "--base", f"origin/{target_branch}:{spec_file}",
-                "--revision", str(repo_path / spec_file),
-                "--format", "json",
+                "oasdiff",
+                "breaking",
+                "--base",
+                f"origin/{target_branch}:{spec_file}",
+                "--revision",
+                str(repo_path / spec_file),
+                "--format",
+                "json",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(repo_path),
@@ -50,7 +55,8 @@ async def run_api_contract_check(
             stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
         except FileNotFoundError:
             return MechanicalCheckResult(
-                tool="api-contracts", passed=True,
+                tool="api-contracts",
+                passed=True,
                 error="oasdiff not installed — skipped",
                 duration_ms=int((time.monotonic() - start) * 1000),
             )
@@ -58,12 +64,15 @@ async def run_api_contract_check(
             continue
 
         if proc.returncode != 0 and stdout.strip():
-            findings.append(CheckFinding(
-                file=spec_file, line=None,
-                rule="api-breaking-change",
-                message=f"Breaking API changes detected in {spec_file}",
-                severity=CheckSeverity.WARNING,
-            ))
+            findings.append(
+                CheckFinding(
+                    file=spec_file,
+                    line=None,
+                    rule="api-breaking-change",
+                    message=f"Breaking API changes detected in {spec_file}",
+                    severity=CheckSeverity.WARNING,
+                )
+            )
 
     duration = int((time.monotonic() - start) * 1000)
     return MechanicalCheckResult(

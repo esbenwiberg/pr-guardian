@@ -5,6 +5,7 @@ Resolves every request to a unified Identity by checking (in order):
 2. X-MS-CLIENT-PRINCIPAL-NAME header → Easy Auth (Entra ID)
 3. Anonymous fallback (admin in local dev, non-admin otherwise)
 """
+
 from __future__ import annotations
 
 import os
@@ -13,7 +14,6 @@ from dataclasses import dataclass, field
 import structlog
 from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.responses import JSONResponse
 
 log = structlog.get_logger()
 
@@ -56,9 +56,7 @@ def _dev_admin_mode() -> bool:
 class IdentityMiddleware(BaseHTTPMiddleware):
     """Resolve caller identity on every request."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
 
         # Skip auth for health, webhooks, static assets
@@ -96,6 +94,7 @@ class IdentityMiddleware(BaseHTTPMiddleware):
 
         try:
             from pr_guardian.persistence import storage
+
             key_data = await storage.validate_api_key(raw_key)
         except Exception as e:
             log.warning("api_key_validation_error", error=str(e))
@@ -124,6 +123,7 @@ class IdentityMiddleware(BaseHTTPMiddleware):
             return not _db_available()  # admin in local dev
         try:
             from pr_guardian.persistence import storage
+
             return await storage.is_admin(email)
         except Exception:
             return False
@@ -132,4 +132,5 @@ class IdentityMiddleware(BaseHTTPMiddleware):
 def _unauthorized(detail: str):
     """Return an exception that the middleware can raise to short-circuit."""
     from starlette.exceptions import HTTPException
+
     return HTTPException(status_code=401, detail=detail)

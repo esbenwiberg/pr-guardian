@@ -7,6 +7,7 @@ Provides a focused surface for automated agents to:
 
 All endpoints require a valid API key via Authorization: Bearer prg_*.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -95,7 +96,9 @@ async def dismiss_finding(
         platform=review["platform"],
         signature=sig,
         status=body.status,
-        comment=f"[{identity.display_name}] {body.comment}" if body.comment else f"[{identity.display_name}]",
+        comment=f"[{identity.display_name}] {body.comment}"
+        if body.comment
+        else f"[{identity.display_name}]",
         source_finding={
             "finding_id": str(finding_id),
             "agent_name": agent_name,
@@ -140,11 +143,18 @@ async def trigger_re_review(
 
     async def _run():
         import traceback
+
         try:
             from pr_guardian.core.orchestrator import run_re_review
+
             await run_re_review(pr, adapter, original_review=review)
         except Exception as e:
-            log.error("agent_re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
+            log.error(
+                "agent_re_review_failed",
+                pr_id=pr.pr_id,
+                error=str(e),
+                traceback=traceback.format_exc(),
+            )
 
     asyncio.create_task(_run())
 
@@ -186,11 +196,18 @@ async def trigger_full_review(
 
     async def _run():
         import traceback
+
         try:
             from pr_guardian.core.orchestrator import run_review
+
             await run_review(pr, adapter, comment_mode=body.comment_mode, dismissals=dismissals)
         except Exception as e:
-            log.error("agent_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
+            log.error(
+                "agent_review_failed",
+                pr_id=pr.pr_id,
+                error=str(e),
+                traceback=traceback.format_exc(),
+            )
 
     asyncio.create_task(_run())
 

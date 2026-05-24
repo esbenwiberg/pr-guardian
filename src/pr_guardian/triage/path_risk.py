@@ -14,8 +14,12 @@ def _tier_index(tier: RiskTier) -> int:
 
 
 def _tier_from_str(s: str) -> RiskTier | None:
-    mapping = {"trivial": RiskTier.TRIVIAL, "low": RiskTier.LOW,
-               "medium": RiskTier.MEDIUM, "high": RiskTier.HIGH}
+    mapping = {
+        "trivial": RiskTier.TRIVIAL,
+        "low": RiskTier.LOW,
+        "medium": RiskTier.MEDIUM,
+        "high": RiskTier.HIGH,
+    }
     return mapping.get(s.lower())
 
 
@@ -34,7 +38,9 @@ def apply_path_risk(
         if any(fnmatch(f, entry.pattern) for f in changed_files):
             min_tier = _tier_from_str(entry.min_tier)
             if min_tier and _tier_index(min_tier) > _tier_index(tier):
-                reasons.append(f"Path risk: {entry.pattern} → min {entry.min_tier} ({entry.reason})")
+                reasons.append(
+                    f"Path risk: {entry.pattern} → min {entry.min_tier} ({entry.reason})"
+                )
                 tier = min_tier
 
     # Apply safe_paths (ceiling — can only lower tier)

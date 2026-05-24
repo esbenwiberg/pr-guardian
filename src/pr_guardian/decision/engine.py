@@ -6,7 +6,13 @@ import structlog
 
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.decision.types import StickyTrigger
-from pr_guardian.models.context import RepoRiskClass, ReviewContext, RiskTier, TrustTier, TrustTierResult
+from pr_guardian.models.context import (
+    RepoRiskClass,
+    ReviewContext,
+    RiskTier,
+    TrustTier,
+    TrustTierResult,
+)
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.triage.hotspots import check_hotspot_hits
@@ -126,7 +132,9 @@ def check_overrides(
         for finding in result.findings:
             validated = validated_certainty(finding, config)
             if validated == Certainty.DETECTED and finding.severity in (
-                Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL
+                Severity.MEDIUM,
+                Severity.HIGH,
+                Severity.CRITICAL,
             ):
                 detected_medium_plus += 1
             if validated == Certainty.SUSPECTED:
@@ -140,40 +148,48 @@ def check_overrides(
         finding_reasons.append(f"{suspected_count} suspected findings (threshold: 3)")
 
     if context.change_profile.adds_dependencies:
-        sticky.append(StickyTrigger(
-            kind="new_dep",
-            label="New dependency added",
-            source="adds_dependencies",
-            reason="PR introduces a new external dependency",
-        ))
+        sticky.append(
+            StickyTrigger(
+                kind="new_dep",
+                label="New dependency added",
+                source="adds_dependencies",
+                reason="PR introduces a new external dependency",
+            )
+        )
 
     if context.repo_risk_class in (RepoRiskClass.ELEVATED, RepoRiskClass.CRITICAL):
-        sticky.append(StickyTrigger(
-            kind="repo_risk",
-            label=f"Elevated repo risk: {context.repo_risk_class.value}",
-            source=context.repo_risk_class.value,
-            reason=f"Repository is classified as {context.repo_risk_class.value} risk",
-        ))
+        sticky.append(
+            StickyTrigger(
+                kind="repo_risk",
+                label=f"Elevated repo risk: {context.repo_risk_class.value}",
+                source=context.repo_risk_class.value,
+                reason=f"Repository is classified as {context.repo_risk_class.value} risk",
+            )
+        )
 
     hotspot_hits = check_hotspot_hits(context.changed_files, context.hotspots)
     if hotspot_hits:
         source = hotspot_hits[0]
-        sticky.append(StickyTrigger(
-            kind="hotspot",
-            label=f"Hotspot file touched: {source}",
-            source=source,
-            reason=f"{len(hotspot_hits)} hotspot file(s) changed: {', '.join(hotspot_hits[:3])}",
-        ))
+        sticky.append(
+            StickyTrigger(
+                kind="hotspot",
+                label=f"Hotspot file touched: {source}",
+                source=source,
+                reason=f"{len(hotspot_hits)} hotspot file(s) changed: {', '.join(hotspot_hits[:3])}",
+            )
+        )
 
     if context.security_surface.has_hits():
         hit_files = list(context.security_surface.classifications.keys())
         source = hit_files[0]
-        sticky.append(StickyTrigger(
-            kind="path_risk",
-            label=f"Security surface touched: {source}",
-            source=source,
-            reason=f"{len(hit_files)} security-surface file(s) changed",
-        ))
+        sticky.append(
+            StickyTrigger(
+                kind="path_risk",
+                label=f"Security surface touched: {source}",
+                source=source,
+                reason=f"{len(hit_files)} security-surface file(s) changed",
+            )
+        )
 
     return sticky, finding_reasons
 
@@ -201,9 +217,7 @@ def decide(
     # Check auto-approve branch rules
     target = context.pr.target_branch
     auto_approve_cfg = config.auto_approve
-    branch_blocked = any(
-        fnmatch(target, p) for p in auto_approve_cfg.blocked_target_branches
-    )
+    branch_blocked = any(fnmatch(target, p) for p in auto_approve_cfg.blocked_target_branches)
 
     # Start with decision matrix (risk-based)
     decision = _apply_matrix(risk_tier, repo_risk, agent_results, score, config)
@@ -213,12 +227,14 @@ def decide(
     # trail reflects the restrictive tier even when findings already escalated.
     reviewer_group_override: str | None = None
     if trust_tier in (TrustTier.MANDATORY_HUMAN, TrustTier.HUMAN_PRIMARY):
-        sticky_triggers.append(StickyTrigger(
-            kind="trust_tier",
-            label=f"Trust tier: {trust_tier.value}",
-            source=trust_tier.value,
-            reason=f"Trust tier {trust_tier.value} requires human review",
-        ))
+        sticky_triggers.append(
+            StickyTrigger(
+                kind="trust_tier",
+                label=f"Trust tier: {trust_tier.value}",
+                source=trust_tier.value,
+                reason=f"Trust tier {trust_tier.value} requires human review",
+            )
+        )
         if decision == Decision.AUTO_APPROVE:
             decision = Decision.HUMAN_REVIEW
         if trust_tier == TrustTier.HUMAN_PRIMARY and trust_tier_result:

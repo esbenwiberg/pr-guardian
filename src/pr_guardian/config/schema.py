@@ -57,15 +57,15 @@ class AgentContextThresholds(BaseModel):
 
 
 class TriageConfig(BaseModel):
-    agent_context_thresholds: AgentContextThresholds = Field(default_factory=AgentContextThresholds)
+    agent_context_thresholds: AgentContextThresholds = Field(
+        default_factory=AgentContextThresholds
+    )
 
 
 class AutoApproveConfig(BaseModel):
     enabled: bool = True
     allowed_target_branches: list[str] = Field(default_factory=lambda: ["develop", "feature/*"])
-    blocked_target_branches: list[str] = Field(
-        default_factory=lambda: ["release/*"]
-    )
+    blocked_target_branches: list[str] = Field(default_factory=lambda: ["release/*"])
     require_all_checks_pass: bool = True
 
 
@@ -119,7 +119,12 @@ class FileRolesConfig(BaseModel):
         default_factory=lambda: ["**/*.md", "*.md", "**/docs/**", "CHANGELOG*"]
     )
     generated_patterns: list[str] = Field(
-        default_factory=lambda: ["**/migrations/**", "migrations/**", "**/package-lock.json", "**/*.lock"]
+        default_factory=lambda: [
+            "**/migrations/**",
+            "migrations/**",
+            "**/package-lock.json",
+            "**/*.lock",
+        ]
     )
     build_patterns: list[str] = Field(
         default_factory=lambda: ["**/Dockerfile*", "**/Makefile", "**/*.csproj"]
@@ -154,22 +159,43 @@ class TrustTierRule(BaseModel):
 class TrustTierConfig(BaseModel):
     default_tier: str = "spot_check"
     rules: list[TrustTierRule] = Field(default_factory=list)
-    reviewer_groups: dict[str, str] = Field(default_factory=lambda: {
-        "mandatory_human": "",
-        "human_primary": "security-team",
-    })
+    reviewer_groups: dict[str, str] = Field(
+        default_factory=lambda: {
+            "mandatory_human": "",
+            "human_primary": "security-team",
+        }
+    )
     spot_check_window_hours: int = 48
-    escalation_keywords: list[str] = Field(default_factory=lambda: [
-        "auth", "permission", "token", "credential", "secret",
-        "encryption", "crypto", "rbac", "role", "privilege",
-        "session", "injection", "csrf", "xss", "cors",
-        "oauth", "jwt", "certificate", "password", "api_key",
-    ])
+    escalation_keywords: list[str] = Field(
+        default_factory=lambda: [
+            "auth",
+            "permission",
+            "token",
+            "credential",
+            "secret",
+            "encryption",
+            "crypto",
+            "rbac",
+            "role",
+            "privilege",
+            "session",
+            "injection",
+            "csrf",
+            "xss",
+            "cors",
+            "oauth",
+            "jwt",
+            "certificate",
+            "password",
+            "api_key",
+        ]
+    )
     escalation_min_severity: str = "medium"
 
 
 class SeverityFloorRule(BaseModel):
     """A single suppression rule: suppress findings matching severity + certainty."""
+
     severity: str  # low, medium, high, critical
     certainty: str | None = None  # if set, both must match; if None, severity alone triggers
 
@@ -180,6 +206,7 @@ class SeverityFloorConfig(BaseModel):
     Findings are suppressed from display/storage but the decision engine still
     scores them — this only affects what the developer sees.
     """
+
     enabled: bool = True
     # Rules per risk tier. Findings matching ANY rule are suppressed.
     low_tier_suppress: list[SeverityFloorRule] = Field(
@@ -204,6 +231,7 @@ class SeverityFloorConfig(BaseModel):
 
 class ValidatorConfig(BaseModel):
     """Adversarial validator that challenges agent findings before display."""
+
     enabled: bool = True
     scan_enabled: bool = True
     min_findings_to_validate: int = 1
@@ -234,6 +262,7 @@ class InlineCommentsConfig(BaseModel):
 
 class GuardianConfig(BaseModel):
     """Top-level config: merged from service defaults + per-repo review.yml."""
+
     llm: LLMConfig = Field(default_factory=LLMConfig)
     repo_risk_class: str = "standard"
     human_review: HumanReviewConfig = Field(default_factory=HumanReviewConfig)
@@ -245,9 +274,7 @@ class GuardianConfig(BaseModel):
     triage: TriageConfig = Field(default_factory=TriageConfig)
     auto_approve: AutoApproveConfig = Field(default_factory=AutoApproveConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
-    intent_verification: IntentVerificationConfig = Field(
-        default_factory=IntentVerificationConfig
-    )
+    intent_verification: IntentVerificationConfig = Field(default_factory=IntentVerificationConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     test_quality: TestQualityConfig = Field(default_factory=TestQualityConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)

@@ -56,6 +56,7 @@ def max_trust_tier(a: TrustTier, b: TrustTier) -> TrustTier:
 @dataclass
 class TrustTierResult:
     """Output of trust-tier classification (path-based + optional escalation)."""
+
     resolved_tier: TrustTier = TrustTier.SPOT_CHECK
     file_tiers: dict[str, TrustTier] = field(default_factory=dict)
     triggering_files: list[str] = field(default_factory=list)
@@ -68,6 +69,7 @@ class TrustTierResult:
 @dataclass
 class SecuritySurface:
     """File classifications from security surface patterns."""
+
     classifications: dict[str, set[str]] = field(default_factory=dict)
 
     def classify(self, file_path: str, classification: str) -> None:
@@ -83,6 +85,7 @@ class SecuritySurface:
 @dataclass
 class BlastRadius:
     """Maps changed files to their downstream consumers and propagated risk."""
+
     consumers: dict[str, set[str]] = field(default_factory=dict)
     propagated_surface: dict[str, set[str]] = field(default_factory=dict)
     touches_shared_code: bool = False
@@ -93,6 +96,7 @@ class BlastRadius:
 @dataclass
 class ChangeProfile:
     """Semantic classification of what this PR changes."""
+
     file_roles: dict[str, set[FileRole]] = field(default_factory=dict)
 
     has_production_changes: bool = False
@@ -116,6 +120,7 @@ class ChangeProfile:
 @dataclass
 class ReviewContext:
     """Built once in Stage 0, consumed by all downstream stages."""
+
     pr: PlatformPR
     repo_path: Path
 

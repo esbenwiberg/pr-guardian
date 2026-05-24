@@ -1,4 +1,5 @@
 """Tests for scan-level noise reduction: severity floor + validator."""
+
 from __future__ import annotations
 
 from pr_guardian.config.schema import GuardianConfig, SeverityFloorRule
@@ -32,10 +33,14 @@ def _result(findings: list[ScanFinding], verdict: str = "warn") -> ScanAgentResu
 class TestScanSeverityFilter:
     def test_suppresses_low_uncertain(self):
         config = GuardianConfig()  # default scan_suppress: low+uncertain
-        results = [_result([
-            _finding("low", "uncertain"),
-            _finding("medium", "detected"),
-        ])]
+        results = [
+            _result(
+                [
+                    _finding("low", "uncertain"),
+                    _finding("medium", "detected"),
+                ]
+            )
+        ]
         filtered, suppressed = filter_scan_findings(results, config)
         assert suppressed == 1
         assert len(filtered[0].findings) == 1
@@ -83,11 +88,15 @@ class TestScanSeverityFilter:
         config.severity_floor.scan_suppress = [
             SeverityFloorRule(severity="medium", certainty="suspected"),
         ]
-        results = [_result([
-            _finding("low", "uncertain"),
-            _finding("medium", "suspected"),
-            _finding("high", "detected"),
-        ])]
+        results = [
+            _result(
+                [
+                    _finding("low", "uncertain"),
+                    _finding("medium", "suspected"),
+                    _finding("high", "detected"),
+                ]
+            )
+        ]
         filtered, suppressed = filter_scan_findings(results, config)
         assert suppressed == 1
         assert len(filtered[0].findings) == 2

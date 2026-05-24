@@ -4,6 +4,7 @@ Revision ID: 005
 Revises: 004
 Create Date: 2026-03-10
 """
+
 from typing import Sequence, Union
 
 from alembic import op
@@ -30,7 +31,9 @@ def _column_exists(table: str, column: str) -> bool:
 
 def upgrade() -> None:
     if not _column_exists("reviews", "repo_risk_class"):
-        op.add_column("reviews", sa.Column("repo_risk_class", sa.String(16), server_default="standard"))
+        op.add_column(
+            "reviews", sa.Column("repo_risk_class", sa.String(16), server_default="standard")
+        )
     if not _column_exists("reviews", "trust_tier"):
         op.add_column("reviews", sa.Column("trust_tier", sa.String(32), server_default=""))
     if not _column_exists("reviews", "trust_tier_details"):

@@ -12,7 +12,6 @@ from pydantic import BaseModel, ConfigDict
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
-    HARD_MAX_FILES,
     build_synthetic_pr,
     build_repo_diff,
     clamp_max_files,
@@ -71,7 +70,10 @@ class ReviewResponse(BaseModel):
 
 
 async def _run_review_background(
-    stub: PlatformPR, adapter, comment_mode: str, base_url: str,
+    stub: PlatformPR,
+    adapter,
+    comment_mode: str,
+    base_url: str,
     *,
     platform_name: str,
     pat_name: str | None = None,
@@ -79,10 +81,13 @@ async def _run_review_background(
 ) -> None:
     """Hydrate the PR stub and run the full review pipeline in the background."""
     import traceback
+
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
     except Exception as e:
-        log.error("background_review_hydrate_failed", pr_id=stub.pr_id, repo=stub.repo, error=str(e))
+        log.error(
+            "background_review_hydrate_failed", pr_id=stub.pr_id, repo=stub.repo, error=str(e)
+        )
         return
 
     dismissals: list[dict] | None = None
@@ -90,6 +95,7 @@ async def _run_review_background(
     try:
         from pr_guardian.persistence import storage
         from pr_guardian.persistence.storage import find_review_by_pr_url
+
         dismissals = await storage.get_active_dismissals(pr.pr_id, pr.repo, pr.platform.value)
         prev_review = await find_review_by_pr_url(pr.pr_url)
     except Exception:
@@ -97,7 +103,8 @@ async def _run_review_background(
 
     try:
         result = await run_review(
-            pr, adapter,
+            pr,
+            adapter,
             comment_mode=comment_mode,
             base_url=base_url,
             dismissals=dismissals,
@@ -106,6 +113,7 @@ async def _run_review_background(
         )
         if result is not None and dismissals is not None:
             from pr_guardian.persistence.storage import infer_fixes, finding_signature as _fsig
+
             prev_sigs = {
                 _fsig(f.get("file", ""), f.get("category", ""), ar["agent_name"])
                 for ar in (prev_review or {}).get("agent_results", [])
@@ -118,7 +126,12 @@ async def _run_review_background(
             }
             await infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)
     except Exception as e:
-        log.error("background_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
+        log.error(
+            "background_review_failed",
+            pr_id=pr.pr_id,
+            error=str(e),
+            traceback=traceback.format_exc(),
+        )
 
 
 @router.post("/review", response_model=ReviewResponse)
@@ -151,17 +164,26 @@ async def manual_review(req: ReviewRequest, request: Request):
     review_db_id: uuid.UUID | None = None
     try:
         from pr_guardian.persistence import storage
+
         review_db_id = await storage.create_review_record(
-            stub, comment_mode=req.comment_mode, pat_name=req.pat_name,
+            stub,
+            comment_mode=req.comment_mode,
+            pat_name=req.pat_name,
         )
     except Exception as e:
         log.warning("manual_review_db_create_failed", pr_id=stub.pr_id, error=str(e))
 
-    asyncio.create_task(_run_review_background(
-        stub, adapter, req.comment_mode, base_url,
-        platform_name=platform_name, pat_name=req.pat_name,
-        review_db_id=review_db_id,
-    ))
+    asyncio.create_task(
+        _run_review_background(
+            stub,
+            adapter,
+            req.comment_mode,
+            base_url,
+            platform_name=platform_name,
+            pat_name=req.pat_name,
+            review_db_id=review_db_id,
+        )
+    )
 
     return ReviewResponse(
         status="queued",
@@ -240,7 +262,11 @@ class RepoReviewResponse(BaseModel):
 
 
 async def _run_repo_review_background(
-    repo: str, platform: str, adapter, ref: str, max_files: int,
+    repo: str,
+    platform: str,
+    adapter,
+    ref: str,
+    max_files: int,
     *,
     selection: str = "all",
     pat_name: str | None = None,
@@ -265,21 +291,27 @@ async def _run_repo_review_background(
     # shows up in Active Reviews immediately and any failure is surfaced there.
     if storage:
         try:
-            review_db_id = await storage.create_review_record(pr, comment_mode="none", pat_name=pat_name)
+            review_db_id = await storage.create_review_record(
+                pr, comment_mode="none", pat_name=pat_name
+            )
             await storage.update_review_stage(review_db_id, "queued", "Building repo diff")
-            event_bus.publish(ReviewEvent(
-                review_id=str(review_db_id),
-                pr_id=pr.pr_id,
-                repo=pr.repo,
-                stage="queued",
-                detail="Building repo diff",
-            ))
+            event_bus.publish(
+                ReviewEvent(
+                    review_id=str(review_db_id),
+                    pr_id=pr.pr_id,
+                    repo=pr.repo,
+                    stage="queued",
+                    detail="Building repo diff",
+                )
+            )
         except Exception as e:
             log.warning("repo_review_db_create_failed", error=str(e))
 
     try:
         diff, meta = await build_repo_diff(
-            adapter, repo, ref=ref,
+            adapter,
+            repo,
+            ref=ref,
             selection=selection,  # type: ignore[arg-type]
             max_files=max_files,
         )
@@ -309,14 +341,16 @@ async def _run_repo_review_background(
                 await storage.update_review_stage(review_db_id, "repo_diff_built", detail)
             except Exception:
                 pass
-        event_bus.publish(ReviewEvent(
-            review_id=str(review_db_id) if review_db_id else "",
-            pr_id=pr.pr_id,
-            repo=pr.repo,
-            stage="repo_diff_built",
-            detail=detail,
-            extra=meta,
-        ))
+        event_bus.publish(
+            ReviewEvent(
+                review_id=str(review_db_id) if review_db_id else "",
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                stage="repo_diff_built",
+                detail=detail,
+                extra=meta,
+            )
+        )
 
         await run_review(
             pr,
@@ -330,7 +364,9 @@ async def _run_repo_review_background(
     except Exception as e:
         log.error(
             "repo_review_background_failed",
-            repo=repo, error=str(e), traceback=traceback.format_exc(),
+            repo=repo,
+            error=str(e),
+            traceback=traceback.format_exc(),
         )
         if storage and review_db_id:
             try:
@@ -380,15 +416,23 @@ async def manual_repo_review(req: RepoReviewRequest):
 
     log.info(
         "manual_repo_review_started",
-        platform=req.platform, repo=repo, ref=req.ref,
-        selection=req.selection, max_files=max_files,
+        platform=req.platform,
+        repo=repo,
+        ref=req.ref,
+        selection=req.selection,
+        max_files=max_files,
         clamped=(max_files != req.max_files),
     )
 
     asyncio.create_task(
         _run_repo_review_background(
-            repo, req.platform, adapter, req.ref, max_files,
-            selection=req.selection, pat_name=req.pat_name,
+            repo,
+            req.platform,
+            adapter,
+            req.ref,
+            max_files,
+            selection=req.selection,
+            pat_name=req.pat_name,
         )
     )
 
@@ -442,7 +486,9 @@ async def _hydrate_pr(adapter, stub: PlatformPR, platform: str) -> PlatformPR:
         # HEAD immediately, so prefer it.
         try:
             branch_head = await adapter.resolve_branch_head(
-                stub.project, stub.repo, source_branch,
+                stub.project,
+                stub.repo,
+                source_branch,
             )
             if branch_head:
                 if branch_head != head_sha:

@@ -14,8 +14,14 @@ async def run_gitleaks(repo_path: Path) -> MechanicalCheckResult:
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            "gitleaks", "detect", "--source", str(repo_path),
-            "--report-format", "json", "--report-path", "/dev/stdout",
+            "gitleaks",
+            "detect",
+            "--source",
+            str(repo_path),
+            "--report-format",
+            "json",
+            "--report-path",
+            "/dev/stdout",
             "--no-git",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
@@ -24,13 +30,15 @@ async def run_gitleaks(repo_path: Path) -> MechanicalCheckResult:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
     except FileNotFoundError:
         return MechanicalCheckResult(
-            tool="gitleaks", passed=True,
+            tool="gitleaks",
+            passed=True,
             error="gitleaks not installed — skipped",
             duration_ms=int((time.monotonic() - start) * 1000),
         )
     except asyncio.TimeoutError:
         return MechanicalCheckResult(
-            tool="gitleaks", passed=False,
+            tool="gitleaks",
+            passed=False,
             error="gitleaks timed out after 30s",
             severity=CheckSeverity.ERROR,
             duration_ms=30_000,
@@ -40,13 +48,15 @@ async def run_gitleaks(repo_path: Path) -> MechanicalCheckResult:
     try:
         results = json.loads(stdout.decode()) if stdout.strip() else []
         for leak in results:
-            findings.append(CheckFinding(
-                file=leak.get("File", ""),
-                line=leak.get("StartLine"),
-                rule=leak.get("RuleID", "secret-detected"),
-                message=f"Secret detected: {leak.get('Description', 'unknown')}",
-                severity=CheckSeverity.ERROR,
-            ))
+            findings.append(
+                CheckFinding(
+                    file=leak.get("File", ""),
+                    line=leak.get("StartLine"),
+                    rule=leak.get("RuleID", "secret-detected"),
+                    message=f"Secret detected: {leak.get('Description', 'unknown')}",
+                    severity=CheckSeverity.ERROR,
+                )
+            )
     except (json.JSONDecodeError, KeyError):
         pass
 

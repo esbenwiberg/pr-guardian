@@ -9,6 +9,7 @@ Routing follows the UI redesign sitemap (specs/ui-redesign/design.md):
 
 Legacy paths 302-redirect to their new home.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -45,6 +46,7 @@ def _is_admin(request: Request) -> bool:
 # ---------------------------------------------------------------------------
 # Primary surfaces
 # ---------------------------------------------------------------------------
+
 
 @router.get("/", response_class=HTMLResponse)
 async def root():
@@ -115,6 +117,7 @@ async def settings_page(request: Request):
 # keep their JS isolated (Brief 06 — see settings.html).
 # ---------------------------------------------------------------------------
 
+
 @router.get("/_embed/settings/llm", response_class=HTMLResponse)
 async def embed_llm(request: Request):
     if not _is_admin(request):
@@ -154,6 +157,7 @@ async def help_api():
 # ---------------------------------------------------------------------------
 # Legacy redirects (302 — preserve old bookmarks during the redesign)
 # ---------------------------------------------------------------------------
+
 
 @router.get("/dashboard")
 async def legacy_dashboard():

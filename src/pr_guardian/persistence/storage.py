@@ -1,4 +1,5 @@
 """Service layer: save review results and query for the dashboard."""
+
 from __future__ import annotations
 
 import hashlib
@@ -14,7 +15,6 @@ import structlog
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pr_guardian.models.findings import AgentResult as AgentResultDomain
 from pr_guardian.models.output import ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.persistence.database import async_session
@@ -48,7 +48,10 @@ log = structlog.get_logger()
 # Write operations
 # ---------------------------------------------------------------------------
 
-async def create_review_record(pr: PlatformPR, *, comment_mode: str = "none", pat_name: str | None = None) -> uuid.UUID:
+
+async def create_review_record(
+    pr: PlatformPR, *, comment_mode: str = "none", pat_name: str | None = None
+) -> uuid.UUID:
     """Insert a pending review row when a review starts. Returns the row id."""
     row = ReviewRow(
         pr_id=pr.pr_id,
@@ -127,11 +130,15 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.risk_tier = result.risk_tier.value
         row.repo_risk_class = result.repo_risk_class.value
         row.trust_tier = result.trust_tier.value if result.trust_tier else ""
-        row.trust_tier_details = {
-            "files": result.trust_tier_files,
-            "reviewer_group_override": result.reviewer_group_override,
-            "escalated_from": result.escalated_from,
-        } if result.trust_tier else None
+        row.trust_tier_details = (
+            {
+                "files": result.trust_tier_files,
+                "reviewer_group_override": result.reviewer_group_override,
+                "escalated_from": result.escalated_from,
+            }
+            if result.trust_tier
+            else None
+        )
         row.combined_score = result.combined_score
         row.decision = result.decision.value
         row.mechanical_passed = result.mechanical_passed
@@ -151,14 +158,16 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
 
         # Mechanical results
         for mech in result.mechanical_results:
-            session.add(MechanicalResultRow(
-                review_id=review_id,
-                tool=mech.tool,
-                passed=mech.passed,
-                severity=mech.severity,
-                findings=mech.findings,
-                error=mech.error,
-            ))
+            session.add(
+                MechanicalResultRow(
+                    review_id=review_id,
+                    tool=mech.tool,
+                    passed=mech.passed,
+                    severity=mech.severity,
+                    findings=mech.findings,
+                    error=mech.error,
+                )
+            )
 
         # Agent results + findings
         for ar in result.agent_results:
@@ -174,18 +183,20 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
             await session.flush()  # get the id
 
             for f in ar.findings:
-                session.add(FindingRow(
-                    agent_result_id=ar_row.id,
-                    severity=f.severity.value[:16],
-                    certainty=f.certainty.value[:16],
-                    category=f.category[:128],
-                    language=f.language[:32],
-                    file=f.file,
-                    line=f.line,
-                    description=f.description,
-                    suggestion=f.suggestion,
-                    cwe=f.cwe[:32] if f.cwe else None,
-                ))
+                session.add(
+                    FindingRow(
+                        agent_result_id=ar_row.id,
+                        severity=f.severity.value[:16],
+                        certainty=f.certainty.value[:16],
+                        category=f.category[:128],
+                        language=f.language[:32],
+                        file=f.file,
+                        line=f.line,
+                        description=f.description,
+                        suggestion=f.suggestion,
+                        cwe=f.cwe[:32] if f.cwe else None,
+                    )
+                )
 
         await session.commit()
         log.info("review_result_saved", review_id=str(review_id), decision=result.decision.value)
@@ -194,6 +205,7 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
 # ---------------------------------------------------------------------------
 # Read operations (dashboard queries)
 # ---------------------------------------------------------------------------
+
 
 async def get_review(review_id: uuid.UUID) -> dict[str, Any] | None:
     """Fetch a single review with all nested data."""
@@ -309,19 +321,24 @@ async def get_stats() -> dict[str, Any]:
         cost_per_day: list[dict] = []
         try:
             from datetime import date, timedelta
+
             today = date.today()
             window_start = today - timedelta(days=29)
             day_col = func.date(ReviewRow.started_at).label("d")
-            rows = (await session.execute(
-                select(day_col, func.coalesce(func.sum(ReviewRow.cost_usd), 0.0))
-                .where(ReviewRow.started_at.isnot(None))
-                .where(func.date(ReviewRow.started_at) >= window_start)
-                .group_by(day_col)
-            )).all()
+            rows = (
+                await session.execute(
+                    select(day_col, func.coalesce(func.sum(ReviewRow.cost_usd), 0.0))
+                    .where(ReviewRow.started_at.isnot(None))
+                    .where(func.date(ReviewRow.started_at) >= window_start)
+                    .group_by(day_col)
+                )
+            ).all()
             day_map = {str(r[0]): float(r[1] or 0.0) for r in rows}
             for i in range(30):
                 d = window_start + timedelta(days=i)
-                cost_per_day.append({"date": d.isoformat(), "cost": round(day_map.get(d.isoformat(), 0.0), 4)})
+                cost_per_day.append(
+                    {"date": d.isoformat(), "cost": round(day_map.get(d.isoformat(), 0.0), 4)}
+                )
         except Exception:
             cost_per_day = []
 
@@ -343,6 +360,7 @@ async def get_stats() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Prompt overrides
 # ---------------------------------------------------------------------------
+
 
 async def get_prompt_override(agent_name: str) -> str | None:
     """Return the override content for an agent, or None if no override exists."""
@@ -377,8 +395,7 @@ async def get_all_prompts() -> list[dict[str, Any]]:
     try:
         async with async_session() as session:
             overrides = {
-                r.agent_name: r
-                for r in (await session.scalars(select(PromptOverrideRow))).all()
+                r.agent_name: r for r in (await session.scalars(select(PromptOverrideRow))).all()
             }
     except Exception:
         log.warning("prompt_overrides_table_missing")
@@ -387,13 +404,15 @@ async def get_all_prompts() -> list[dict[str, Any]]:
     for name in agents:
         default_content = load_prompt(f"{name}/base.md") or ""
         ovr = overrides.get(name)
-        result.append({
-            "agent_name": name,
-            "content": ovr.content if ovr else default_content,
-            "default_content": default_content,
-            "is_override": ovr is not None,
-            "updated_at": ovr.updated_at.isoformat() if ovr else None,
-        })
+        result.append(
+            {
+                "agent_name": name,
+                "content": ovr.content if ovr else default_content,
+                "default_content": default_content,
+                "is_override": ovr is not None,
+                "updated_at": ovr.updated_at.isoformat() if ovr else None,
+            }
+        )
     return result
 
 
@@ -543,9 +562,7 @@ async def update_github_pat(
             return None
         if is_default is True:
             await session.execute(
-                sa_update(GithubPatRow)
-                .where(GithubPatRow.id != pat_id)
-                .values(is_default=False)
+                sa_update(GithubPatRow).where(GithubPatRow.id != pat_id).values(is_default=False)
             )
         if name is not None:
             row.name = name
@@ -616,7 +633,10 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
     except LookupError:
         raise
     except Exception:
-        log.warning("resolve_github_token_failed", hint="DB unavailable or decrypt error; falling back to env var")
+        log.warning(
+            "resolve_github_token_failed",
+            hint="DB unavailable or decrypt error; falling back to env var",
+        )
     return os.environ.get("GITHUB_TOKEN", "")
 
 
@@ -1036,19 +1056,21 @@ async def save_scan_result(scan_id: uuid.UUID, result) -> None:
             await session.flush()
 
             for f in ar.findings:
-                session.add(ScanFindingRow(
-                    agent_result_id=ar_row.id,
-                    severity=f.severity.value,
-                    certainty=f.certainty.value,
-                    category=f.category,
-                    file=f.file,
-                    line=f.line,
-                    description=f.description,
-                    suggestion=f.suggestion,
-                    priority=f.priority,
-                    last_modified=f.last_modified,
-                    effort_estimate=f.effort_estimate,
-                ))
+                session.add(
+                    ScanFindingRow(
+                        agent_result_id=ar_row.id,
+                        severity=f.severity.value,
+                        certainty=f.certainty.value,
+                        category=f.category,
+                        file=f.file,
+                        line=f.line,
+                        description=f.description,
+                        suggestion=f.suggestion,
+                        priority=f.priority,
+                        last_modified=f.last_modified,
+                        effort_estimate=f.effort_estimate,
+                    )
+                )
 
         await session.commit()
         log.info("scan_result_saved", scan_id=str(scan_id), scan_type=result.scan_type.value)
@@ -1088,9 +1110,7 @@ async def get_scan_stats() -> dict[str, Any]:
 
         type_counts: dict[str, int] = {}
         for st in ("recent_changes", "maintenance"):
-            c = await session.scalar(
-                select(func.count(ScanRow.id)).where(ScanRow.scan_type == st)
-            )
+            c = await session.scalar(select(func.count(ScanRow.id)).where(ScanRow.scan_type == st))
             type_counts[st] = c or 0
 
         total_cost = await session.scalar(
@@ -1213,6 +1233,7 @@ def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _unpack_override_reasons(raw: dict | list | None) -> dict:
     """Convert the stored override_reasons blob to the new split-field shape.
 
@@ -1312,9 +1333,7 @@ async def is_admin(email: str) -> bool:
 async def list_admins() -> list[dict[str, Any]]:
     """Return all admin records."""
     async with async_session() as session:
-        rows = (await session.scalars(
-            select(AdminRow).order_by(AdminRow.created_at)
-        )).all()
+        rows = (await session.scalars(select(AdminRow).order_by(AdminRow.created_at))).all()
         return [
             {"email": r.email, "added_by": r.added_by, "created_at": r.created_at.isoformat()}
             for r in rows
@@ -1375,9 +1394,7 @@ async def create_api_key(
     key_hash = _hash_key(raw_key)
     key_prefix = raw_key[:8]
     expires_at = (
-        datetime.now(timezone.utc) + timedelta(days=expires_in_days)
-        if expires_in_days
-        else None
+        datetime.now(timezone.utc) + timedelta(days=expires_in_days) if expires_in_days else None
     )
 
     row = ApiKeyRow(
@@ -1402,9 +1419,7 @@ async def validate_api_key(raw_key: str) -> dict[str, Any] | None:
     key_hash = _hash_key(raw_key)
     now = datetime.now(timezone.utc)
     async with async_session() as session:
-        row = await session.scalar(
-            select(ApiKeyRow).where(ApiKeyRow.key_hash == key_hash)
-        )
+        row = await session.scalar(select(ApiKeyRow).where(ApiKeyRow.key_hash == key_hash))
         if not row:
             return None
         if row.revoked_at is not None:
@@ -1419,9 +1434,9 @@ async def validate_api_key(raw_key: str) -> dict[str, Any] | None:
 async def list_api_keys() -> list[dict[str, Any]]:
     """List all API keys (hash never exposed)."""
     async with async_session() as session:
-        rows = (await session.scalars(
-            select(ApiKeyRow).order_by(ApiKeyRow.created_at.desc())
-        )).all()
+        rows = (
+            await session.scalars(select(ApiKeyRow).order_by(ApiKeyRow.created_at.desc()))
+        ).all()
         return [_api_key_to_dict(r) for r in rows]
 
 
@@ -1476,24 +1491,26 @@ async def save_inline_comment_ids(
     """Persist platform-native comment IDs for a review."""
     async with async_session() as session:
         for comment_id in ids:
-            session.add(PostedInlineCommentRow(
-                review_id=review_id,
-                platform_comment_id=comment_id,
-                platform=platform,
-                pr_id=pr_id,
-                repo=repo,
-            ))
+            session.add(
+                PostedInlineCommentRow(
+                    review_id=review_id,
+                    platform_comment_id=comment_id,
+                    platform=platform,
+                    pr_id=pr_id,
+                    repo=repo,
+                )
+            )
         await session.commit()
 
 
 async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
     """Return all platform comment IDs previously saved for a review."""
     async with async_session() as session:
-        rows = (await session.scalars(
-            select(PostedInlineCommentRow).where(
-                PostedInlineCommentRow.review_id == review_id
+        rows = (
+            await session.scalars(
+                select(PostedInlineCommentRow).where(PostedInlineCommentRow.review_id == review_id)
             )
-        )).all()
+        ).all()
         return [r.platform_comment_id for r in rows]
 
 
@@ -1532,11 +1549,13 @@ async def upsert_user_identity(
             row.ado_upn = ado_upn or None
             row.updated_at = datetime.now(timezone.utc)
         else:
-            session.add(UserIdentityRow(
-                email=email,
-                github_handle=github_handle or None,
-                ado_upn=ado_upn or None,
-            ))
+            session.add(
+                UserIdentityRow(
+                    email=email,
+                    github_handle=github_handle or None,
+                    ado_upn=ado_upn or None,
+                )
+            )
         await session.commit()
 
 
@@ -1561,14 +1580,16 @@ async def upsert_sync_source(
             row.org = org
             row.repo_url = repo_url
         else:
-            session.add(SyncSourceRow(
-                platform=platform,
-                org=org,
-                project=project,
-                repo=repo,
-                repo_url=repo_url,
-                is_active=True,
-            ))
+            session.add(
+                SyncSourceRow(
+                    platform=platform,
+                    org=org,
+                    project=project,
+                    repo=repo,
+                    repo_url=repo_url,
+                    is_active=True,
+                )
+            )
         await session.commit()
 
 
@@ -1623,13 +1644,19 @@ async def upsert_synced_pr(data: dict[str, Any]) -> None:
         stmt = pg_insert(SyncedPRRow).values(id=uuid.uuid4(), **values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_synced_pr",
-            set_={k: v for k, v in values.items() if k not in ("platform", "pr_id", "repo", "project")},
+            set_={
+                k: v
+                for k, v in values.items()
+                if k not in ("platform", "pr_id", "repo", "project")
+            },
         )
         await session.execute(stmt)
         await session.commit()
 
 
-async def delete_closed_prs(platform: str, repo: str, project: str, keep_pr_ids: list[str]) -> None:
+async def delete_closed_prs(
+    platform: str, repo: str, project: str, keep_pr_ids: list[str]
+) -> None:
     """Remove non-merged PRs that are no longer in the keep list for the given repo.
 
     Merged PRs are preserved here so a transient failure on the merged-PR fetch
@@ -1695,7 +1722,7 @@ async def list_synced_prs(
 ) -> tuple[list[dict[str, Any]], int]:
     """List cached open PRs with filters. Returns (items, total_count)."""
     import json
-    from sqlalchemy import cast, exists, or_
+    from sqlalchemy import cast, or_
     from sqlalchemy.dialects.postgresql import JSONB
 
     stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
@@ -1738,8 +1765,7 @@ async def list_synced_prs(
             q = q.where(SyncedPRRow.author.in_(user_handles))
         elif view == "queue" and user_handles:
             conditions = [
-                SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB))
-                for h in user_handles
+                SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB)) for h in user_handles
             ]
             q = q.where(or_(*conditions))
         elif view == "stale":
@@ -1778,7 +1804,8 @@ async def list_synced_prs(
                     cap=_MAX_FETCH,
                 )
             filtered = [
-                r for r in all_rows
+                r
+                for r in all_rows
                 if not repo_matches_rules(rules, r.platform, r.org, r.project, r.repo)
             ]
             total = len(filtered)
@@ -1822,7 +1849,7 @@ async def get_pr_dashboard_summary(
 ) -> dict[str, Any]:
     """Compute counts for the dashboard summary cards."""
     import json
-    from sqlalchemy import cast, exists, or_
+    from sqlalchemy import cast, or_
     from sqlalchemy.dialects.postgresql import JSONB
 
     stale_cutoff = datetime.now(timezone.utc) - timedelta(days=_STALE_DAYS)
@@ -1839,54 +1866,67 @@ async def get_pr_dashboard_summary(
     open_only = SyncedPRRow.approval_status != "merged"
 
     async with async_session() as session:
-        total_open = await session.scalar(
-            select(func.count(SyncedPRRow.id)).where(open_only)
-        ) or 0
+        total_open = await session.scalar(select(func.count(SyncedPRRow.id)).where(open_only)) or 0
 
         if user_handles:
-            mine_q = select(func.count(SyncedPRRow.id)).where(
-                SyncedPRRow.author.in_(user_handles)
-            ).where(open_only)
+            mine_q = (
+                select(func.count(SyncedPRRow.id))
+                .where(SyncedPRRow.author.in_(user_handles))
+                .where(open_only)
+            )
             mine_total = await session.scalar(mine_q) or 0
 
-            attention_q = select(func.count(SyncedPRRow.id)).where(
-                SyncedPRRow.author.in_(user_handles)
-            ).where(open_only).where(
-                or_(
-                    SyncedPRRow.approval_status == "changes_requested",
-                    SyncedPRRow.pr_updated_at < stale_cutoff,
-                    SyncedPRRow.approval_status == "approved",
+            attention_q = (
+                select(func.count(SyncedPRRow.id))
+                .where(SyncedPRRow.author.in_(user_handles))
+                .where(open_only)
+                .where(
+                    or_(
+                        SyncedPRRow.approval_status == "changes_requested",
+                        SyncedPRRow.pr_updated_at < stale_cutoff,
+                        SyncedPRRow.approval_status == "approved",
+                    )
                 )
             )
             mine_attention = await session.scalar(attention_q) or 0
 
             queue_conditions = [
-                SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB))
-                for h in user_handles
+                SyncedPRRow.reviewers.op("@>")(cast(json.dumps([h]), JSONB)) for h in user_handles
             ]
-            queue_q = select(func.count(SyncedPRRow.id)).where(or_(*queue_conditions)).where(open_only)
+            queue_q = (
+                select(func.count(SyncedPRRow.id)).where(or_(*queue_conditions)).where(open_only)
+            )
             queue_total = await session.scalar(queue_q) or 0
         else:
             mine_total = mine_attention = queue_total = 0
 
-        stale_total = await session.scalar(
-            select(func.count(SyncedPRRow.id))
-            .where(SyncedPRRow.pr_updated_at < stale_cutoff)
-            .where(open_only)
-        ) or 0
+        stale_total = (
+            await session.scalar(
+                select(func.count(SyncedPRRow.id))
+                .where(SyncedPRRow.pr_updated_at < stale_cutoff)
+                .where(open_only)
+            )
+            or 0
+        )
 
-        ready_total = await session.scalar(
-            select(func.count(SyncedPRRow.id))
-            .where(SyncedPRRow.is_draft == False)  # noqa: E712
-            .where(SyncedPRRow.has_conflicts == False)  # noqa: E712
-            .where(SyncedPRRow.ci_status != "failure")
-            .where(open_only)
-            .where(review_exists_subq)
-        ) or 0
+        ready_total = (
+            await session.scalar(
+                select(func.count(SyncedPRRow.id))
+                .where(SyncedPRRow.is_draft == False)  # noqa: E712
+                .where(SyncedPRRow.has_conflicts == False)  # noqa: E712
+                .where(SyncedPRRow.ci_status != "failure")
+                .where(open_only)
+                .where(review_exists_subq)
+            )
+            or 0
+        )
 
-        repo_count = await session.scalar(
-            select(func.count(func.distinct(SyncedPRRow.repo))).where(open_only)
-        ) or 0
+        repo_count = (
+            await session.scalar(
+                select(func.count(func.distinct(SyncedPRRow.repo))).where(open_only)
+            )
+            or 0
+        )
 
         oldest_stale = await session.scalar(
             select(func.min(SyncedPRRow.pr_updated_at))
@@ -1975,15 +2015,16 @@ async def list_excluded_repos() -> list[dict[str, Any]]:
         ]
 
 
-async def add_excluded_repo(
-    platform: str, org: str, project: str, repo: str, email: str
-) -> bool:
+async def add_excluded_repo(platform: str, org: str, project: str, repo: str, email: str) -> bool:
     """Add a repo exclusion. Returns False if it already exists."""
     from sqlalchemy.exc import IntegrityError
 
     async with async_session() as session:
         row = ExcludedRepoRow(
-            platform=platform, org=org, project=project, repo=repo,
+            platform=platform,
+            org=org,
+            project=project,
+            repo=repo,
             excluded_by_email=email,
         )
         session.add(row)
@@ -2001,9 +2042,7 @@ async def remove_excluded_repo(exclusion_id: str) -> bool:
 
     async with async_session() as session:
         result = await session.execute(
-            sa_delete(ExcludedRepoRow).where(
-                ExcludedRepoRow.id == uuid.UUID(exclusion_id)
-            )
+            sa_delete(ExcludedRepoRow).where(ExcludedRepoRow.id == uuid.UUID(exclusion_id))
         )
         await session.commit()
         return (result.rowcount or 0) > 0
@@ -2113,7 +2152,6 @@ async def remove_exclusion_rule(rule_id: str) -> bool:
 
 async def get_pr_filter_options() -> dict[str, Any]:
     """Return distinct platforms, orgs, projects, and repos for filter dropdowns."""
-    from sqlalchemy import text
 
     async with async_session() as session:
         rows = (
@@ -2134,13 +2172,17 @@ async def get_pr_filter_options() -> dict[str, Any]:
     seen: dict[str, set] = {"platform": set(), "org": set(), "project": set(), "repo": set()}
     for platform, org, project, repo in rows:
         if platform and platform not in seen["platform"]:
-            platforms.append(platform); seen["platform"].add(platform)
+            platforms.append(platform)
+            seen["platform"].add(platform)
         if org and org not in seen["org"]:
-            orgs.append(org); seen["org"].add(org)
+            orgs.append(org)
+            seen["org"].add(org)
         if project and project not in seen["project"]:
-            projects.append(project); seen["project"].add(project)
+            projects.append(project)
+            seen["project"].add(project)
         if repo and repo not in seen["repo"]:
-            repos.append(repo); seen["repo"].add(repo)
+            repos.append(repo)
+            seen["repo"].add(repo)
 
     return {
         "platforms": sorted(platforms),

@@ -1,4 +1,5 @@
 """Orchestrator for recent changes scan: analyzes merged code changes as a whole."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,12 +24,12 @@ log = structlog.get_logger()
 
 # Same pricing table as the main orchestrator
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus":   (15.0,  75.0),
-    "claude-sonnet": (3.0,   15.0),
-    "gpt-5.5":       (5.0,   30.0),
-    "gpt-5.4":       (2.50,  15.0),
-    "gpt-5.2":       (0.875,  7.0),
-    "gpt-5":         (0.625,  5.0),
+    "claude-opus": (15.0, 75.0),
+    "claude-sonnet": (3.0, 15.0),
+    "gpt-5.5": (5.0, 30.0),
+    "gpt-5.4": (2.50, 15.0),
+    "gpt-5.2": (0.875, 7.0),
+    "gpt-5": (0.625, 5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 
@@ -46,6 +47,7 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 def _try_import_storage():
     try:
         from pr_guardian.persistence import storage
+
         return storage
     except Exception:
         return None
@@ -70,7 +72,9 @@ def _group_changes_by_module(files: list[dict]) -> dict[str, list[dict]]:
     return dict(groups)
 
 
-def _build_change_summary(merged_prs: list[dict], commits: list[dict], changes_by_module: dict) -> str:
+def _build_change_summary(
+    merged_prs: list[dict], commits: list[dict], changes_by_module: dict
+) -> str:
     """Build a human-readable summary of recent changes."""
     lines = []
     lines.append(f"Total merged PRs: {len(merged_prs)}")
@@ -80,10 +84,16 @@ def _build_change_summary(merged_prs: list[dict], commits: list[dict], changes_b
     # Author distribution
     authors: dict[str, int] = defaultdict(int)
     for pr in merged_prs:
-        author = pr.get("user", {}).get("login", "unknown") if isinstance(pr.get("user"), dict) else "unknown"
+        author = (
+            pr.get("user", {}).get("login", "unknown")
+            if isinstance(pr.get("user"), dict)
+            else "unknown"
+        )
         authors[author] += 1
     if authors:
-        lines.append(f"Authors: {', '.join(f'{a} ({c})' for a, c in sorted(authors.items(), key=lambda x: -x[1])[:10])}")
+        lines.append(
+            f"Authors: {', '.join(f'{a} ({c})' for a, c in sorted(authors.items(), key=lambda x: -x[1])[:10])}"
+        )
 
     # Module sizes
     lines.append("\nChanges per module:")
@@ -129,22 +139,26 @@ async def run_recent_changes_scan(
     started_at = datetime.now(timezone.utc)
 
     def _plog(level: str, stage: str, msg: str):
-        pipeline_log.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "level": level,
-            "stage": stage,
-            "msg": msg,
-        })
+        pipeline_log.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "stage": stage,
+                "msg": msg,
+            }
+        )
 
     def _emit(stage: str, detail: str = "", **extra):
-        event_bus.publish(ReviewEvent(
-            review_id=scan_id,
-            pr_id="",
-            repo=repo,
-            stage=stage,
-            detail=detail,
-            extra={"scan_type": "recent_changes", **extra},
-        ))
+        event_bus.publish(
+            ReviewEvent(
+                review_id=scan_id,
+                pr_id="",
+                repo=repo,
+                stage=stage,
+                detail=detail,
+                extra={"scan_type": "recent_changes", **extra},
+            )
+        )
 
     async def _update_stage(stage: str, detail: str = ""):
         _emit(stage, detail)
@@ -156,9 +170,20 @@ async def run_recent_changes_scan(
 
     try:
         return await _run_recent_pipeline(
-            repo, platform, adapter, config, days, since,
-            scan_id, storage, scan_db_id, pipeline_log, started_at,
-            _plog, _emit, _update_stage,
+            repo,
+            platform,
+            adapter,
+            config,
+            days,
+            since,
+            scan_id,
+            storage,
+            scan_db_id,
+            pipeline_log,
+            started_at,
+            _plog,
+            _emit,
+            _update_stage,
         )
     except Exception as exc:
         if storage and scan_db_id:
@@ -171,9 +196,20 @@ async def run_recent_changes_scan(
 
 
 async def _run_recent_pipeline(
-    repo, platform, adapter, config, days, since,
-    scan_id, storage, scan_db_id, pipeline_log, started_at,
-    _plog, _emit, _update_stage,
+    repo,
+    platform,
+    adapter,
+    config,
+    days,
+    since,
+    scan_id,
+    storage,
+    scan_db_id,
+    pipeline_log,
+    started_at,
+    _plog,
+    _emit,
+    _update_stage,
 ) -> ScanResult:
     # Stage 1: Discovery
     await _update_stage("scan_discovery", "Fetching recent merged PRs and commits")
@@ -189,7 +225,11 @@ async def _run_recent_pipeline(
         adapter.fetch_recent_commits(repo, branch=branch, since=since),
     )
 
-    _plog("info", "discovery", f"Found {len(merged_prs)} merged PRs and {len(commits)} commits in {days} days.")
+    _plog(
+        "info",
+        "discovery",
+        f"Found {len(merged_prs)} merged PRs and {len(commits)} commits in {days} days.",
+    )
 
     if not merged_prs and not commits:
         _plog("info", "discovery", "No recent changes found.")
@@ -251,22 +291,30 @@ async def _run_recent_pipeline(
                 base_sha = earliest.get("parents", [""])[0] if earliest.get("parents") else ""
 
             if base_sha and head_sha:
-                _plog("info", "discovery",
-                       f"No merged PRs; fetching compare diff {base_sha[:8]}..{head_sha[:8]}.")
+                _plog(
+                    "info",
+                    "discovery",
+                    f"No merged PRs; fetching compare diff {base_sha[:8]}..{head_sha[:8]}.",
+                )
                 compare_diff = await adapter.fetch_compare_diff(repo, base_sha, head_sha)
                 for df in compare_diff.files:
-                    all_changed_files.append({
-                        "filename": df.path,
-                        "status": df.status,
-                        "additions": df.additions,
-                        "deletions": df.deletions,
-                        "patch": df.patch,
-                        "_pr_number": None,
-                        "_pr_title": "(direct commits — no PR)",
-                    })
+                    all_changed_files.append(
+                        {
+                            "filename": df.path,
+                            "status": df.status,
+                            "additions": df.additions,
+                            "deletions": df.deletions,
+                            "patch": df.patch,
+                            "_pr_number": None,
+                            "_pr_title": "(direct commits — no PR)",
+                        }
+                    )
             else:
-                _plog("warn", "discovery",
-                       "Cannot resolve base/head SHAs from commits; diff unavailable.")
+                _plog(
+                    "warn",
+                    "discovery",
+                    "Cannot resolve base/head SHAs from commits; diff unavailable.",
+                )
         except Exception as e:
             _plog("warn", "discovery", f"Compare-diff fallback failed: {e}")
 
@@ -274,12 +322,18 @@ async def _run_recent_pipeline(
     change_summary = _build_change_summary(merged_prs, commits, changes_by_module)
 
     files_with_patch = sum(1 for f in all_changed_files if f.get("patch"))
-    _plog("info", "discovery",
-           f"Aggregated {len(all_changed_files)} file changes across "
-           f"{len(changes_by_module)} modules ({files_with_patch} with patch content).")
+    _plog(
+        "info",
+        "discovery",
+        f"Aggregated {len(all_changed_files)} file changes across "
+        f"{len(changes_by_module)} modules ({files_with_patch} with patch content).",
+    )
     if all_changed_files and files_with_patch == 0:
-        _plog("warn", "discovery",
-               "No patch content retrieved — agents will have no code to analyze.")
+        _plog(
+            "warn",
+            "discovery",
+            "No patch content retrieved — agents will have no code to analyze.",
+        )
 
     # Stage 2: Analysis
     await _update_stage("scan_analysis", f"Running {len(RECENT_CHANGES_AGENTS)} scan agents")
@@ -336,14 +390,15 @@ async def _run_recent_pipeline(
         total_findings -= suppressed_count
 
     validated_results, validator_meta = await validate_scan_findings(
-        agent_results_list, context, config,
+        agent_results_list,
+        context,
+        config,
     )
     if validator_meta.get("validator_ran"):
         dismissed = validator_meta.get("dismissed", 0)
         downgraded = validator_meta.get("downgraded", 0)
         total_findings -= dismissed
-        _plog("info", "analysis",
-               f"Validator: {dismissed} dismissed, {downgraded} downgraded.")
+        _plog("info", "analysis", f"Validator: {dismissed} dismissed, {downgraded} downgraded.")
         # Track validator cost
         v_in = validator_meta.get("input_tokens", 0)
         v_out = validator_meta.get("output_tokens", 0)
@@ -351,7 +406,9 @@ async def _run_recent_pipeline(
         total_output_tokens += v_out
         if v_in or v_out:
             total_cost += _estimate_cost(
-                config.validator.model_override or "", v_in, v_out,
+                config.validator.model_override or "",
+                v_in,
+                v_out,
             )
         agent_results_list = validated_results
 
@@ -361,8 +418,11 @@ async def _run_recent_pipeline(
     summaries = [ar.summary for ar in agent_results_list if ar.summary]
     overall_summary = " | ".join(summaries) if summaries else "Scan complete."
 
-    _plog("info", "report",
-           f"Scan complete: {total_findings} findings, ${total_cost:.4f} estimated cost.")
+    _plog(
+        "info",
+        "report",
+        f"Scan complete: {total_findings} findings, ${total_cost:.4f} estimated cost.",
+    )
 
     result = ScanResult(
         scan_id=scan_id,

@@ -1,4 +1,5 @@
 """Tests for scan issue creation: storage, API endpoints, and platform adapters."""
+
 from __future__ import annotations
 
 import json
@@ -191,7 +192,11 @@ class TestCreateScanIssuesValidation:
     """Input validation returns errors before hitting the platform."""
 
     def test_bad_mode_returns_400(self, client):
-        with patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=_MOCK_SCAN):
+        with patch(
+            "pr_guardian.api.scans.storage.get_scan",
+            new_callable=AsyncMock,
+            return_value=_MOCK_SCAN,
+        ):
             resp = client.post(
                 f"/api/scans/{SCAN_ID}/create-issues",
                 json={"mode": "all_at_once", "finding_ids": [FINDING_ID]},
@@ -199,7 +204,11 @@ class TestCreateScanIssuesValidation:
         assert resp.status_code == 400
 
     def test_empty_finding_ids_returns_400(self, client):
-        with patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=_MOCK_SCAN):
+        with patch(
+            "pr_guardian.api.scans.storage.get_scan",
+            new_callable=AsyncMock,
+            return_value=_MOCK_SCAN,
+        ):
             resp = client.post(
                 f"/api/scans/{SCAN_ID}/create-issues",
                 json={"mode": "single", "finding_ids": []},
@@ -207,7 +216,9 @@ class TestCreateScanIssuesValidation:
         assert resp.status_code == 400
 
     def test_scan_not_found_returns_404(self, client):
-        with patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=None):
+        with patch(
+            "pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=None
+        ):
             resp = client.post(
                 f"/api/scans/{SCAN_ID}/create-issues",
                 json={"mode": "single", "finding_ids": [FINDING_ID]},
@@ -215,7 +226,11 @@ class TestCreateScanIssuesValidation:
         assert resp.status_code == 404
 
     def test_unmatched_finding_ids_returns_400(self, client):
-        with patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=_MOCK_SCAN):
+        with patch(
+            "pr_guardian.api.scans.storage.get_scan",
+            new_callable=AsyncMock,
+            return_value=_MOCK_SCAN,
+        ):
             resp = client.post(
                 f"/api/scans/{SCAN_ID}/create-issues",
                 json={"mode": "single", "finding_ids": [str(uuid.uuid4())]},
@@ -237,9 +252,17 @@ class TestCreateScanIssuesSuccess:
     def test_single_mode_creates_one_issue(self, client):
         mock_adapter = self._mock_github_adapter()
         with (
-            patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=_MOCK_SCAN),
+            patch(
+                "pr_guardian.api.scans.storage.get_scan",
+                new_callable=AsyncMock,
+                return_value=_MOCK_SCAN,
+            ),
             patch("pr_guardian.api.scans.create_adapter", return_value=mock_adapter),
-            patch("pr_guardian.api.scans.storage.create_scan_issue", new_callable=AsyncMock, return_value=uuid.uuid4()),
+            patch(
+                "pr_guardian.api.scans.storage.create_scan_issue",
+                new_callable=AsyncMock,
+                return_value=uuid.uuid4(),
+            ),
         ):
             resp = client.post(
                 f"/api/scans/{SCAN_ID}/create-issues",
@@ -255,9 +278,17 @@ class TestCreateScanIssuesSuccess:
     def test_per_finding_mode_creates_one_issue_per_finding(self, client):
         mock_adapter = self._mock_github_adapter()
         with (
-            patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=_MOCK_SCAN),
+            patch(
+                "pr_guardian.api.scans.storage.get_scan",
+                new_callable=AsyncMock,
+                return_value=_MOCK_SCAN,
+            ),
             patch("pr_guardian.api.scans.create_adapter", return_value=mock_adapter),
-            patch("pr_guardian.api.scans.storage.create_scan_issue", new_callable=AsyncMock, return_value=uuid.uuid4()),
+            patch(
+                "pr_guardian.api.scans.storage.create_scan_issue",
+                new_callable=AsyncMock,
+                return_value=uuid.uuid4(),
+            ),
         ):
             resp = client.post(
                 f"/api/scans/{SCAN_ID}/create-issues",
@@ -272,7 +303,11 @@ class TestCreateScanIssuesSuccess:
         mock_adapter.create_issue = AsyncMock(side_effect=RuntimeError("API down"))
         mock_adapter.close = AsyncMock()
         with (
-            patch("pr_guardian.api.scans.storage.get_scan", new_callable=AsyncMock, return_value=_MOCK_SCAN),
+            patch(
+                "pr_guardian.api.scans.storage.get_scan",
+                new_callable=AsyncMock,
+                return_value=_MOCK_SCAN,
+            ),
             patch("pr_guardian.api.scans.create_adapter", return_value=mock_adapter),
         ):
             resp = client.post(
@@ -354,7 +389,11 @@ class TestGitHubAdapterCreateIssue:
             repo="org/repo", title="Sec", body="Body", labels=["pr-guardian"]
         )
         call_kwargs = adapter._client.post.call_args
-        payload = call_kwargs.kwargs.get("json") or call_kwargs.args[1] if len(call_kwargs.args) > 1 else call_kwargs.kwargs["json"]
+        payload = (
+            call_kwargs.kwargs.get("json") or call_kwargs.args[1]
+            if len(call_kwargs.args) > 1
+            else call_kwargs.kwargs["json"]
+        )
         assert payload["labels"] == ["pr-guardian"]
 
     @pytest.mark.asyncio

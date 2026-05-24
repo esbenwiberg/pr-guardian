@@ -46,16 +46,12 @@ def compute_blast_radius(
         if propagated:
             result.propagated_surface[file_path] = propagated
 
-    result.touches_shared_code = any(
-        len(c) > 3 for c in result.consumers.values()
-    )
+    result.touches_shared_code = any(len(c) > 3 for c in result.consumers.values())
     result.propagates_to_security = any(
-        "security_critical" in cs
-        for cs in result.propagated_surface.values()
+        "security_critical" in cs for cs in result.propagated_surface.values()
     )
     result.propagates_to_api = any(
-        "input_handling" in cs
-        for cs in result.propagated_surface.values()
+        "input_handling" in cs for cs in result.propagated_surface.values()
     )
 
     return result

@@ -3,11 +3,12 @@
 Provides heuristic pre-grouping of potentially duplicate findings across agents,
 and a merge function that consolidates duplicates while preserving attribution.
 """
+
 from __future__ import annotations
 
 import re
 from collections import defaultdict
-from dataclasses import replace, field
+from dataclasses import replace
 
 from pr_guardian.models.findings import (
     Certainty,
@@ -87,7 +88,9 @@ def cluster_potential_duplicates(
 
                 # Check line proximity
                 lines_close = _lines_are_close(
-                    finding_i.line, finding_j.line, line_threshold,
+                    finding_i.line,
+                    finding_j.line,
+                    line_threshold,
                 )
                 if not lines_close:
                     continue
@@ -107,7 +110,9 @@ def cluster_potential_duplicates(
 
 
 def _lines_are_close(
-    line_a: int | None, line_b: int | None, threshold: int,
+    line_a: int | None,
+    line_b: int | None,
+    threshold: int,
 ) -> bool:
     """Check if two line numbers are within threshold of each other.
 
@@ -164,15 +169,11 @@ def merge_findings(
             (f.evidence_basis.cwe_id for _, f in all_findings if f.evidence_basis.cwe_id),
             None,
         ),
-        similar_code_in_repo=any(
-            f.evidence_basis.similar_code_in_repo for _, f in all_findings
-        ),
+        similar_code_in_repo=any(f.evidence_basis.similar_code_in_repo for _, f in all_findings),
         suggestion_is_concrete=any(
             f.evidence_basis.suggestion_is_concrete for _, f in all_findings
         ),
-        cross_references=max(
-            f.evidence_basis.cross_references for _, f in all_findings
-        ),
+        cross_references=max(f.evidence_basis.cross_references for _, f in all_findings),
     )
 
     # Collect unique CWE references

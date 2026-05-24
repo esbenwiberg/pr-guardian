@@ -1,7 +1,7 @@
 """Tests for the sticky_triggers / finding_reasons split in check_overrides()."""
+
 from pathlib import Path
 
-import pytest
 
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.decision.engine import check_overrides, decide
@@ -33,9 +33,15 @@ from pr_guardian.models.pr import Diff, Platform, PlatformPR
 def _ctx(**overrides) -> ReviewContext:
     base = dict(
         pr=PlatformPR(
-            platform=Platform.GITHUB, pr_id="1", repo="test/repo",
-            repo_url="", source_branch="feat", target_branch="main",
-            author="dev", title="PR", head_commit_sha="abc",
+            platform=Platform.GITHUB,
+            pr_id="1",
+            repo="test/repo",
+            repo_url="",
+            source_branch="feat",
+            target_branch="main",
+            author="dev",
+            title="PR",
+            head_commit_sha="abc",
         ),
         repo_path=Path("/tmp"),
         diff=Diff(),
@@ -150,7 +156,8 @@ class TestBucketSplit:
             line=1,
             description="possible issue",
             evidence_basis=EvidenceBasis(
-                saw_full_context=True, pattern_match=True,
+                saw_full_context=True,
+                pattern_match=True,
                 suggestion_is_concrete=True,
             ),
         )
@@ -187,12 +194,16 @@ class TestBucketSplit:
 
 class TestBreakCleanlyInvariant:
     def test_review_result_has_no_override_reasons(self):
-        assert not hasattr(ReviewResult, "override_reasons") or \
-               "override_reasons" not in ReviewResult.__dataclass_fields__
+        assert (
+            not hasattr(ReviewResult, "override_reasons")
+            or "override_reasons" not in ReviewResult.__dataclass_fields__
+        )
 
     def test_review_result_has_no_trust_tier_reasons(self):
-        assert not hasattr(ReviewResult, "trust_tier_reasons") or \
-               "trust_tier_reasons" not in ReviewResult.__dataclass_fields__
+        assert (
+            not hasattr(ReviewResult, "trust_tier_reasons")
+            or "trust_tier_reasons" not in ReviewResult.__dataclass_fields__
+        )
 
     def test_review_result_has_sticky_triggers(self):
         assert "sticky_triggers" in ReviewResult.__dataclass_fields__

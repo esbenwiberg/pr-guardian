@@ -1,4 +1,5 @@
 """Base class for scan agents (recent changes + maintenance)."""
+
 from __future__ import annotations
 
 import json
@@ -72,7 +73,11 @@ class ScanBaseAgent:
                 parts.append("\n## Merged PRs")
                 for pr in context.merged_prs[:50]:
                     title = pr.get("title", "untitled")
-                    author = pr.get("user", {}).get("login", "unknown") if isinstance(pr.get("user"), dict) else pr.get("author", "unknown")
+                    author = (
+                        pr.get("user", {}).get("login", "unknown")
+                        if isinstance(pr.get("user"), dict)
+                        else pr.get("author", "unknown")
+                    )
                     number = pr.get("number", "?")
                     parts.append(f"- #{number}: {title} (by {author})")
 
@@ -81,7 +86,9 @@ class ScanBaseAgent:
                 for module, files in sorted(context.changes_by_module.items()):
                     parts.append(f"\n### {module} ({len(files)} files)")
                     for f in files[:20]:
-                        parts.append(f"  - {f.get('filename', f.get('path', '?'))} (+{f.get('additions', 0)}/-{f.get('deletions', 0)})")
+                        parts.append(
+                            f"  - {f.get('filename', f.get('path', '?'))} (+{f.get('additions', 0)}/-{f.get('deletions', 0)})"
+                        )
                     if len(files) > 20:
                         parts.append(f"  ... and {len(files) - 20} more files")
 
@@ -89,19 +96,23 @@ class ScanBaseAgent:
                 # Budget-capped to keep prompt size sane; prioritize larger diffs first.
                 patch_budget = 40_000  # characters total
                 per_file_cap = 4_000
-                patched: list[tuple[int, str, str, str]] = []  # (lines_changed, pr_title, filename, patch)
+                patched: list[
+                    tuple[int, str, str, str]
+                ] = []  # (lines_changed, pr_title, filename, patch)
                 for module_files in context.changes_by_module.values():
                     for f in module_files:
                         patch = f.get("patch") or ""
                         if not patch:
                             continue
                         lines = f.get("additions", 0) + f.get("deletions", 0)
-                        patched.append((
-                            lines,
-                            f.get("_pr_title", ""),
-                            f.get("filename", f.get("path", "?")),
-                            patch,
-                        ))
+                        patched.append(
+                            (
+                                lines,
+                                f.get("_pr_title", ""),
+                                f.get("filename", f.get("path", "?")),
+                                patch,
+                            )
+                        )
 
                 if patched:
                     patched.sort(key=lambda x: -x[0])
@@ -111,7 +122,10 @@ class ScanBaseAgent:
                     skipped = 0
                     for _, pr_title, fname, patch in patched:
                         if len(patch) > per_file_cap:
-                            patch = patch[:per_file_cap] + f"\n... [truncated, {len(patch)} total chars]"
+                            patch = (
+                                patch[:per_file_cap]
+                                + f"\n... [truncated, {len(patch)} total chars]"
+                            )
                         block = f"\n### {fname}"
                         if pr_title:
                             block += f"  _(from: {pr_title})_"

@@ -31,6 +31,7 @@ def main():
 def serve(host: str, port: int):
     """Start the PR Guardian service."""
     import uvicorn
+
     uvicorn.run("pr_guardian.main:app", host=host, port=port, reload=False)
 
 
@@ -108,7 +109,11 @@ def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
     dep_graph = build_dep_graph(config.path_risk.critical_consumers or None)
     blast_radius = compute_blast_radius(file_list, security_surface, dep_graph)
     change_profile = build_change_profile(
-        file_list, diff, security_surface, blast_radius, config.file_roles,
+        file_list,
+        diff,
+        security_surface,
+        blast_radius,
+        config.file_roles,
     )
 
     risk_class_map = {
@@ -119,9 +124,15 @@ def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
 
     context = ReviewContext(
         pr=PlatformPR(
-            platform=Platform.GITHUB, pr_id="dry-run", repo="local",
-            repo_url="", source_branch="feature", target_branch=diff_target,
-            author="cli", title="Dry run", head_commit_sha="",
+            platform=Platform.GITHUB,
+            pr_id="dry-run",
+            repo="local",
+            repo_url="",
+            source_branch="feature",
+            target_branch=diff_target,
+            author="cli",
+            title="Dry run",
+            head_commit_sha="",
         ),
         repo_path=repo_path,
         diff=diff,
@@ -142,7 +153,7 @@ def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
 
     click.echo(f"\nRisk Tier: {triage_result.risk_tier.value.upper()}")
     click.echo(f"Agents: {', '.join(sorted(triage_result.agent_set)) or 'none'}")
-    click.echo(f"Reasons:")
+    click.echo("Reasons:")
     for r in triage_result.reasons:
         click.echo(f"  - {r}")
 
@@ -177,7 +188,9 @@ def scan_recent(repo: str, platform: str, days: int, since: str | None):
             if result.summary:
                 click.echo(f"  Summary: {result.summary}")
             for ar in result.agent_results:
-                click.echo(f"  Agent {ar.agent_name}: {ar.verdict.value}, {len(ar.findings)} finding(s)")
+                click.echo(
+                    f"  Agent {ar.agent_name}: {ar.verdict.value}, {len(ar.findings)} finding(s)"
+                )
         finally:
             if hasattr(adapter, "close"):
                 await adapter.close()
@@ -215,7 +228,9 @@ def scan_maintenance(repo: str, platform: str, staleness: int, max_files: int):
             if result.summary:
                 click.echo(f"  Summary: {result.summary}")
             for ar in result.agent_results:
-                click.echo(f"  Agent {ar.agent_name}: {ar.verdict.value}, {len(ar.findings)} finding(s)")
+                click.echo(
+                    f"  Agent {ar.agent_name}: {ar.verdict.value}, {len(ar.findings)} finding(s)"
+                )
         finally:
             if hasattr(adapter, "close"):
                 await adapter.close()
@@ -282,19 +297,25 @@ def show_review_cmd(review_id, as_json):
         risk = (row.get("risk_tier") or "?").upper()
         score = row.get("combined_score")
 
-        click.echo(f"\n{'='*70}")
+        click.echo(f"\n{'=' * 70}")
         click.echo(f"Review: {row['id']}")
-        click.echo(f"PR:     {row.get('repo', '')} #{row.get('pr_id', '')} — {row.get('title', '')}")
+        click.echo(
+            f"PR:     {row.get('repo', '')} #{row.get('pr_id', '')} — {row.get('title', '')}"
+        )
         click.echo(f"Decision: {decision_str}   Risk: {risk}   Score: {score}")
-        click.echo(f"Cost: ${row.get('cost_usd', 0):.4f}   Duration: {row.get('duration_ms', 0)}ms")
-        click.echo(f"{'='*70}")
+        click.echo(
+            f"Cost: ${row.get('cost_usd', 0):.4f}   Duration: {row.get('duration_ms', 0)}ms"
+        )
+        click.echo(f"{'=' * 70}")
 
         # Enrich with dismissals
         dismissals = []
         sig_map = {}
         try:
             dismissals = await storage.get_active_dismissals(
-                row["pr_id"], row["repo"], row["platform"],
+                row["pr_id"],
+                row["repo"],
+                row["platform"],
             )
             sig_map = {d["signature"]: d for d in dismissals}
         except Exception:
@@ -305,11 +326,13 @@ def show_review_cmd(review_id, as_json):
             if not agent.get("findings"):
                 continue
             click.echo(f"\n  Agent: {agent['agent_name']}  (verdict: {agent.get('verdict', '?')})")
-            click.echo(f"  {'—'*60}")
+            click.echo(f"  {'—' * 60}")
             for f in agent["findings"]:
                 finding_num += 1
                 sig = finding_signature(
-                    f.get("file", ""), f.get("category", ""), agent["agent_name"],
+                    f.get("file", ""),
+                    f.get("category", ""),
+                    agent["agent_name"],
                 )
                 dismissed = sig_map.get(sig)
                 dismiss_tag = f" [DISMISSED: {dismissed['status']}]" if dismissed else ""
@@ -333,7 +356,11 @@ def show_review_cmd(review_id, as_json):
 
 @main.command("dismiss")
 @click.argument("finding_id")
-@click.option("--status", required=True, type=click.Choice(["by_design", "false_positive", "acknowledged", "will_fix"]))
+@click.option(
+    "--status",
+    required=True,
+    type=click.Choice(["by_design", "false_positive", "acknowledged", "will_fix"]),
+)
 @click.option("--comment", default="", help="Optional comment")
 def dismiss_cmd(finding_id, status, comment):
     """Dismiss a finding by ID."""
@@ -353,6 +380,7 @@ def dismiss_cmd(finding_id, status, comment):
         # Look up finding context
         async with get_session() as session:
             from sqlalchemy import select as sel
+
             f_row = (await session.scalars(sel(FindingRow).where(FindingRow.id == fid))).first()
             if not f_row:
                 click.echo("Finding not found.", err=True)
@@ -386,17 +414,20 @@ def dismiss_cmd(finding_id, status, comment):
 
 @main.command("batch-dismiss")
 @click.argument("review_id")
-@click.option("--status", required=True, type=click.Choice(["by_design", "false_positive", "acknowledged", "will_fix"]))
+@click.option(
+    "--status",
+    required=True,
+    type=click.Choice(["by_design", "false_positive", "acknowledged", "will_fix"]),
+)
 @click.option("--comment", default="", help="Optional comment")
-@click.option("--finding-ids", default=None, help="Comma-separated finding IDs (default: all findings)")
+@click.option(
+    "--finding-ids", default=None, help="Comma-separated finding IDs (default: all findings)"
+)
 @click.option("--severity", default=None, help="Only dismiss findings with this severity or lower")
 def batch_dismiss_cmd(review_id, status, comment, finding_ids, severity):
     """Batch dismiss findings from a review."""
     import uuid as uuid_mod
     from pr_guardian.persistence import storage
-    from pr_guardian.persistence.storage import finding_signature
-    from pr_guardian.persistence.database import async_session as get_session
-    from pr_guardian.persistence.models import FindingRow, AgentResultRow, ReviewRow
 
     SEVERITY_ORDER = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
@@ -534,10 +565,7 @@ def re_review_cmd(review_id, post_comment):
             click.echo("Review has no PR URL — cannot re-review.", err=True)
             sys.exit(1)
 
-        total_findings = sum(
-            len(a.get("findings", []))
-            for a in review.get("agent_results", [])
-        )
+        total_findings = sum(len(a.get("findings", [])) for a in review.get("agent_results", []))
         click.echo(
             f"Re-evaluating {review['repo']} #{review['pr_id']} — "
             f"{total_findings} original finding(s)..."
@@ -554,12 +582,14 @@ def re_review_cmd(review_id, post_comment):
 
         try:
             result = await run_re_review(
-                pr, adapter, original_review=review,
+                pr,
+                adapter,
+                original_review=review,
                 post_comment=post_comment,
             )
             kept = sum(len(a.findings) for a in result.agent_results)
             summary = result.dismissal_summary or {}
-            click.echo(f"\nRe-review complete!")
+            click.echo("\nRe-review complete!")
             click.echo(f"  Decision: {result.decision.value.upper()}")
             click.echo(f"  Findings kept: {kept}")
             click.echo(f"  Findings resolved: {summary.get('resolved', 0)}")

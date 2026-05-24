@@ -1,4 +1,5 @@
 """FastAPI dependencies for authorization checks."""
+
 from __future__ import annotations
 
 from fastapi import HTTPException, Request

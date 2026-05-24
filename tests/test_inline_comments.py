@@ -1,4 +1,5 @@
 """Unit tests for post_inline_comments / delete_inline_comments on GitHub and ADO adapters."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -74,6 +75,7 @@ def _mock_response(status: int, body: dict) -> MagicMock:
 # ---------------------------------------------------------------------------
 # GitHub — post_inline_comments
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_github_post_inline_returns_ids():
@@ -161,6 +163,7 @@ async def test_github_post_inline_groups_same_file_line():
 # GitHub — delete_inline_comments
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_github_delete_calls_correct_endpoint():
     adapter = GitHubAdapter(token="tok")
@@ -181,6 +184,7 @@ async def test_github_delete_calls_correct_endpoint():
 # ---------------------------------------------------------------------------
 # ADO — post_inline_comments
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_ado_post_inline_returns_ids():
@@ -242,6 +246,7 @@ async def test_ado_post_inline_prepends_slash_to_path():
 # ADO — delete_inline_comments
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_ado_delete_patches_status_and_replies():
     adapter = ADOAdapter(pat="pat", org_url="https://dev.azure.com/myorg")
@@ -287,6 +292,7 @@ async def test_ado_delete_calls_correct_thread_url():
 # GitHub — delete negative paths
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_github_delete_ignores_404():
     """404 on a stale comment ID should be silently skipped; remaining IDs still processed."""
@@ -294,10 +300,12 @@ async def test_github_delete_ignores_404():
     pr = _make_github_pr()
 
     mock_client = MagicMock()
-    mock_client.delete = AsyncMock(side_effect=[
-        _mock_response(404, {}),
-        _mock_response(204, {}),
-    ])
+    mock_client.delete = AsyncMock(
+        side_effect=[
+            _mock_response(404, {}),
+            _mock_response(204, {}),
+        ]
+    )
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
         await adapter.delete_inline_comments(pr, ["stale", "valid"])
@@ -323,6 +331,7 @@ async def test_github_delete_raises_on_non_404_error():
 # ADO — delete negative paths
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_ado_delete_ignores_404():
     """404 on a stale thread ID should be silently skipped; remaining IDs still processed."""
@@ -330,10 +339,12 @@ async def test_ado_delete_ignores_404():
     pr = _make_ado_pr()
 
     mock_client = MagicMock()
-    mock_client.patch = AsyncMock(side_effect=[
-        _mock_response(404, {}),
-        _mock_response(200, {}),
-    ])
+    mock_client.patch = AsyncMock(
+        side_effect=[
+            _mock_response(404, {}),
+            _mock_response(200, {}),
+        ]
+    )
     mock_client.post = AsyncMock(return_value=_mock_response(200, {}))
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
@@ -368,10 +379,12 @@ async def test_ado_delete_reply_failure_does_not_abort_batch():
     # Both PATCHes succeed
     mock_client.patch = AsyncMock(return_value=_mock_response(200, {}))
     # First reply POST fails with 403, second succeeds
-    mock_client.post = AsyncMock(side_effect=[
-        _mock_response(403, {}),
-        _mock_response(200, {}),
-    ])
+    mock_client.post = AsyncMock(
+        side_effect=[
+            _mock_response(403, {}),
+            _mock_response(200, {}),
+        ]
+    )
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
         # Should not raise even though first reply POST returns 403
@@ -390,7 +403,7 @@ import uuid as _uuid
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.orchestrator import _post_results
 from pr_guardian.models.context import RepoRiskClass, RiskTier
-from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
+from pr_guardian.models.findings import AgentResult, Verdict
 from pr_guardian.models.output import Decision, ReviewResult
 
 
@@ -456,8 +469,13 @@ async def test_inline_mode_filters_below_threshold():
     config = GuardianConfig()  # default threshold = MEDIUM
 
     await _post_results(
-        adapter, pr, result, config,
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        config,
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     adapter.post_inline_comments.assert_called_once()
@@ -479,14 +497,17 @@ async def test_inline_mode_posts_summary_after_inline():
     adapter.post_inline_comments = AsyncMock(
         side_effect=lambda *a, **kw: call_order.append("inline") or ["id-1"]
     )
-    adapter.post_comment = AsyncMock(
-        side_effect=lambda *a, **kw: call_order.append("summary")
-    )
+    adapter.post_comment = AsyncMock(side_effect=lambda *a, **kw: call_order.append("summary"))
     storage = _mock_storage()
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     assert "inline" in call_order
@@ -504,8 +525,13 @@ async def test_summary_mode_never_calls_post_inline_comments():
     storage = _mock_storage()
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="summary", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="summary",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     adapter.post_inline_comments.assert_not_called()
@@ -532,8 +558,13 @@ async def test_inline_rereview_deletes_before_posting():
     original_review_id = str(_uuid.uuid4())
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
         original_review_id=original_review_id,
     )
 
@@ -683,8 +714,13 @@ async def test_inline_mode_mech_findings_skips_none_line():
     storage = _mock_storage()
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     adapter.post_inline_comments.assert_not_called()
@@ -708,8 +744,13 @@ async def test_inline_mode_mech_findings_error_severity_passes_threshold():
     storage = _mock_storage()
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     adapter.post_inline_comments.assert_called_once()
@@ -737,8 +778,13 @@ async def test_inline_mode_mech_findings_info_severity_filtered_out():
     storage = _mock_storage()
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     adapter.post_inline_comments.assert_not_called()
@@ -753,7 +799,12 @@ async def test_inline_mode_mech_findings_warning_passes_medium_threshold():
         passed=False,
         severity="warning",
         findings=[
-            {"file": "src/types.py", "line": 7, "rule": "arg-type", "message": "Incompatible type"},
+            {
+                "file": "src/types.py",
+                "line": 7,
+                "rule": "arg-type",
+                "message": "Incompatible type",
+            },
         ],
     )
     result = _make_result_with_mech([mech])
@@ -762,8 +813,13 @@ async def test_inline_mode_mech_findings_warning_passes_medium_threshold():
     storage = _mock_storage()
 
     await _post_results(
-        adapter, pr, result, GuardianConfig(),
-        comment_mode="inline", review_id=_uuid.uuid4(), storage=storage,
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
     )
 
     adapter.post_inline_comments.assert_called_once()

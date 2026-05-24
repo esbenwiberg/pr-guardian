@@ -4,6 +4,7 @@ Revision ID: 010
 Revises: 009
 Create Date: 2026-04-28
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -31,10 +32,7 @@ def _column_exists(table: str, column: str) -> bool:
 def _table_exists(table: str) -> bool:
     conn = op.get_bind()
     result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = :table"
-        ),
+        sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table"),
         {"table": table},
     )
     return result.scalar() is not None
@@ -51,8 +49,9 @@ def upgrade() -> None:
         op.create_table(
             "posted_inline_comments",
             sa.Column("id", UUID(as_uuid=True), primary_key=True),
-            sa.Column("review_id", UUID(as_uuid=True),
-                      sa.ForeignKey("reviews.id"), nullable=False),
+            sa.Column(
+                "review_id", UUID(as_uuid=True), sa.ForeignKey("reviews.id"), nullable=False
+            ),
             sa.Column("platform_comment_id", sa.String(256), nullable=False),
             sa.Column("platform", sa.String(16), nullable=False),
             sa.Column("pr_id", sa.String(64), nullable=False),

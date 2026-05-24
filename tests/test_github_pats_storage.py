@@ -1,4 +1,5 @@
 """Tests for GitHub PAT storage and token resolution helpers."""
+
 from __future__ import annotations
 
 import uuid
@@ -47,14 +48,17 @@ def _make_pat_row(
 
 def _session_cm(session: AsyncMock):
     """Wrap a mock session so it works as `async with async_session() as s:`."""
+
     @asynccontextmanager
     async def _factory():
         yield session
+
     return _factory
 
 
 class _FailingCM:
     """Async context manager that raises on entry (simulates DB unavailability)."""
+
     def __init__(self, exc: Exception):
         self._exc = exc
 

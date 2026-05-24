@@ -7,11 +7,20 @@ from pr_guardian.models.context import FileRole
 
 
 # Default conventions when no config provided
-DEFAULT_DEPENDENCY_FILES = frozenset({
-    "package.json", "requirements.txt", "Pipfile", "pyproject.toml",
-    "go.mod", "Cargo.toml", "pom.xml", "build.gradle",
-    "*.csproj", "packages.config",
-})
+DEFAULT_DEPENDENCY_FILES = frozenset(
+    {
+        "package.json",
+        "requirements.txt",
+        "Pipfile",
+        "pyproject.toml",
+        "go.mod",
+        "Cargo.toml",
+        "pom.xml",
+        "build.gradle",
+        "*.csproj",
+        "packages.config",
+    }
+)
 
 
 def classify_file_roles(
@@ -54,9 +63,18 @@ def _matches_any(file_path: str, patterns: list[str]) -> bool:
 
 def _is_dependency_file(file_path: str) -> bool:
     import os
+
     basename = os.path.basename(file_path)
-    if basename in {"package.json", "requirements.txt", "Pipfile", "go.mod",
-                    "Cargo.toml", "pom.xml", "build.gradle", "packages.config"}:
+    if basename in {
+        "package.json",
+        "requirements.txt",
+        "Pipfile",
+        "go.mod",
+        "Cargo.toml",
+        "pom.xml",
+        "build.gradle",
+        "packages.config",
+    }:
         return True
     if basename == "pyproject.toml":
         return True
@@ -64,12 +82,23 @@ def _is_dependency_file(file_path: str) -> bool:
 
 
 def _is_infra_file(file_path: str) -> bool:
-    infra_patterns = ["**/terraform/**", "**/docker/**", "**/k8s/**",
-                      "**/infra/**", "**/.github/**", "**/azure-pipelines*"]
+    infra_patterns = [
+        "**/terraform/**",
+        "**/docker/**",
+        "**/k8s/**",
+        "**/infra/**",
+        "**/.github/**",
+        "**/azure-pipelines*",
+    ]
     return _matches_any(file_path, infra_patterns)
 
 
 def _is_config_file(file_path: str) -> bool:
-    config_patterns = ["**/config/**", "**/.env*", "**/settings*",
-                       "**/*.config.*", "**/appsettings*"]
+    config_patterns = [
+        "**/config/**",
+        "**/.env*",
+        "**/settings*",
+        "**/*.config.*",
+        "**/appsettings*",
+    ]
     return _matches_any(file_path, config_patterns)

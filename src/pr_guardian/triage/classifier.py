@@ -21,16 +21,23 @@ log = structlog.get_logger()
 @dataclass
 class TriageResult:
     """Output of the triage stage."""
+
     risk_tier: RiskTier
     agent_set: set[str] = field(default_factory=set)
     reasons: list[str] = field(default_factory=list)
     hotspot_hits: list[str] = field(default_factory=list)
 
 
-ALL_AGENTS = frozenset({
-    "security_privacy", "performance", "architecture_intent",
-    "code_quality_observability", "test_quality", "hotspot",
-})
+ALL_AGENTS = frozenset(
+    {
+        "security_privacy",
+        "performance",
+        "architecture_intent",
+        "code_quality_observability",
+        "test_quality",
+        "hotspot",
+    }
+)
 
 
 def classify(context: ReviewContext, config: GuardianConfig) -> TriageResult:

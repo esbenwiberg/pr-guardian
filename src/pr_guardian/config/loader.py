@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import structlog
@@ -41,6 +40,7 @@ async def apply_global_settings(config: GuardianConfig) -> GuardianConfig:
     """
     try:
         from pr_guardian.persistence.storage import get_global_config
+
         settings = await get_global_config()
     except Exception:
         return config

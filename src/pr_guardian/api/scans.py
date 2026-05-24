@@ -1,4 +1,5 @@
 """Scans API: trigger and query recent changes / maintenance scans."""
+
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +28,8 @@ router = APIRouter(prefix="/api", tags=["scans"])
 # ---------------------------------------------------------------------------
 
 _GITHUB_URL_RE = re.compile(
-    r"^(?:https?://)?github\.com/([^/]+/[^/]+?)(?:\.git)?/?$", re.IGNORECASE,
+    r"^(?:https?://)?github\.com/([^/]+/[^/]+?)(?:\.git)?/?$",
+    re.IGNORECASE,
 )
 _ADO_URL_RE = re.compile(
     r"^(?:https?://)?dev\.azure\.com/[^/]+/([^/]+)/_git/([^/]+?)(?:\.git)?/?$",
@@ -228,7 +230,10 @@ async def list_scans(
     """Paginated list of scans with optional filters."""
     try:
         return await storage.list_scans(
-            limit=limit, offset=offset, repo=repo, scan_type=scan_type,
+            limit=limit,
+            offset=offset,
+            repo=repo,
+            scan_type=scan_type,
         )
     except Exception:
         return []
@@ -313,7 +318,9 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
     - per_group: one issue per agent group among selected findings
     """
     if req.mode not in ("single", "per_finding", "per_group"):
-        raise HTTPException(status_code=400, detail="mode must be single, per_finding, or per_group")
+        raise HTTPException(
+            status_code=400, detail="mode must be single, per_finding, or per_group"
+        )
     if not req.finding_ids:
         raise HTTPException(status_code=400, detail="No finding_ids provided")
 
@@ -404,12 +411,14 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
                 platform=scan["platform"],
                 repo=repo,
             )
-            created.append({
-                "issue_url": issue_url,
-                "issue_number": issue_number,
-                "title": title,
-                "finding_ids": group_finding_ids,
-            })
+            created.append(
+                {
+                    "issue_url": issue_url,
+                    "issue_number": issue_number,
+                    "title": title,
+                    "finding_ids": group_finding_ids,
+                }
+            )
         except Exception as e:
             log.error("scan_issue_create_failed", error=str(e), title=title)
             errors.append(str(e))

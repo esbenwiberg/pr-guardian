@@ -1,4 +1,5 @@
 """SQLAlchemy ORM models for review persistence."""
+
 from __future__ import annotations
 
 import uuid
@@ -26,9 +27,7 @@ class ReviewRow(Base):
 
     __tablename__ = "reviews"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pr_id: Mapped[str] = mapped_column(String(64), index=True)
     repo: Mapped[str] = mapped_column(String(256), index=True)
     platform: Mapped[str] = mapped_column(String(16))
@@ -59,17 +58,13 @@ class ReviewRow(Base):
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
-    comment_mode: Mapped[str] = mapped_column(
-        String(32), server_default="none", nullable=False
-    )
+    comment_mode: Mapped[str] = mapped_column(String(32), server_default="none", nullable=False)
     pat_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Relationships
@@ -84,9 +79,7 @@ class ReviewRow(Base):
 class MechanicalResultRow(Base):
     __tablename__ = "mechanical_results"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     review_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("reviews.id", ondelete="CASCADE")
     )
@@ -102,9 +95,7 @@ class MechanicalResultRow(Base):
 class AgentResultRow(Base):
     __tablename__ = "agent_results"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     review_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("reviews.id", ondelete="CASCADE")
     )
@@ -124,9 +115,7 @@ class AgentResultRow(Base):
 class FindingRow(Base):
     __tablename__ = "findings"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_result_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("agent_results.id", ondelete="CASCADE")
     )
@@ -177,9 +166,7 @@ class ScanRow(Base):
 
     __tablename__ = "scans"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     scan_type: Mapped[str] = mapped_column(String(32), index=True)
     repo: Mapped[str] = mapped_column(String(256), index=True)
     platform: Mapped[str] = mapped_column(String(16))
@@ -201,9 +188,7 @@ class ScanRow(Base):
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
-    finished_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     agent_results: Mapped[list[ScanAgentResultRow]] = relationship(
@@ -214,9 +199,7 @@ class ScanRow(Base):
 class ScanAgentResultRow(Base):
     __tablename__ = "scan_agent_results"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     scan_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE")
     )
@@ -234,9 +217,7 @@ class ScanAgentResultRow(Base):
 class ScanFindingRow(Base):
     __tablename__ = "scan_findings"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     agent_result_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("scan_agent_results.id", ondelete="CASCADE")
     )
@@ -264,9 +245,7 @@ class ScanIssueRow(Base):
 
     __tablename__ = "scan_issues"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     scan_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), index=True
     )
@@ -292,14 +271,14 @@ class FindingDismissalRow(Base):
 
     __tablename__ = "finding_dismissals"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     pr_id: Mapped[str] = mapped_column(String(64), index=True)
     repo: Mapped[str] = mapped_column(String(256))
     platform: Mapped[str] = mapped_column(String(16))
     signature: Mapped[str] = mapped_column(String(16), index=True)
-    status: Mapped[str] = mapped_column(String(24))  # by_design | false_positive | acknowledged | will_fix
+    status: Mapped[str] = mapped_column(
+        String(24)
+    )  # by_design | false_positive | acknowledged | will_fix
     comment: Mapped[str] = mapped_column(Text, default="")
     source_finding: Mapped[dict] = mapped_column(JSONB, default=dict)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -329,9 +308,7 @@ class PostedInlineCommentRow(Base):
 
     __tablename__ = "posted_inline_comments"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     review_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("reviews.id"), index=True
     )
@@ -354,9 +331,7 @@ class GithubPatRow(Base):
 
     __tablename__ = "github_pats"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     description: Mapped[str] = mapped_column(String(256), default="")
     encrypted_token: Mapped[str] = mapped_column(Text)
@@ -392,23 +367,15 @@ class ApiKeyRow(Base):
 
     __tablename__ = "api_keys"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128))
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     key_prefix: Mapped[str] = mapped_column(String(12))  # "prg_xxxx" for display
     scopes: Mapped[list] = mapped_column(JSONB, default=lambda: ["read"])
     created_by: Mapped[str] = mapped_column(String(256))
-    expires_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    revoked_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    last_used_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -437,17 +404,13 @@ class SyncSourceRow(Base):
 
     __tablename__ = "sync_sources"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     platform: Mapped[str] = mapped_column(String(16), index=True)  # github | ado
     org: Mapped[str] = mapped_column(String(256))
     project: Mapped[str] = mapped_column(String(256), default="")  # ADO only
     repo: Mapped[str] = mapped_column(String(256))  # "owner/name" for GH, "name" for ADO
     repo_url: Mapped[str] = mapped_column(Text, default="")
-    last_synced_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -465,9 +428,7 @@ class SyncedPRRow(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     platform: Mapped[str] = mapped_column(String(16), index=True)
     pr_id: Mapped[str] = mapped_column(String(64))
     org: Mapped[str] = mapped_column(String(256), index=True)
@@ -488,12 +449,8 @@ class SyncedPRRow(Base):
     comment_count: Mapped[int] = mapped_column(Integer, default=0)
     # 'success' | 'failure' | 'pending' | 'unknown'
     ci_status: Mapped[str] = mapped_column(String(32), default="unknown")
-    pr_created_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-    pr_updated_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
+    pr_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    pr_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -509,9 +466,7 @@ class ExcludedRepoRow(Base):
         ),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     platform: Mapped[str] = mapped_column(String(16))
     org: Mapped[str] = mapped_column(String(256))
     project: Mapped[str] = mapped_column(String(256), default="")
@@ -532,9 +487,7 @@ class ExclusionRuleRow(Base):
 
     __tablename__ = "exclusion_rules"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     platform: Mapped[str] = mapped_column(String(16))
     org_pattern: Mapped[str] = mapped_column(String(256), default="")
     project_pattern: Mapped[str] = mapped_column(String(256), default="")

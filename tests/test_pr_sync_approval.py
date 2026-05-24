@@ -1,7 +1,7 @@
 """Unit tests for self-approval exclusion in pr_sync approval status helpers."""
+
 from __future__ import annotations
 
-import pytest
 
 from pr_guardian.core.pr_sync import (
     _ado_approval_status,
@@ -13,6 +13,7 @@ from pr_guardian.core.pr_sync import (
 # ---------------------------------------------------------------------------
 # _ado_approval_status
 # ---------------------------------------------------------------------------
+
 
 class TestAdoApprovalStatus:
     def test_no_reviewers_is_pending(self):
@@ -66,6 +67,7 @@ class TestAdoApprovalStatus:
 # _gh_approval_status
 # ---------------------------------------------------------------------------
 
+
 class TestGhApprovalStatus:
     def _review(self, login: str, state: str) -> dict:
         return {"user": {"login": login}, "state": state}
@@ -111,6 +113,7 @@ class TestGhApprovalStatus:
 # ---------------------------------------------------------------------------
 # _normalize_ado_pr — author_id extraction edge cases
 # ---------------------------------------------------------------------------
+
 
 class TestNormalizeAdoPrAuthorId:
     def _pr(self, created_by: dict, reviewers: list[dict]) -> dict:

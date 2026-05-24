@@ -4,6 +4,7 @@ Revision ID: 012
 Revises: 011
 Create Date: 2026-05-04
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -18,9 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def _index_exists(index_name: str) -> bool:
     conn = op.get_bind()
     result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM pg_indexes WHERE indexname = :idx"
-        ),
+        sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :idx"),
         {"idx": index_name},
     )
     return result.scalar() is not None

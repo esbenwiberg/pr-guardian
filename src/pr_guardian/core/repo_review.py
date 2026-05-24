@@ -12,6 +12,7 @@ Two selection modes:
 Only suitable for relatively small slices — token budget grows linearly with
 total code size.
 """
+
 from __future__ import annotations
 
 from typing import Literal
@@ -36,16 +37,53 @@ SelectionMode = Literal["all", "recent"]
 
 # Binary/generated paths we never want to feed to agents.
 _SKIP_SUFFIXES = (
-    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".svg",
-    ".pdf", ".zip", ".tar", ".gz", ".tgz", ".7z", ".rar",
-    ".woff", ".woff2", ".ttf", ".eot", ".otf",
-    ".mp3", ".mp4", ".mov", ".avi", ".wav",
-    ".pyc", ".pyo", ".so", ".dll", ".exe", ".class", ".jar",
-    ".lock", ".min.js", ".min.css", ".map",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".webp",
+    ".ico",
+    ".svg",
+    ".pdf",
+    ".zip",
+    ".tar",
+    ".gz",
+    ".tgz",
+    ".7z",
+    ".rar",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".eot",
+    ".otf",
+    ".mp3",
+    ".mp4",
+    ".mov",
+    ".avi",
+    ".wav",
+    ".pyc",
+    ".pyo",
+    ".so",
+    ".dll",
+    ".exe",
+    ".class",
+    ".jar",
+    ".lock",
+    ".min.js",
+    ".min.css",
+    ".map",
 )
 _SKIP_DIR_PARTS = (
-    "node_modules/", "dist/", "build/", ".next/", ".git/", "vendor/",
-    "__pycache__/", ".venv/", ".mypy_cache/", ".pytest_cache/",
+    "node_modules/",
+    "dist/",
+    "build/",
+    ".next/",
+    ".git/",
+    "vendor/",
+    "__pycache__/",
+    ".venv/",
+    ".mypy_cache/",
+    ".pytest_cache/",
 )
 
 
@@ -94,7 +132,9 @@ async def _select_candidates(
         # Ask the adapter for up to max_files recently-changed paths. The
         # adapter is responsible for ordering newest-first.
         paths = await adapter.list_recently_changed_files(
-            repo, ref=ref, limit=max_files,
+            repo,
+            ref=ref,
+            limit=max_files,
         )
         filtered = [p for p in paths if not _should_skip(p)]
         capped = len(filtered) >= max_files
@@ -129,11 +169,13 @@ async def build_repo_diff(
     ``all`` mode — ``recent`` is bounded by definition).
     """
     candidates, total_listed, capped = await _select_candidates(
-        adapter, repo, ref, selection, max_files,
+        adapter,
+        repo,
+        ref,
+        selection,
+        max_files,
     )
-    skipped_binary = total_listed - (
-        len(candidates) if selection == "all" else total_listed
-    )
+    skipped_binary = total_listed - (len(candidates) if selection == "all" else total_listed)
     # For "recent" mode, skipped_binary is calculated differently:
     # adapter returns raw paths, we filter to candidates, the difference is skips.
     if selection == "recent":
@@ -159,18 +201,20 @@ async def build_repo_diff(
         total_bytes += len(content)
         if total_bytes > max_total_bytes:
             raise ValueError(
-                f"Repo total size exceeds {max_total_bytes} bytes. "
-                f"Too large for repo review."
+                f"Repo total size exceeds {max_total_bytes} bytes. Too large for repo review."
             )
 
-        diff_files.append(DiffFile(
-            path=path,
-            status="added",
-            old_path=None,
-            additions=content.count("\n") + (1 if content and not content.endswith("\n") else 0),
-            deletions=0,
-            patch=_synthesize_patch(content),
-        ))
+        diff_files.append(
+            DiffFile(
+                path=path,
+                status="added",
+                old_path=None,
+                additions=content.count("\n")
+                + (1 if content and not content.endswith("\n") else 0),
+                deletions=0,
+                patch=_synthesize_patch(content),
+            )
+        )
 
     meta = {
         "selection": selection,

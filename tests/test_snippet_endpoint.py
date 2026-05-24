@@ -3,6 +3,7 @@
 Verifies the hunk-extraction path of dashboard_review_diff without hitting
 GitHub or a real database.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -31,6 +32,7 @@ SAMPLE_PATCH = """\
 @pytest.fixture
 def client():
     from pr_guardian.main import app
+
     return TestClient(app)
 
 
@@ -77,13 +79,21 @@ def _patch_deps(monkeypatch, fake_review, diff=None):
     monkeypatch.setattr(dash, "create_github_adapter", AsyncMock(return_value=adapter))
 
     from pr_guardian.api import review as rv
+
     monkeypatch.setattr(rv, "_parse_pr_url", lambda url: (url, "github"))
 
     pr_stub = SimpleNamespace(
-        pr_id="7", repo="org/repo", platform="github",
-        source_branch="feat", target_branch="main",
-        author="dev", title="T", head_commit_sha="deadbeef",
-        pr_url=fake_review["pr_url"], org="", project="",
+        pr_id="7",
+        repo="org/repo",
+        platform="github",
+        source_branch="feat",
+        target_branch="main",
+        author="dev",
+        title="T",
+        head_commit_sha="deadbeef",
+        pr_url=fake_review["pr_url"],
+        org="",
+        project="",
     )
     monkeypatch.setattr(rv, "_hydrate_pr", AsyncMock(return_value=pr_stub))
 
@@ -91,6 +101,7 @@ def _patch_deps(monkeypatch, fake_review, diff=None):
 # ---------------------------------------------------------------------------
 # Hunk-extraction path
 # ---------------------------------------------------------------------------
+
 
 def test_path_and_line_returns_hunk(client, review_id, fake_review, monkeypatch):
     _patch_deps(monkeypatch, fake_review)
@@ -134,6 +145,7 @@ def test_unknown_file_returns_404(client, review_id, fake_review, monkeypatch):
 
 def test_unknown_review_returns_404(client, monkeypatch):
     from pr_guardian.api import dashboard as dash
+
     monkeypatch.setattr(dash.storage, "get_review", AsyncMock(return_value=None))
     rid = uuid.uuid4()
     resp = client.get(

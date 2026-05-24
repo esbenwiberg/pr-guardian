@@ -4,6 +4,7 @@ Exercises the same ADO org/project recovery path that submit-verdict has, plus
 the "always post a comment on approve" behavior. Stays in-process via stubbed
 storage and a mocked platform adapter.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -16,6 +17,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     from pr_guardian.main import app
+
     return TestClient(app)
 
 
@@ -64,9 +66,7 @@ def _patch(monkeypatch, review, adapter):
     monkeypatch.setattr(rq.storage, "append_review_log_entry", _append)
     monkeypatch.setattr(rq.storage, "list_reviews", _list)
     monkeypatch.setattr(factory_mod, "create_adapter", lambda _p: adapter)
-    monkeypatch.setattr(
-        factory_mod, "create_github_adapter", AsyncMock(return_value=adapter)
-    )
+    monkeypatch.setattr(factory_mod, "create_github_adapter", AsyncMock(return_value=adapter))
     return appended
 
 

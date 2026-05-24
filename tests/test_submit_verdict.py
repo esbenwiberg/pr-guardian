@@ -5,6 +5,7 @@ FastAPI's TestClient. Uses monkeypatch to stub the storage helpers and the
 platform adapter so the test stays in-process and does not require a DB,
 network, or real GitHub/ADO credentials.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -17,6 +18,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     from pr_guardian.main import app
+
     return TestClient(app)
 
 
@@ -34,19 +36,27 @@ def fake_review():
         "author": "dev",
         "title": "My PR",
         "agent_results": [
-            {"agent_name": "security",
-             "findings": [
-                 {"id": str(uuid.uuid4()),
-                  "severity": "medium",
-                  "file": "a.py", "line": 1,
-                  "description": "x",
-                  "dismissal": {"status": "acknowledged"}},
-                 {"id": str(uuid.uuid4()),
-                  "severity": "high",
-                  "file": "b.py", "line": 2,
-                  "description": "y",
-                  "dismissal": {"status": "will_fix"}},
-             ]},
+            {
+                "agent_name": "security",
+                "findings": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "severity": "medium",
+                        "file": "a.py",
+                        "line": 1,
+                        "description": "x",
+                        "dismissal": {"status": "acknowledged"},
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "severity": "high",
+                        "file": "b.py",
+                        "line": 2,
+                        "description": "y",
+                        "dismissal": {"status": "will_fix"},
+                    },
+                ],
+            },
         ],
     }
 
@@ -255,12 +265,16 @@ def test_ado_review_without_pr_url_returns_422(client, monkeypatch):
     adapter.approve_pr.assert_not_awaited()
 
 
-def test_httpx_status_error_surfaces_platform_body_and_returns_502(client, fake_review, monkeypatch):
+def test_httpx_status_error_surfaces_platform_body_and_returns_502(
+    client, fake_review, monkeypatch
+):
     """When the platform raises httpx.HTTPStatusError, the handler must surface
     the response body — not swallow it with a 500 from a variable-shadow bug."""
     import httpx
 
-    request = httpx.Request("POST", "https://dev.azure.com/foo/_apis/git/pullrequests/42/reviewers/me")
+    request = httpx.Request(
+        "POST", "https://dev.azure.com/foo/_apis/git/pullrequests/42/reviewers/me"
+    )
     response = httpx.Response(
         status_code=400,
         request=request,

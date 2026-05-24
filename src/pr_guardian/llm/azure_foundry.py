@@ -25,6 +25,7 @@ class AzureFoundryClient:
         if self._client is None:
             import httpx
             import openai
+
             self._client = openai.AsyncAzureOpenAI(
                 azure_endpoint=self._endpoint,
                 api_key=self._api_key,

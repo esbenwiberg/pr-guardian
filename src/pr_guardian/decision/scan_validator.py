@@ -3,6 +3,7 @@
 Mirrors the PR review validator (validator.py) but operates on ScanAgentResult /
 ScanFinding models and uses the scan-specific validator prompt.
 """
+
 from __future__ import annotations
 
 import json
@@ -35,7 +36,9 @@ def _load_scan_validator_prompt() -> str:
     path = _find_prompts_dir() / "scan_validator" / "base.md"
     if path.exists():
         return path.read_text().strip()
-    return "You are a scan finding validator. For each finding, decide: keep, dismiss, or downgrade."
+    return (
+        "You are a scan finding validator. For each finding, decide: keep, dismiss, or downgrade."
+    )
 
 
 def _flatten_findings(
@@ -86,7 +89,9 @@ def _build_scan_context_text(context: ScanContext, max_chars: int = 30_000) -> s
         if context.stale_files:
             parts.append("\nStale files:")
             for sf in context.stale_files[:30]:
-                parts.append(f"- {sf.get('path', '?')} (last modified: {sf.get('last_modified', '?')})")
+                parts.append(
+                    f"- {sf.get('path', '?')} (last modified: {sf.get('last_modified', '?')})"
+                )
 
     text = "\n".join(parts)
     if len(text) > max_chars:
@@ -166,9 +171,7 @@ def _apply_validations(
             findings=new_findings,
             verdict=(
                 Verdict.PASS
-                if not new_findings
-                and result.findings
-                and result.verdict != Verdict.FLAG_HUMAN
+                if not new_findings and result.findings and result.verdict != Verdict.FLAG_HUMAN
                 else result.verdict
             ),
         )
@@ -219,7 +222,9 @@ async def validate_scan_findings(
         validations = data.get("validations", [])
 
         new_results, dismissed, downgraded = _apply_validations(
-            agent_results, flat, validations,
+            agent_results,
+            flat,
+            validations,
         )
 
         meta.update(

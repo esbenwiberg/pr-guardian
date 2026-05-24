@@ -26,12 +26,8 @@ def build_change_profile(
     all_roles = [roles for roles in file_roles.values()]
 
     # Aggregate from file roles
-    profile.has_production_changes = any(
-        FileRole.PRODUCTION in roles for roles in all_roles
-    )
-    profile.has_test_changes = any(
-        FileRole.TEST in roles for roles in all_roles
-    )
+    profile.has_production_changes = any(FileRole.PRODUCTION in roles for roles in all_roles)
+    profile.has_test_changes = any(FileRole.TEST in roles for roles in all_roles)
     profile.has_docs_only = bool(all_roles) and all(
         roles <= {FileRole.DOCS} for roles in all_roles
     )
@@ -47,17 +43,14 @@ def build_change_profile(
         security_surface.has_hits() or blast_radius.propagates_to_security
     )
     profile.touches_shared_code = blast_radius.touches_shared_code
-    profile.touches_api_boundary = any(
-        "input_handling" in security_surface.get_classifications(f)
-        for f in changed_files
-    ) or blast_radius.propagates_to_api
+    profile.touches_api_boundary = (
+        any("input_handling" in security_surface.get_classifications(f) for f in changed_files)
+        or blast_radius.propagates_to_api
+    )
     profile.touches_data_layer = any(
-        "data_access" in security_surface.get_classifications(f)
-        for f in changed_files
+        "data_access" in security_surface.get_classifications(f) for f in changed_files
     )
-    profile.adds_dependencies = any(
-        FileRole.DEPENDENCY in roles for roles in all_roles
-    )
+    profile.adds_dependencies = any(FileRole.DEPENDENCY in roles for roles in all_roles)
 
     # Check for new API endpoints (heuristic: new files in controller/handler/api dirs)
     _API_SEGMENTS = {"controllers", "controller", "handlers", "handler", "api", "routes"}

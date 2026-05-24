@@ -4,6 +4,7 @@ Covers: GET/POST /api/admin/github-pats and PUT/DELETE /api/admin/github-pats/{i
 In the test environment DATABASE_URL is not set, so the identity middleware grants
 anonymous requests admin access — no auth headers are needed.
 """
+
 from __future__ import annotations
 
 import uuid

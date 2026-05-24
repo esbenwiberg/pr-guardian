@@ -37,13 +37,15 @@ async def run_semgrep(
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=120)
     except FileNotFoundError:
         return MechanicalCheckResult(
-            tool="semgrep", passed=True,
+            tool="semgrep",
+            passed=True,
             error="semgrep not installed — skipped",
             duration_ms=int((time.monotonic() - start) * 1000),
         )
     except asyncio.TimeoutError:
         return MechanicalCheckResult(
-            tool="semgrep", passed=False,
+            tool="semgrep",
+            passed=False,
             error="semgrep timed out after 120s",
             severity=CheckSeverity.ERROR,
             duration_ms=120_000,
@@ -54,13 +56,15 @@ async def run_semgrep(
         data = json.loads(stdout.decode())
         for result in data.get("results", []):
             sev = _map_severity(result.get("extra", {}).get("severity", "WARNING"))
-            findings.append(CheckFinding(
-                file=result.get("path", ""),
-                line=result.get("start", {}).get("line"),
-                rule=result.get("check_id", ""),
-                message=result.get("extra", {}).get("message", ""),
-                severity=sev,
-            ))
+            findings.append(
+                CheckFinding(
+                    file=result.get("path", ""),
+                    line=result.get("start", {}).get("line"),
+                    rule=result.get("check_id", ""),
+                    message=result.get("extra", {}).get("message", ""),
+                    severity=sev,
+                )
+            )
     except (json.JSONDecodeError, KeyError):
         pass
 

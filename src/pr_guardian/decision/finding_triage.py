@@ -14,6 +14,7 @@ The default rules below are intentionally conservative — Phase 2 does
 not yet expose tuning knobs in `GuardianConfig`. Phase 2.5 can lift
 these into config when usage tells us where the boundaries should sit.
 """
+
 from __future__ import annotations
 
 from typing import Any, Iterable

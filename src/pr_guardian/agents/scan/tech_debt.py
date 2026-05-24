@@ -1,4 +1,5 @@
 """Tech debt agent: identifies technical debt in stale files."""
+
 from __future__ import annotations
 
 from pr_guardian.agents.scan.base import ScanBaseAgent

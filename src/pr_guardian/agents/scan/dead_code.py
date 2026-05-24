@@ -1,4 +1,5 @@
 """Dead code agent: identifies likely dead or unused code in stale files."""
+
 from __future__ import annotations
 
 from pr_guardian.agents.scan.base import ScanBaseAgent

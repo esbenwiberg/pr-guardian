@@ -1,4 +1,5 @@
 """Domain models for scan-based reviews (recent changes + maintenance)."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ class ScanType(str, Enum):
 @dataclass
 class ScanFinding:
     """A single finding from a scan agent."""
+
     severity: Severity
     certainty: Certainty
     category: str
@@ -31,6 +33,7 @@ class ScanFinding:
 @dataclass
 class ScanAgentResult:
     """Output from a single scan agent."""
+
     agent_name: str
     verdict: Verdict
     findings: list[ScanFinding] = field(default_factory=list)
@@ -42,6 +45,7 @@ class ScanAgentResult:
 @dataclass
 class ScanResult:
     """Full result of a scan run."""
+
     scan_id: str
     scan_type: ScanType
     repo: str
@@ -65,6 +69,7 @@ class ScanResult:
 @dataclass
 class ScanContext:
     """Lightweight context passed to scan agents (replaces ReviewContext)."""
+
     scan_id: str
     scan_type: ScanType
     repo: str

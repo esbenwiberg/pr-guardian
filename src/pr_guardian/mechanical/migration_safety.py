@@ -8,19 +8,34 @@ from pr_guardian.mechanical.results import CheckFinding, CheckSeverity, Mechanic
 
 # Dangerous SQL migration patterns
 DANGEROUS_PATTERNS = [
-    (re.compile(r'\bDROP\s+TABLE\b', re.I), "DROP TABLE detected", CheckSeverity.ERROR),
-    (re.compile(r'\bDROP\s+COLUMN\b', re.I), "DROP COLUMN detected", CheckSeverity.ERROR),
-    (re.compile(r'\bTRUNCATE\b', re.I), "TRUNCATE detected", CheckSeverity.ERROR),
-    (re.compile(r'\bDELETE\s+FROM\b(?!.*\bWHERE\b)', re.I),
-     "DELETE without WHERE clause", CheckSeverity.ERROR),
-    (re.compile(r'\bALTER\s+TABLE\b.*\bRENAME\b', re.I),
-     "Table/column rename — may break consumers", CheckSeverity.WARNING),
-    (re.compile(r'\bALTER\s+TABLE\b.*\bALTER\s+COLUMN\b.*\bTYPE\b', re.I),
-     "Column type change — may lose data", CheckSeverity.WARNING),
-    (re.compile(r'\bNOT\s+NULL\b', re.I),
-     "Adding NOT NULL — will fail if existing data has NULLs", CheckSeverity.WARNING),
-    (re.compile(r'\bCREATE\s+INDEX\b(?!.*\bCONCURRENTLY\b)', re.I),
-     "CREATE INDEX without CONCURRENTLY — will lock table", CheckSeverity.WARNING),
+    (re.compile(r"\bDROP\s+TABLE\b", re.I), "DROP TABLE detected", CheckSeverity.ERROR),
+    (re.compile(r"\bDROP\s+COLUMN\b", re.I), "DROP COLUMN detected", CheckSeverity.ERROR),
+    (re.compile(r"\bTRUNCATE\b", re.I), "TRUNCATE detected", CheckSeverity.ERROR),
+    (
+        re.compile(r"\bDELETE\s+FROM\b(?!.*\bWHERE\b)", re.I),
+        "DELETE without WHERE clause",
+        CheckSeverity.ERROR,
+    ),
+    (
+        re.compile(r"\bALTER\s+TABLE\b.*\bRENAME\b", re.I),
+        "Table/column rename — may break consumers",
+        CheckSeverity.WARNING,
+    ),
+    (
+        re.compile(r"\bALTER\s+TABLE\b.*\bALTER\s+COLUMN\b.*\bTYPE\b", re.I),
+        "Column type change — may lose data",
+        CheckSeverity.WARNING,
+    ),
+    (
+        re.compile(r"\bNOT\s+NULL\b", re.I),
+        "Adding NOT NULL — will fail if existing data has NULLs",
+        CheckSeverity.WARNING,
+    ),
+    (
+        re.compile(r"\bCREATE\s+INDEX\b(?!.*\bCONCURRENTLY\b)", re.I),
+        "CREATE INDEX without CONCURRENTLY — will lock table",
+        CheckSeverity.WARNING,
+    ),
 ]
 
 
@@ -41,7 +56,8 @@ async def run_migration_safety(
 
     if not migration_files:
         return MechanicalCheckResult(
-            tool="migration-safety", passed=True,
+            tool="migration-safety",
+            passed=True,
             duration_ms=int((time.monotonic() - start) * 1000),
         )
 
@@ -60,11 +76,15 @@ async def run_migration_safety(
         for line_num, line in enumerate(content.splitlines(), 1):
             for pattern, message, severity in DANGEROUS_PATTERNS:
                 if pattern.search(line):
-                    findings.append(CheckFinding(
-                        file=file_path, line=line_num,
-                        rule="migration-safety", message=message,
-                        severity=severity,
-                    ))
+                    findings.append(
+                        CheckFinding(
+                            file=file_path,
+                            line=line_num,
+                            rule="migration-safety",
+                            message=message,
+                            severity=severity,
+                        )
+                    )
 
     has_errors = any(f.severity == CheckSeverity.ERROR for f in findings)
     duration = int((time.monotonic() - start) * 1000)
@@ -72,9 +92,9 @@ async def run_migration_safety(
     return MechanicalCheckResult(
         tool="migration-safety",
         passed=not has_errors,
-        severity=CheckSeverity.ERROR if has_errors else (
-            CheckSeverity.WARNING if findings else CheckSeverity.INFO
-        ),
+        severity=CheckSeverity.ERROR
+        if has_errors
+        else (CheckSeverity.WARNING if findings else CheckSeverity.INFO),
         findings=findings,
         duration_ms=duration,
     )

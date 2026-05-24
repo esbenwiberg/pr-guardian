@@ -4,6 +4,7 @@ Revision ID: 017
 Revises: 016
 Create Date: 2026-05-08
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -39,9 +40,7 @@ def upgrade() -> None:
             sa.Column("project_pattern", sa.String(256), nullable=False, server_default=""),
             sa.Column("repo_pattern", sa.String(256), nullable=False, server_default=""),
             sa.Column("created_by_email", sa.String(256), nullable=False, server_default=""),
-            sa.Column(
-                "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
-            ),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         )
 
 

@@ -1,4 +1,5 @@
 """Background worker that syncs open PRs from GitHub and ADO into the local DB."""
+
 from __future__ import annotations
 
 import asyncio
@@ -46,7 +47,9 @@ def _gh_approval_status(reviews: list[dict], author_login: str = "") -> str:
 def _normalize_github_pr(pr: dict, repo_full_name: str) -> dict:
     org = repo_full_name.split("/")[0] if "/" in repo_full_name else repo_full_name
     author_login = pr.get("user", {}).get("login", "")
-    approval_status = "draft" if pr.get("draft") else _gh_approval_status(pr.get("_reviews", []), author_login)
+    approval_status = (
+        "draft" if pr.get("draft") else _gh_approval_status(pr.get("_reviews", []), author_login)
+    )
     reviewers = [r["login"] for r in pr.get("requested_reviewers", [])]
     assignees = [a.get("login", "") for a in pr.get("assignees", []) if a.get("login")]
     return {
@@ -80,11 +83,9 @@ def _ado_approval_status(reviewers: list[dict], author_id: str = "") -> str:
     other than the author to approve.
     """
     non_author = [
-        r for r in reviewers
-        if not author_id or (
-            r.get("uniqueName", "") != author_id
-            and r.get("id", "") != author_id
-        )
+        r
+        for r in reviewers
+        if not author_id or (r.get("uniqueName", "") != author_id and r.get("id", "") != author_id)
     ]
     votes = [r.get("vote", 0) for r in non_author]
     if any(v <= -5 for v in votes):
@@ -106,18 +107,14 @@ def _normalize_github_merged_pr(pr: dict, repo_full_name: str) -> dict:
     return base
 
 
-def _normalize_ado_merged_pr(
-    pr: dict, org_url: str, project: str, repo_name: str
-) -> dict:
+def _normalize_ado_merged_pr(pr: dict, org_url: str, project: str, repo_name: str) -> dict:
     """Build a synced-PR dict for a merged ADO PR.
 
     ``pr`` here is the GitHub-shaped dict returned by ``ADOAdapter.fetch_merged_prs``,
     not a raw ADO payload, so we can't reuse ``_normalize_ado_pr``.
     """
     pr_id = str(pr.get("number", ""))
-    pr_url = (
-        f"{org_url.rstrip('/')}/{project}/_git/{repo_name}/pullrequest/{pr_id}"
-    )
+    pr_url = f"{org_url.rstrip('/')}/{project}/_git/{repo_name}/pullrequest/{pr_id}"
     author = pr.get("user", {}).get("login", "")
     merged_at = pr.get("merged_at")
     created_at = pr.get("created_at") or merged_at
@@ -155,9 +152,7 @@ def _normalize_ado_pr(pr: dict, org_url: str, project: str, repo_name: str) -> d
     author_id = created_by.get("uniqueName", "") or created_by.get("id", "")
     approval_status = _ado_approval_status(reviewers_raw, author_id)
     pr_id = str(pr.get("pullRequestId", ""))
-    pr_url = (
-        f"{org_url.rstrip('/')}/{project}/_git/{repo_name}/pullrequest/{pr_id}"
-    )
+    pr_url = f"{org_url.rstrip('/')}/{project}/_git/{repo_name}/pullrequest/{pr_id}"
     return {
         "platform": "ado",
         "pr_id": pr_id,
@@ -192,9 +187,7 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
         repos = await adapter.list_accessible_repos()
         log.info("github_sync_repos_discovered", count=len(repos), pat=pat_label)
 
-        since = (
-            datetime.now(timezone.utc) - timedelta(days=_MERGED_RETENTION_DAYS)
-        ).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(days=_MERGED_RETENTION_DAYS)).isoformat()
         for repo_data in repos:
             repo = repo_data.get("full_name", "")
             if not repo:
@@ -211,9 +204,7 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
                         repo, since=since, base=default_branch
                     )
                 except Exception as exc:
-                    log.warning(
-                        "github_fetch_merged_failed", repo=repo, error=str(exc)
-                    )
+                    log.warning("github_fetch_merged_failed", repo=repo, error=str(exc))
                     merged_prs = []
 
                 keep_pr_ids: list[str] = []
@@ -229,9 +220,7 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
                         await storage.upsert_synced_pr(_normalize_github_pr(pr, repo))
                         keep_pr_ids.append(str(pr["number"]))
                     for pr in merged_prs:
-                        await storage.upsert_synced_pr(
-                            _normalize_github_merged_pr(pr, repo)
-                        )
+                        await storage.upsert_synced_pr(_normalize_github_merged_pr(pr, repo))
                         keep_pr_ids.append(str(pr["number"]))
                     await storage.mark_sync_source_synced("github", repo)
                 await storage.delete_closed_prs("github", repo, "", keep_pr_ids)
@@ -257,9 +246,7 @@ async def _sync_ado(pat: str, org_url: str) -> None:
         projects = await adapter.list_projects()
         log.info("ado_sync_projects_discovered", count=len(projects))
 
-        since = (
-            datetime.now(timezone.utc) - timedelta(days=_MERGED_RETENTION_DAYS)
-        ).isoformat()
+        since = (datetime.now(timezone.utc) - timedelta(days=_MERGED_RETENTION_DAYS)).isoformat()
         for proj in projects:
             project_name = proj.get("name", "")
             if not project_name:
@@ -275,11 +262,9 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                         continue
                     try:
                         prs = await adapter.list_repo_open_prs(project_name, repo_name)
-                        default_branch = (
-                            (repo_data.get("defaultBranch") or "")
-                            .replace("refs/heads/", "")
-                            or "main"
-                        )
+                        default_branch = (repo_data.get("defaultBranch") or "").replace(
+                            "refs/heads/", ""
+                        ) or "main"
                         try:
                             merged_prs = await adapter.fetch_merged_prs(
                                 f"{project_name}/{repo_name}",
@@ -306,16 +291,12 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                             )
                             for pr in prs:
                                 await storage.upsert_synced_pr(
-                                    _normalize_ado_pr(
-                                        pr, org_url, project_name, repo_name
-                                    )
+                                    _normalize_ado_pr(pr, org_url, project_name, repo_name)
                                 )
                                 keep_pr_ids.append(str(pr.get("pullRequestId", "")))
                             for pr in merged_prs:
                                 await storage.upsert_synced_pr(
-                                    _normalize_ado_merged_pr(
-                                        pr, org_url, project_name, repo_name
-                                    )
+                                    _normalize_ado_merged_pr(pr, org_url, project_name, repo_name)
                                 )
                                 keep_pr_ids.append(str(pr.get("number", "")))
                             await storage.mark_sync_source_synced(
@@ -332,7 +313,12 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                             merged_prs=len(merged_prs),
                         )
                     except Exception as exc:
-                        log.warning("ado_repo_sync_failed", project=project_name, repo=repo_name, error=str(exc))
+                        log.warning(
+                            "ado_repo_sync_failed",
+                            project=project_name,
+                            repo=repo_name,
+                            error=str(exc),
+                        )
             except Exception as exc:
                 log.warning("ado_project_sync_failed", project=project_name, error=str(exc))
     finally:

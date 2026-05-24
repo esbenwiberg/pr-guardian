@@ -6,6 +6,7 @@ from dataclasses import dataclass
 @dataclass
 class WorkItem:
     """Linked work item (ADO work item or GitHub issue)."""
+
     id: str
     source: str  # "azure-devops" or "github"
     title: str
@@ -28,7 +29,7 @@ async def fetch_work_item(
     import re
 
     # ADO pattern: AB#12345
-    ado_match = re.search(r'AB#(\d+)', pr_title)
+    ado_match = re.search(r"AB#(\d+)", pr_title)
     if ado_match and platform == "ado":
         return WorkItem(
             id=f"AB#{ado_match.group(1)}",
@@ -37,7 +38,7 @@ async def fetch_work_item(
         )
 
     # GitHub pattern: #42
-    gh_match = re.search(r'#(\d+)', pr_title)
+    gh_match = re.search(r"#(\d+)", pr_title)
     if gh_match and platform == "github":
         return WorkItem(
             id=f"#{gh_match.group(1)}",

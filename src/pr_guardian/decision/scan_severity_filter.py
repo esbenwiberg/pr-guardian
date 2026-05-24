@@ -4,6 +4,7 @@ Mirrors the PR review severity floor (severity_filter.py) but operates on
 ScanAgentResult / ScanFinding models. Scans don't have per-PR risk tiers,
 so a single set of rules (config.severity_floor.scan_suppress) is applied.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace

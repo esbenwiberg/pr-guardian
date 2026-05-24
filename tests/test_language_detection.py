@@ -47,9 +47,7 @@ class TestDetectLanguages:
         assert not result.cross_stack
 
     def test_multi_language(self):
-        result = detect_languages([
-            "src/main.py", "src/app.ts", "migrations/001.sql"
-        ])
+        result = detect_languages(["src/main.py", "src/app.ts", "migrations/001.sql"])
         assert result.language_count == 3
         assert result.cross_stack  # python + typescript + sql
 

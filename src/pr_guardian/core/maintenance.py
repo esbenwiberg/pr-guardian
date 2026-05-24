@@ -1,4 +1,5 @@
 """Orchestrator for maintenance scan: identifies stale files needing attention."""
+
 from __future__ import annotations
 
 import asyncio
@@ -22,12 +23,12 @@ from pr_guardian.platform.protocol import PlatformAdapter
 log = structlog.get_logger()
 
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus":   (15.0,  75.0),
-    "claude-sonnet": (3.0,   15.0),
-    "gpt-5.5":       (5.0,   30.0),
-    "gpt-5.4":       (2.50,  15.0),
-    "gpt-5.2":       (0.875,  7.0),
-    "gpt-5":         (0.625,  5.0),
+    "claude-opus": (15.0, 75.0),
+    "claude-sonnet": (3.0, 15.0),
+    "gpt-5.5": (5.0, 30.0),
+    "gpt-5.4": (2.50, 15.0),
+    "gpt-5.2": (0.875, 7.0),
+    "gpt-5": (0.625, 5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 
@@ -45,6 +46,7 @@ def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 def _try_import_storage():
     try:
         from pr_guardian.persistence import storage
+
         return storage
     except Exception:
         return None
@@ -59,9 +61,31 @@ MAINTENANCE_AGENTS = {
 
 # File extensions worth analyzing
 _ANALYZABLE_EXTENSIONS = {
-    ".py", ".js", ".ts", ".tsx", ".jsx", ".java", ".go", ".rb", ".rs",
-    ".cs", ".cpp", ".c", ".h", ".hpp", ".php", ".swift", ".kt", ".scala",
-    ".sh", ".bash", ".sql", ".yaml", ".yml", ".json", ".toml",
+    ".py",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".jsx",
+    ".java",
+    ".go",
+    ".rb",
+    ".rs",
+    ".cs",
+    ".cpp",
+    ".c",
+    ".h",
+    ".hpp",
+    ".php",
+    ".swift",
+    ".kt",
+    ".scala",
+    ".sh",
+    ".bash",
+    ".sql",
+    ".yaml",
+    ".yml",
+    ".json",
+    ".toml",
 }
 
 
@@ -132,22 +156,26 @@ async def run_maintenance_scan(
     started_at = datetime.now(timezone.utc)
 
     def _plog(level: str, stage: str, msg: str):
-        pipeline_log.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "level": level,
-            "stage": stage,
-            "msg": msg,
-        })
+        pipeline_log.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "stage": stage,
+                "msg": msg,
+            }
+        )
 
     def _emit(stage: str, detail: str = "", **extra):
-        event_bus.publish(ReviewEvent(
-            review_id=scan_id,
-            pr_id="",
-            repo=repo,
-            stage=stage,
-            detail=detail,
-            extra={"scan_type": "maintenance", **extra},
-        ))
+        event_bus.publish(
+            ReviewEvent(
+                review_id=scan_id,
+                pr_id="",
+                repo=repo,
+                stage=stage,
+                detail=detail,
+                extra={"scan_type": "maintenance", **extra},
+            )
+        )
 
     async def _update_stage(stage: str, detail: str = ""):
         _emit(stage, detail)
@@ -159,9 +187,20 @@ async def run_maintenance_scan(
 
     try:
         return await _run_maintenance_pipeline(
-            repo, platform, adapter, config, months, file_limit,
-            scan_id, storage, scan_db_id, pipeline_log, started_at,
-            _plog, _emit, _update_stage,
+            repo,
+            platform,
+            adapter,
+            config,
+            months,
+            file_limit,
+            scan_id,
+            storage,
+            scan_db_id,
+            pipeline_log,
+            started_at,
+            _plog,
+            _emit,
+            _update_stage,
         )
     except Exception as exc:
         if storage and scan_db_id:
@@ -174,9 +213,20 @@ async def run_maintenance_scan(
 
 
 async def _run_maintenance_pipeline(
-    repo, platform, adapter, config, months, file_limit,
-    scan_id, storage, scan_db_id, pipeline_log, started_at,
-    _plog, _emit, _update_stage,
+    repo,
+    platform,
+    adapter,
+    config,
+    months,
+    file_limit,
+    scan_id,
+    storage,
+    scan_db_id,
+    pipeline_log,
+    started_at,
+    _plog,
+    _emit,
+    _update_stage,
 ) -> ScanResult:
     # Stage 1: Discovery — list repo files and identify stale ones
     await _update_stage("scan_discovery", "Listing repository files and checking staleness")
@@ -206,8 +256,10 @@ async def _run_maintenance_pipeline(
     # Collect security patterns for importance scoring
     sec_config = config.security_surface
     security_patterns = (
-        sec_config.security_critical + sec_config.input_handling +
-        sec_config.data_access + sec_config.configuration
+        sec_config.security_critical
+        + sec_config.input_handling
+        + sec_config.data_access
+        + sec_config.configuration
     )
 
     stale_files: list[dict] = []
@@ -220,31 +272,41 @@ async def _run_maintenance_pipeline(
                 if not path_commits:
                     return  # No history available
 
-                last_commit_date = path_commits[0].get("commit", {}).get("committer", {}).get("date", "")
+                last_commit_date = (
+                    path_commits[0].get("commit", {}).get("committer", {}).get("date", "")
+                )
                 if last_commit_date and last_commit_date < cutoff_iso:
                     importance = _importance_score(path, security_patterns)
-                    stale_files.append({
-                        "path": path,
-                        "last_modified": last_commit_date,
-                        "staleness_score": importance,
-                    })
+                    stale_files.append(
+                        {
+                            "path": path,
+                            "last_modified": last_commit_date,
+                            "staleness_score": importance,
+                        }
+                    )
             except Exception as e:
                 log.debug("staleness_check_failed", path=path, error=str(e))
 
     # Check staleness in batches
     batch_size = 20
     for i in range(0, len(candidates), batch_size):
-        batch = candidates[i:i + batch_size]
+        batch = candidates[i : i + batch_size]
         await asyncio.gather(*[_check_staleness(p) for p in batch])
-        _plog("info", "discovery",
-               f"Checked staleness: {min(i + batch_size, len(candidates))}/{len(candidates)} files.")
+        _plog(
+            "info",
+            "discovery",
+            f"Checked staleness: {min(i + batch_size, len(candidates))}/{len(candidates)} files.",
+        )
 
     # Sort by importance (staleness_score) descending and limit
     stale_files.sort(key=lambda x: x["staleness_score"], reverse=True)
     stale_files = stale_files[:file_limit]
 
-    _plog("info", "discovery",
-           f"Found {len(stale_files)} stale files (>{months} months since last change).")
+    _plog(
+        "info",
+        "discovery",
+        f"Found {len(stale_files)} stale files (>{months} months since last change).",
+    )
 
     if not stale_files:
         result = ScanResult(
@@ -345,21 +407,24 @@ async def _run_maintenance_pipeline(
         total_findings -= suppressed_count
 
     validated_results, validator_meta = await validate_scan_findings(
-        agent_results_list, context, config,
+        agent_results_list,
+        context,
+        config,
     )
     if validator_meta.get("validator_ran"):
         dismissed = validator_meta.get("dismissed", 0)
         downgraded = validator_meta.get("downgraded", 0)
         total_findings -= dismissed
-        _plog("info", "analysis",
-               f"Validator: {dismissed} dismissed, {downgraded} downgraded.")
+        _plog("info", "analysis", f"Validator: {dismissed} dismissed, {downgraded} downgraded.")
         v_in = validator_meta.get("input_tokens", 0)
         v_out = validator_meta.get("output_tokens", 0)
         total_input_tokens += v_in
         total_output_tokens += v_out
         if v_in or v_out:
             total_cost += _estimate_cost(
-                config.validator.model_override or "", v_in, v_out,
+                config.validator.model_override or "",
+                v_in,
+                v_out,
             )
         agent_results_list = validated_results
 
@@ -369,9 +434,12 @@ async def _run_maintenance_pipeline(
     summaries = [ar.summary for ar in agent_results_list if ar.summary]
     overall_summary = " | ".join(summaries) if summaries else "Maintenance scan complete."
 
-    _plog("info", "report",
-           f"Scan complete: {total_findings} findings across {len(stale_files)} stale files, "
-           f"${total_cost:.4f} estimated cost.")
+    _plog(
+        "info",
+        "report",
+        f"Scan complete: {total_findings} findings across {len(stale_files)} stale files, "
+        f"${total_cost:.4f} estimated cost.",
+    )
 
     result = ScanResult(
         scan_id=scan_id,

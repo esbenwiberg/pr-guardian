@@ -1,9 +1,10 @@
 """Tests for POST /api/dashboard/reviews/{id}/verify endpoint."""
+
 from __future__ import annotations
 
 import hashlib
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     from pr_guardian.main import app
+
     return TestClient(app)
 
 
@@ -32,6 +34,7 @@ def fake_review(review_id):
 
 def _patch_storage(monkeypatch, fake_review):
     from pr_guardian.api import dashboard as dash
+
     monkeypatch.setattr(dash.storage, "get_review", AsyncMock(return_value=fake_review))
     monkeypatch.setattr(dash.storage, "verify_sticky_trigger", AsyncMock(return_value=None))
     return dash.storage
@@ -41,11 +44,16 @@ def _patch_storage(monkeypatch, fake_review):
 # Contract tests
 # ---------------------------------------------------------------------------
 
+
 def test_valid_payload_returns_200_and_record(client, review_id, fake_review, monkeypatch):
     storage = _patch_storage(monkeypatch, fake_review)
     resp = client.post(
         f"/api/dashboard/reviews/{review_id}/verify",
-        json={"trigger_kind": "new_dep", "trigger_source": "requests==2.32.3", "user": "alice@example.com"},
+        json={
+            "trigger_kind": "new_dep",
+            "trigger_source": "requests==2.32.3",
+            "user": "alice@example.com",
+        },
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -71,6 +79,7 @@ def test_unknown_trigger_kind_returns_400(client, review_id, fake_review, monkey
 
 def test_unknown_review_id_returns_404(client, monkeypatch):
     from pr_guardian.api import dashboard as dash
+
     monkeypatch.setattr(dash.storage, "get_review", AsyncMock(return_value=None))
     resp = client.post(
         f"/api/dashboard/reviews/{uuid.uuid4()}/verify",

@@ -6,6 +6,7 @@ These tests verify the core invariants of the trust tier system:
 - The decision engine respects trust tier governance
 - Labels and comments reflect trust tier state
 """
+
 from pathlib import Path
 
 from pr_guardian.config.schema import (
@@ -46,12 +47,19 @@ from pr_guardian.triage.trust_escalation import maybe_escalate_trust
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_context(**overrides) -> ReviewContext:
     defaults = dict(
         pr=PlatformPR(
-            platform=Platform.GITHUB, pr_id="1", repo="test/repo",
-            repo_url="", source_branch="feature", target_branch="develop",
-            author="dev", title="Test PR", head_commit_sha="abc",
+            platform=Platform.GITHUB,
+            pr_id="1",
+            repo="test/repo",
+            repo_url="",
+            source_branch="feature",
+            target_branch="develop",
+            author="dev",
+            title="Test PR",
+            head_commit_sha="abc",
         ),
         repo_path=Path("/tmp"),
         diff=Diff(),
@@ -79,8 +87,11 @@ def _make_finding(**overrides) -> Finding:
         line=10,
         description="test finding",
         evidence_basis=EvidenceBasis(
-            saw_full_context=True, pattern_match=True,
-            cwe_id="CWE-89", suggestion_is_concrete=True, cross_references=1,
+            saw_full_context=True,
+            pattern_match=True,
+            cwe_id="CWE-89",
+            suggestion_is_concrete=True,
+            cross_references=1,
         ),
     )
     defaults.update(overrides)
@@ -102,21 +113,30 @@ def _make_trust_result(**overrides) -> TrustTierResult:
 # max_trust_tier utility
 # ---------------------------------------------------------------------------
 
+
 class TestMaxTrustTier:
     def test_returns_higher_governance_tier(self):
-        assert max_trust_tier(TrustTier.AI_ONLY, TrustTier.HUMAN_PRIMARY) == TrustTier.HUMAN_PRIMARY
-        assert max_trust_tier(TrustTier.HUMAN_PRIMARY, TrustTier.AI_ONLY) == TrustTier.HUMAN_PRIMARY
+        assert (
+            max_trust_tier(TrustTier.AI_ONLY, TrustTier.HUMAN_PRIMARY) == TrustTier.HUMAN_PRIMARY
+        )
+        assert (
+            max_trust_tier(TrustTier.HUMAN_PRIMARY, TrustTier.AI_ONLY) == TrustTier.HUMAN_PRIMARY
+        )
 
     def test_same_tier_returns_itself(self):
         assert max_trust_tier(TrustTier.SPOT_CHECK, TrustTier.SPOT_CHECK) == TrustTier.SPOT_CHECK
 
     def test_adjacent_tiers(self):
-        assert max_trust_tier(TrustTier.SPOT_CHECK, TrustTier.MANDATORY_HUMAN) == TrustTier.MANDATORY_HUMAN
+        assert (
+            max_trust_tier(TrustTier.SPOT_CHECK, TrustTier.MANDATORY_HUMAN)
+            == TrustTier.MANDATORY_HUMAN
+        )
 
 
 # ---------------------------------------------------------------------------
 # Trust Tier Classification
 # ---------------------------------------------------------------------------
+
 
 class TestTrustClassifierBuiltinDefaults:
     """Layer 1: Built-in defaults (no config)."""
@@ -177,23 +197,30 @@ class TestTrustClassifierExplicitRules:
     def test_explicit_rules_override_builtins(self):
         """A team marks their API dir as mandatory_human (overriding the
         built-in default of spot_check for controllers)."""
-        config = GuardianConfig(trust_tiers=TrustTierConfig(
-            rules=[
-                TrustTierRule(tier="mandatory_human", patterns=["**/api/**"],
-                              reason="All API changes need review"),
-            ],
-        ))
+        config = GuardianConfig(
+            trust_tiers=TrustTierConfig(
+                rules=[
+                    TrustTierRule(
+                        tier="mandatory_human",
+                        patterns=["**/api/**"],
+                        reason="All API changes need review",
+                    ),
+                ],
+            )
+        )
         result = classify_trust_tier(["src/api/users.py"], config)
         assert result.resolved_tier == TrustTier.MANDATORY_HUMAN
 
     def test_explicit_rules_dont_use_builtins(self):
         """When explicit rules are defined, built-in rules are NOT used.
         Files that don't match any explicit rule get the default tier."""
-        config = GuardianConfig(trust_tiers=TrustTierConfig(
-            rules=[
-                TrustTierRule(tier="human_primary", patterns=["**/auth/**"]),
-            ],
-        ))
+        config = GuardianConfig(
+            trust_tiers=TrustTierConfig(
+                rules=[
+                    TrustTierRule(tier="human_primary", patterns=["**/auth/**"]),
+                ],
+            )
+        )
         # README.md would be ai_only under builtins, but with explicit rules
         # and no matching rule, it gets the default (spot_check)
         result = classify_trust_tier(["README.md"], config)
@@ -260,6 +287,7 @@ class TestTrustClassifierReviewerGroup:
 # Trust Tier Escalation
 # ---------------------------------------------------------------------------
 
+
 class TestTrustEscalation:
     def test_no_escalation_when_no_triggers(self):
         """Clean agent results shouldn't escalate."""
@@ -281,11 +309,13 @@ class TestTrustEscalation:
         agent = AgentResult(
             agent_name="security_privacy",
             verdict=Verdict.WARN,
-            findings=[_make_finding(
-                category="auth_bypass",
-                severity=Severity.MEDIUM,
-                file="src/utils/helpers.py",
-            )],
+            findings=[
+                _make_finding(
+                    category="auth_bypass",
+                    severity=Severity.MEDIUM,
+                    file="src/utils/helpers.py",
+                )
+            ],
         )
         result = maybe_escalate_trust(trust, [agent], TrustTierConfig())
         assert result.resolved_tier == TrustTier.MANDATORY_HUMAN
@@ -301,11 +331,13 @@ class TestTrustEscalation:
         agent = AgentResult(
             agent_name="security_privacy",
             verdict=Verdict.WARN,
-            findings=[_make_finding(
-                category="auth_check",
-                severity=Severity.LOW,
-                file="src/utils.py",
-            )],
+            findings=[
+                _make_finding(
+                    category="auth_check",
+                    severity=Severity.LOW,
+                    file="src/utils.py",
+                )
+            ],
         )
         result = maybe_escalate_trust(trust, [agent], TrustTierConfig())
         assert result.resolved_tier == TrustTier.AI_ONLY
@@ -328,12 +360,14 @@ class TestTrustEscalation:
         agent = AgentResult(
             agent_name="code_quality",
             verdict=Verdict.WARN,
-            findings=[_make_finding(
-                category="data_corruption",  # not a security keyword
-                severity=Severity.CRITICAL,
-                certainty=Certainty.DETECTED,
-                file="src/app.py",
-            )],
+            findings=[
+                _make_finding(
+                    category="data_corruption",  # not a security keyword
+                    severity=Severity.CRITICAL,
+                    certainty=Certainty.DETECTED,
+                    file="src/app.py",
+                )
+            ],
         )
         result = maybe_escalate_trust(trust, [agent], TrustTierConfig())
         assert result.resolved_tier == TrustTier.MANDATORY_HUMAN
@@ -359,11 +393,13 @@ class TestTrustEscalation:
         agent = AgentResult(
             agent_name="security_privacy",
             verdict=Verdict.WARN,
-            findings=[_make_finding(
-                category="credential_exposure",
-                severity=Severity.HIGH,
-                file="src/services/billing.py",
-            )],
+            findings=[
+                _make_finding(
+                    category="credential_exposure",
+                    severity=Severity.HIGH,
+                    file="src/services/billing.py",
+                )
+            ],
         )
         result = maybe_escalate_trust(trust, [agent], TrustTierConfig())
         # Still MANDATORY_HUMAN (not escalated further since no HUMAN_PRIMARY trigger)
@@ -379,11 +415,13 @@ class TestTrustEscalation:
         agent = AgentResult(
             agent_name="performance",
             verdict=Verdict.WARN,
-            findings=[_make_finding(
-                category="n_plus_one_query",
-                severity=Severity.MEDIUM,
-                file="src/utils.py",
-            )],
+            findings=[
+                _make_finding(
+                    category="n_plus_one_query",
+                    severity=Severity.MEDIUM,
+                    file="src/utils.py",
+                )
+            ],
         )
         result = maybe_escalate_trust(trust, [agent], TrustTierConfig())
         assert result.resolved_tier == TrustTier.AI_ONLY
@@ -407,6 +445,7 @@ class TestTrustEscalation:
 # ---------------------------------------------------------------------------
 # Decision Engine with Trust Tier
 # ---------------------------------------------------------------------------
+
 
 class TestDecisionWithTrustTier:
     def test_mandatory_human_forces_human_review(self):
@@ -482,12 +521,16 @@ class TestDecisionWithTrustTier:
 # Labels
 # ---------------------------------------------------------------------------
 
+
 class TestLabelsWithTrustTier:
     def test_spot_check_auto_approve_label(self):
         """SPOT_CHECK + AUTO_APPROVE → guardian-spot-check label."""
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.LOW,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.LOW,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.AUTO_APPROVE,
             trust_tier=TrustTier.SPOT_CHECK,
@@ -499,8 +542,11 @@ class TestLabelsWithTrustTier:
     def test_human_primary_label(self):
         """HUMAN_PRIMARY + HUMAN_REVIEW → needs-security-review label."""
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.HIGH,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.HIGH,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.HUMAN_REVIEW,
             trust_tier=TrustTier.HUMAN_PRIMARY,
@@ -512,8 +558,11 @@ class TestLabelsWithTrustTier:
     def test_mandatory_human_label(self):
         """MANDATORY_HUMAN + HUMAN_REVIEW → needs-human-review label."""
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.MEDIUM,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.MEDIUM,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.HUMAN_REVIEW,
             trust_tier=TrustTier.MANDATORY_HUMAN,
@@ -524,8 +573,11 @@ class TestLabelsWithTrustTier:
     def test_ai_only_auto_approve_label(self):
         """AI_ONLY + AUTO_APPROVE → guardian-approved (standard label)."""
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.LOW,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.LOW,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.AUTO_APPROVE,
             trust_tier=TrustTier.AI_ONLY,
@@ -536,8 +588,11 @@ class TestLabelsWithTrustTier:
     def test_hard_block_label_unchanged(self):
         """Trust tier shouldn't affect HARD_BLOCK label."""
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.HIGH,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.HIGH,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.HARD_BLOCK,
             trust_tier=TrustTier.MANDATORY_HUMAN,
@@ -550,11 +605,15 @@ class TestLabelsWithTrustTier:
 # Comment rendering
 # ---------------------------------------------------------------------------
 
+
 class TestCommentWithTrustTier:
     def test_comment_includes_trust_tier_line(self):
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.MEDIUM,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.MEDIUM,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.HUMAN_REVIEW,
             trust_tier=TrustTier.MANDATORY_HUMAN,
@@ -565,8 +624,11 @@ class TestCommentWithTrustTier:
 
     def test_comment_includes_trust_tier_when_escalated(self):
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.LOW,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.LOW,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.HUMAN_REVIEW,
             trust_tier=TrustTier.MANDATORY_HUMAN,
@@ -578,8 +640,11 @@ class TestCommentWithTrustTier:
 
     def test_comment_without_trust_tier_unchanged(self):
         from pr_guardian.models.output import ReviewResult
+
         result = ReviewResult(
-            pr_id="1", repo="test", risk_tier=RiskTier.LOW,
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.LOW,
             repo_risk_class=RepoRiskClass.STANDARD,
             decision=Decision.AUTO_APPROVE,
         )

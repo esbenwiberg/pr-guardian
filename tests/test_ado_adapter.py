@@ -1,4 +1,5 @@
 """Unit tests for ADOAdapter.fetch_pr_body_and_commits."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -60,11 +61,15 @@ def _adapter(*responses: MagicMock) -> ADOAdapter:
 @pytest.mark.asyncio
 async def test_both_succeed():
     pr_json = {"description": "ADO PR description"}
-    commits_json = {"value": [
-        {"comment": "feat: add feature\n\nBody text"},
-        {"comment": "fix: tweak"},
-    ]}
-    body, commits = await _adapter(_resp(pr_json), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    commits_json = {
+        "value": [
+            {"comment": "feat: add feature\n\nBody text"},
+            {"comment": "fix: tweak"},
+        ]
+    }
+    body, commits = await _adapter(_resp(pr_json), _resp(commits_json)).fetch_pr_body_and_commits(
+        _pr()
+    )
     assert body == "ADO PR description"
     assert commits == ["feat: add feature", "fix: tweak"]
 
@@ -81,24 +86,32 @@ async def test_uses_description_not_body_field():
 async def test_uses_comment_field_for_commits():
     """ADO commit objects have a top-level 'comment' key, not nested 'commit.message'."""
     commits_json = {"value": [{"comment": "ado style commit message"}]}
-    _, commits = await _adapter(_resp({"description": "x"}), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    _, commits = await _adapter(
+        _resp({"description": "x"}), _resp(commits_json)
+    ).fetch_pr_body_and_commits(_pr())
     assert commits == ["ado style commit message"]
 
 
 @pytest.mark.asyncio
 async def test_multiline_commit_only_first_line():
     commits_json = {"value": [{"comment": "feat: headline\n\nSome detail"}]}
-    _, commits = await _adapter(_resp({"description": ""}), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    _, commits = await _adapter(
+        _resp({"description": ""}), _resp(commits_json)
+    ).fetch_pr_body_and_commits(_pr())
     assert commits == ["feat: headline"]
 
 
 @pytest.mark.asyncio
 async def test_commit_without_comment_field_is_skipped():
-    commits_json = {"value": [
-        {"commitId": "abc"},  # no comment key
-        {"comment": "valid commit"},
-    ]}
-    _, commits = await _adapter(_resp({"description": "x"}), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    commits_json = {
+        "value": [
+            {"commitId": "abc"},  # no comment key
+            {"comment": "valid commit"},
+        ]
+    }
+    _, commits = await _adapter(
+        _resp({"description": "x"}), _resp(commits_json)
+    ).fetch_pr_body_and_commits(_pr())
     assert commits == ["valid commit"]
 
 
@@ -117,14 +130,18 @@ async def test_null_description_returned_as_empty():
 @pytest.mark.asyncio
 async def test_pr_body_non200_commits_still_returned():
     commits_json = {"value": [{"comment": "fix: something"}]}
-    body, commits = await _adapter(_resp({}, 404), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    body, commits = await _adapter(_resp({}, 404), _resp(commits_json)).fetch_pr_body_and_commits(
+        _pr()
+    )
     assert body == ""
     assert commits == ["fix: something"]
 
 
 @pytest.mark.asyncio
 async def test_commits_non200_body_still_returned():
-    body, commits = await _adapter(_resp({"description": "desc"}), _resp({}, 500)).fetch_pr_body_and_commits(_pr())
+    body, commits = await _adapter(
+        _resp({"description": "desc"}), _resp({}, 500)
+    ).fetch_pr_body_and_commits(_pr())
     assert body == "desc"
     assert commits == []
 

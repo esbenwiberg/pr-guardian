@@ -4,11 +4,11 @@ Runs a separate LLM call that sees all findings + the diff and decides for each
 finding whether to keep, dismiss, or downgrade. This implements the
 generator-critic pattern to reduce false positives.
 """
+
 from __future__ import annotations
 
 import json
 import re
-from copy import deepcopy
 from dataclasses import replace
 from pathlib import Path
 
@@ -181,9 +181,7 @@ def _apply_validations(
 
     for target_idx, source_indices in merge_groups.items():
         target_agent, target_local, target_finding = flat[target_idx]
-        sources = [
-            (flat[si][0], flat[si][2]) for si in source_indices
-        ]
+        sources = [(flat[si][0], flat[si][2]) for si in source_indices]
 
         merged_finding = merge_findings(
             keeper_agent=target_agent,
@@ -228,9 +226,7 @@ def _apply_validations(
             # Downgrade verdict if all findings dismissed and verdict wasn't FLAG_HUMAN
             verdict=(
                 Verdict.PASS
-                if not new_findings
-                and result.findings
-                and result.verdict != Verdict.FLAG_HUMAN
+                if not new_findings and result.findings and result.verdict != Verdict.FLAG_HUMAN
                 else result.verdict
             ),
         )
@@ -298,7 +294,10 @@ async def validate_findings(
         validations = data.get("validations", [])
 
         new_results, dismissed, downgraded, merged = _apply_validations(
-            agent_results, flat, validations, agent_weights,
+            agent_results,
+            flat,
+            validations,
+            agent_weights,
         )
 
         meta.update(

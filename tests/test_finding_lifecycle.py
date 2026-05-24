@@ -1,4 +1,5 @@
 """Round-trip tests for finding lifecycle storage helpers."""
+
 from __future__ import annotations
 
 import hashlib
@@ -31,6 +32,7 @@ def _session_cm(session):
     @asynccontextmanager
     async def _factory():
         yield session
+
     return _factory
 
 
@@ -315,7 +317,9 @@ async def test_verify_sticky_trigger_is_idempotent():
     raw = "pr-1::new_dep::requests==2.32.3"
     sig = hashlib.sha256(raw.encode()).hexdigest()[:16]
 
-    row = _make_row(signature=sig, resolution_kind=FindingState.VERIFIED, verified_by="alice@example.com")
+    row = _make_row(
+        signature=sig, resolution_kind=FindingState.VERIFIED, verified_by="alice@example.com"
+    )
     session = _mock_session_for_rows(first=row)
 
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):

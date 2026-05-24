@@ -1,4 +1,5 @@
 """Tests for fix-inference: fix detection, regression detection, no-DB graceful path."""
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ def _session_cm(session):
     @asynccontextmanager
     async def _factory():
         yield session
+
     return _factory
 
 
@@ -84,8 +86,10 @@ async def test_run3_detects_regression_with_regressed_from_sha():
     async def _capture(pr_id, sig, sha, prev_sha):
         captured.append((sig, prev_sha))
 
-    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)), \
-         patch("pr_guardian.persistence.storage.mark_regressed", _capture):
+    with (
+        patch("pr_guardian.persistence.storage.async_session", _session_cm(session)),
+        patch("pr_guardian.persistence.storage.mark_regressed", _capture),
+    ):
         fixed, regressed = await infer_fixes("pr-1", {"a"}, {"a", "b", "c"}, "sha-run3")
 
     assert regressed == {"b", "c"}

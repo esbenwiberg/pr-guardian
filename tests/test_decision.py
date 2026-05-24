@@ -52,9 +52,15 @@ def _make_finding(**overrides) -> Finding:
 def _make_context(**overrides) -> ReviewContext:
     defaults = dict(
         pr=PlatformPR(
-            platform=Platform.GITHUB, pr_id="1", repo="test/repo",
-            repo_url="", source_branch="feature", target_branch="develop",
-            author="test", title="Test", head_commit_sha="abc",
+            platform=Platform.GITHUB,
+            pr_id="1",
+            repo="test/repo",
+            repo_url="",
+            source_branch="feature",
+            target_branch="develop",
+            author="test",
+            title="Test",
+            head_commit_sha="abc",
         ),
         repo_path=Path("/tmp"),
         diff=Diff(),
@@ -180,7 +186,9 @@ class TestDecisionMatrix:
         assert result.decision in (Decision.HUMAN_REVIEW, Decision.REJECT)
 
     def test_verdict_explanation_preserved_on_flag_human(self):
-        explanation = "SQL injection risk in user input handling. Focus on parameterized query usage."
+        explanation = (
+            "SQL injection risk in user input handling. Focus on parameterized query usage."
+        )
         agent = AgentResult(
             agent_name="security_privacy",
             verdict=Verdict.FLAG_HUMAN,
@@ -199,9 +207,15 @@ class TestDecisionMatrix:
     def test_blocked_branch_overrides_auto_approve(self):
         ctx = _make_context(
             pr=PlatformPR(
-                platform=Platform.GITHUB, pr_id="1", repo="test",
-                repo_url="", source_branch="feature", target_branch="release/1.0",
-                author="test", title="Test", head_commit_sha="abc",
+                platform=Platform.GITHUB,
+                pr_id="1",
+                repo="test",
+                repo_url="",
+                source_branch="feature",
+                target_branch="release/1.0",
+                author="test",
+                title="Test",
+                head_commit_sha="abc",
             ),
         )
         result = decide(ctx, [], RiskTier.TRIVIAL, GuardianConfig())

@@ -1,4 +1,5 @@
 """Security hygiene agent: checks stale files for outdated security patterns."""
+
 from __future__ import annotations
 
 from pr_guardian.agents.scan.base import ScanBaseAgent

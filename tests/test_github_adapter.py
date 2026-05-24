@@ -1,4 +1,5 @@
 """Unit tests for GitHubAdapter.fetch_pr_body_and_commits."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -62,7 +63,9 @@ async def test_both_succeed():
         {"commit": {"message": "feat: add feature\n\nDetails here"}},
         {"commit": {"message": "fix: small tweak"}},
     ]
-    body, commits = await _adapter(_resp(pr_json), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    body, commits = await _adapter(_resp(pr_json), _resp(commits_json)).fetch_pr_body_and_commits(
+        _pr()
+    )
     assert body == "My PR description"
     assert commits == ["feat: add feature", "fix: small tweak"]
 
@@ -70,7 +73,9 @@ async def test_both_succeed():
 @pytest.mark.asyncio
 async def test_multiline_commit_only_first_line():
     commits_json = [{"commit": {"message": "feat: headline\n\nExpanded description here."}}]
-    _, commits = await _adapter(_resp({"body": ""}), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    _, commits = await _adapter(
+        _resp({"body": ""}), _resp(commits_json)
+    ).fetch_pr_body_and_commits(_pr())
     assert commits == ["feat: headline"]
 
 
@@ -88,7 +93,9 @@ async def test_commit_without_message_is_skipped():
         {"commit": {}},
         {"commit": {"message": "valid commit"}},
     ]
-    _, commits = await _adapter(_resp({"body": "x"}), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    _, commits = await _adapter(
+        _resp({"body": "x"}), _resp(commits_json)
+    ).fetch_pr_body_and_commits(_pr())
     assert commits == ["valid commit"]
 
 
@@ -100,14 +107,18 @@ async def test_commit_without_message_is_skipped():
 @pytest.mark.asyncio
 async def test_pr_body_non200_commits_still_returned():
     commits_json = [{"commit": {"message": "fix: something"}}]
-    body, commits = await _adapter(_resp({}, 404), _resp(commits_json)).fetch_pr_body_and_commits(_pr())
+    body, commits = await _adapter(_resp({}, 404), _resp(commits_json)).fetch_pr_body_and_commits(
+        _pr()
+    )
     assert body == ""
     assert commits == ["fix: something"]
 
 
 @pytest.mark.asyncio
 async def test_commits_non200_body_still_returned():
-    body, commits = await _adapter(_resp({"body": "Some description"}), _resp([], 500)).fetch_pr_body_and_commits(_pr())
+    body, commits = await _adapter(
+        _resp({"body": "Some description"}), _resp([], 500)
+    ).fetch_pr_body_and_commits(_pr())
     assert body == "Some description"
     assert commits == []
 

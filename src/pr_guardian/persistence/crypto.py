@@ -7,6 +7,7 @@ If GUARDIAN_SECRET_KEY is not set, a deterministic fallback key is used
 and a warning is logged.  This keeps the dev experience friction-free
 while making production deployments secure (just set the env var).
 """
+
 from __future__ import annotations
 
 import base64
@@ -21,10 +22,12 @@ _SALT = b"pr-guardian-config-encryption-v1"
 _ITERATIONS = 480_000
 
 # Keys in global_config whose values must be encrypted at rest.
-SECRET_KEYS = frozenset({
-    "llm.anthropic.api_key",
-    "llm.azure_ai_foundry.api_key",
-})
+SECRET_KEYS = frozenset(
+    {
+        "llm.anthropic.api_key",
+        "llm.azure_ai_foundry.api_key",
+    }
+)
 
 _fernet = None
 
@@ -41,7 +44,7 @@ def _get_fernet():
         log.warning(
             "guardian_secret_key_missing",
             hint="Set GUARDIAN_SECRET_KEY for encrypted secret storage. "
-                 "Using insecure fallback — DO NOT use in production.",
+            "Using insecure fallback — DO NOT use in production.",
         )
         secret = "pr-guardian-dev-fallback-not-for-production"
 

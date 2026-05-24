@@ -1,4 +1,5 @@
 """Dashboard API: stats, review list, review detail, active reviews, and SSE stream."""
+
 from __future__ import annotations
 
 import asyncio
@@ -49,7 +50,12 @@ async def dashboard_stats():
         return {
             "total_reviews": 0,
             "active_reviews": 0,
-            "decision_counts": {"auto_approve": 0, "human_review": 0, "reject": 0, "hard_block": 0},
+            "decision_counts": {
+                "auto_approve": 0,
+                "human_review": 0,
+                "reject": 0,
+                "hard_block": 0,
+            },
             "risk_tier_counts": {},
             "severity_counts": {},
             "avg_score": 0,
@@ -71,7 +77,9 @@ async def dashboard_reviews(
 ):
     """Paginated list of reviews with optional filters."""
     try:
-        return await storage.list_reviews(limit=limit, offset=offset, repo=repo, decision=decision, author=author)
+        return await storage.list_reviews(
+            limit=limit, offset=offset, repo=repo, decision=decision, author=author
+        )
     except Exception:
         return []
 
@@ -103,7 +111,9 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     # Enrich findings with dismissal info
     try:
         dismissals = await storage.get_active_dismissals(
-            row["pr_id"], row["repo"], row["platform"],
+            row["pr_id"],
+            row["repo"],
+            row["platform"],
         )
         sig_map = {d["signature"]: d for d in dismissals}
 
@@ -111,7 +121,9 @@ async def dashboard_review_detail(review_id: uuid.UUID):
         for agent in row.get("agent_results", []):
             for f in agent.get("findings", []):
                 sig = finding_signature(
-                    f.get("file", ""), f.get("category", ""), agent["agent_name"],
+                    f.get("file", ""),
+                    f.get("category", ""),
+                    agent["agent_name"],
                 )
                 match = sig_map.get(sig)
                 f["dismissal"] = match
@@ -138,7 +150,9 @@ async def dashboard_review_detail(review_id: uuid.UUID):
 
         # Also include archived (resolved) dismissals from prior reviews
         archived = await storage.get_archived_dismissals(
-            row["pr_id"], row["repo"], row["platform"],
+            row["pr_id"],
+            row["repo"],
+            row["platform"],
         )
         row["prior_dismissals"] = unmatched_active + archived
     except Exception:
@@ -163,14 +177,38 @@ def _parse_patch_lines(patch: str) -> list[dict]:
         if raw.startswith("\\"):
             continue
         if raw.startswith("+"):
-            result.append({"new_ln": new_ln, "old_ln": None, "marker": "+", "content": raw[1:], "type": "add"})
+            result.append(
+                {
+                    "new_ln": new_ln,
+                    "old_ln": None,
+                    "marker": "+",
+                    "content": raw[1:],
+                    "type": "add",
+                }
+            )
             new_ln += 1
         elif raw.startswith("-"):
-            result.append({"new_ln": new_ln, "old_ln": old_ln, "marker": "-", "content": raw[1:], "type": "del"})
+            result.append(
+                {
+                    "new_ln": new_ln,
+                    "old_ln": old_ln,
+                    "marker": "-",
+                    "content": raw[1:],
+                    "type": "del",
+                }
+            )
             old_ln += 1
         else:
             content = raw[1:] if raw else ""
-            result.append({"new_ln": new_ln, "old_ln": old_ln, "marker": " ", "content": content, "type": "ctx"})
+            result.append(
+                {
+                    "new_ln": new_ln,
+                    "old_ln": old_ln,
+                    "marker": " ",
+                    "content": content,
+                    "type": "ctx",
+                }
+            )
             new_ln += 1
             old_ln += 1
     return result
@@ -183,12 +221,14 @@ def _extract_hunk(patch: str, target_line: int, context: int) -> list[dict]:
     for ln in _parse_patch_lines(patch):
         pos = ln["new_ln"]  # del lines carry the new_ln they belong to (next add/ctx)
         if lo <= pos <= hi:
-            out.append({
-                "ln": ln["old_ln"] if ln["type"] == "del" else ln["new_ln"],
-                "marker": ln["marker"],
-                "content": ln["content"],
-                "type": ln["type"],
-            })
+            out.append(
+                {
+                    "ln": ln["old_ln"] if ln["type"] == "del" else ln["new_ln"],
+                    "marker": ln["marker"],
+                    "content": ln["content"],
+                    "type": ln["type"],
+                }
+            )
     return out
 
 
@@ -213,7 +253,11 @@ async def dashboard_review_diff(
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = await create_github_adapter(row.get("pat_name")) if platform_name == "github" else create_adapter(platform_name)
+    adapter = (
+        await create_github_adapter(row.get("pat_name"))
+        if platform_name == "github"
+        else create_adapter(platform_name)
+    )
 
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
@@ -262,9 +306,12 @@ _capability_cache: dict[tuple[str, str], dict] = {}
 def _role_for_path(path: str) -> str:
     pl = path.lower()
     parts = pl.split("/")
-    if any(p in {"test", "tests", "__tests__", "spec", "specs"} for p in parts) \
-            or pl.endswith((".test.py", ".test.ts", ".test.js", ".spec.py", ".spec.ts", ".spec.js"))\
-            or "_test." in pl or "_spec." in pl:
+    if (
+        any(p in {"test", "tests", "__tests__", "spec", "specs"} for p in parts)
+        or pl.endswith((".test.py", ".test.ts", ".test.js", ".spec.py", ".spec.ts", ".spec.js"))
+        or "_test." in pl
+        or "_spec." in pl
+    ):
         return "TEST"
     if "dockerfile" in pl or ".github" in parts or "ci" in parts or "circleci" in parts:
         return "INFRA"
@@ -272,8 +319,9 @@ def _role_for_path(path: str) -> str:
         return "DOCS"
     if pl.endswith((".lock", "package-lock.json", "yarn.lock", "poetry.lock", "cargo.lock")):
         return "GENERATED"
-    if pl.endswith((".cfg", ".ini", ".yaml", ".yml", ".toml", ".conf")) \
-            and not pl.endswith(("pyproject.toml",)):
+    if pl.endswith((".cfg", ".ini", ".yaml", ".yml", ".toml", ".conf")) and not pl.endswith(
+        ("pyproject.toml",)
+    ):
         return "CONFIG"
     return "PRODUCTION"
 
@@ -306,7 +354,11 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     from pr_guardian.models.pr import Diff
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = await create_github_adapter(row.get("pat_name")) if platform_name == "github" else create_adapter(platform_name)
+    adapter = (
+        await create_github_adapter(row.get("pat_name"))
+        if platform_name == "github"
+        else create_adapter(platform_name)
+    )
 
     # Best-effort diff + context fetch — when platform credentials are
     # unavailable or the PR is gone, fall back to building a minimal file list
@@ -356,11 +408,7 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
             )
             for f in diff.files
         ]
-        file_patches = {
-            f.path: (f.patch or "")
-            for f in diff.files
-            if f.patch
-        }
+        file_patches = {f.path: (f.patch or "") for f in diff.files if f.patch}
     else:
         # Build a minimal file list from stored findings when diff is unavailable.
         # This allows the LLM to still cluster by file roles and finding patterns.
@@ -613,7 +661,10 @@ async def verify_trigger(review_id: uuid.UUID, body: VerifyTriggerRequest):
     is a no-op success.
     """
     if body.trigger_kind not in _VALID_TRIGGER_KINDS:
-        raise HTTPException(400, f"Unknown trigger_kind {body.trigger_kind!r}. Must be one of: {sorted(_VALID_TRIGGER_KINDS)}")
+        raise HTTPException(
+            400,
+            f"Unknown trigger_kind {body.trigger_kind!r}. Must be one of: {sorted(_VALID_TRIGGER_KINDS)}",
+        )
 
     row = await storage.get_review(review_id)
     if not row:
@@ -640,15 +691,17 @@ class SubmitVerdictRequest(BaseModel):
 def _summarise_decisions(review_dict: dict) -> dict[str, int]:
     """Tally the per-finding dismissal statuses on this review's PR."""
     counts = {"acknowledged": 0, "will_fix": 0, "false_positive": 0, "by_design": 0}
-    for agent in (review_dict.get("agent_results") or []):
-        for f in (agent.get("findings") or []):
+    for agent in review_dict.get("agent_results") or []:
+        for f in agent.get("findings") or []:
             d = f.get("dismissal")
             if d and d.get("status") in counts:
                 counts[d["status"]] += 1
     return counts
 
 
-def _build_verdict_body(verdict: str, reviewer_comment: str, decision_counts: dict[str, int]) -> str:
+def _build_verdict_body(
+    verdict: str, reviewer_comment: str, decision_counts: dict[str, int]
+) -> str:
     """Compose the comment body posted to the platform alongside the verdict."""
     accepted = decision_counts.get("acknowledged", 0)
     fixes = decision_counts.get("will_fix", 0)
@@ -665,9 +718,12 @@ def _build_verdict_body(verdict: str, reviewer_comment: str, decision_counts: di
         parts.append(reviewer_comment.strip())
 
     summary_bits: list[str] = []
-    if accepted: summary_bits.append(f"{accepted} accepted")
-    if fixes: summary_bits.append(f"{fixes} fix{'es' if fixes != 1 else ''} requested")
-    if dismissed: summary_bits.append(f"{dismissed} dismissed")
+    if accepted:
+        summary_bits.append(f"{accepted} accepted")
+    if fixes:
+        summary_bits.append(f"{fixes} fix{'es' if fixes != 1 else ''} requested")
+    if dismissed:
+        summary_bits.append(f"{dismissed} dismissed")
     if summary_bits:
         parts.append("---")
         parts.append("Per-concern decisions: " + " · ".join(summary_bits) + ".")
@@ -695,6 +751,7 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
     # the path — without it the URL becomes .../{org}//_apis/... and ADO 400s
     # with "A project name is required to reference a Git repository by name".
     from pr_guardian.api.review import recover_org_project_from_pr_url
+
     org_from_url, project_from_url = recover_org_project_from_pr_url(review.get("pr_url") or "")
 
     pr = PlatformPR(
@@ -718,7 +775,9 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
             "cannot construct the reviewer-vote URL.",
         )
 
-    adapter = await create_github_adapter() if platform_str == "github" else create_adapter(platform_str)
+    adapter = (
+        await create_github_adapter() if platform_str == "github" else create_adapter(platform_str)
+    )
     decision_counts = _summarise_decisions(review)
     comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts)
 
@@ -756,16 +815,19 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
 
     # Always record the attempt on the review (even on platform failure) so the
     # audit trail captures intent.
-    await storage.append_review_log_entry(review_id, {
-        "kind": "human_verdict",
-        "verdict": body.verdict,
-        "reviewer_comment": body.comment,
-        "decision_counts": decision_counts,
-        "platform_actions": actions,
-        "posted": posted,
-        "error": error,
-        "at": datetime.now(timezone.utc).isoformat(),
-    })
+    await storage.append_review_log_entry(
+        review_id,
+        {
+            "kind": "human_verdict",
+            "verdict": body.verdict,
+            "reviewer_comment": body.comment,
+            "decision_counts": decision_counts,
+            "platform_actions": actions,
+            "posted": posted,
+            "error": error,
+            "at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
 
     if not posted:
         raise HTTPException(502, f"Failed to post verdict to platform: {error}")
@@ -797,7 +859,11 @@ async def re_review(review_id: uuid.UUID, request: Request):
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
 
     stub, platform_name = _parse_pr_url(review["pr_url"])
-    adapter = await create_github_adapter(review.get("pat_name")) if platform_name == "github" else create_adapter(platform_name)
+    adapter = (
+        await create_github_adapter(review.get("pat_name"))
+        if platform_name == "github"
+        else create_adapter(platform_name)
+    )
 
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
@@ -808,15 +874,20 @@ async def re_review(review_id: uuid.UUID, request: Request):
 
     async def _run_bg():
         import traceback
+
         try:
             from pr_guardian.core.orchestrator import run_re_review
             from pr_guardian.persistence.storage import (
                 finding_signature as _fsig,
                 infer_fixes,
             )
+
             result = await run_re_review(
-                pr, adapter, original_review=review,
-                post_comment=True, base_url=base_url,
+                pr,
+                adapter,
+                original_review=review,
+                post_comment=True,
+                base_url=base_url,
             )
             if result is None:
                 return
@@ -832,15 +903,14 @@ async def re_review(review_id: uuid.UUID, request: Request):
             }
             await infer_fixes(pr.pr_id, prev_sigs, current_sigs, pr.head_commit_sha)
         except Exception as e:
-            log.error("re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc())
+            log.error(
+                "re_review_failed", pr_id=pr.pr_id, error=str(e), traceback=traceback.format_exc()
+            )
 
     asyncio.create_task(_run_bg())
 
     # Count non-dismissed findings for the response
-    active_findings = sum(
-        len(a.get("findings", []))
-        for a in review.get("agent_results", [])
-    )
+    active_findings = sum(len(a.get("findings", [])) for a in review.get("agent_results", []))
     return {
         "status": "queued",
         "pr_id": review["pr_id"],
@@ -856,6 +926,7 @@ async def _find_review_for_finding(finding_id: uuid.UUID) -> dict | None:
 
     async with get_session() as session:
         from sqlalchemy import select as sel
+
         q = sel(FindingRow).where(FindingRow.id == finding_id)
         f_row = (await session.scalars(q)).first()
         if not f_row:
@@ -890,7 +961,7 @@ async def dashboard_events():
     """SSE stream of real-time review progress events."""
 
     async def generate():
-        yield "data: {\"type\": \"connected\"}\n\n"
+        yield 'data: {"type": "connected"}\n\n'
         async for event in event_bus.subscribe():
             yield event.to_sse()
 
@@ -934,7 +1005,13 @@ async def dashboard_scan_stats():
     try:
         return await storage.get_scan_stats()
     except Exception:
-        return {"total_scans": 0, "type_counts": {}, "severity_counts": {}, "total_cost_usd": 0, "avg_cost_usd": 0}
+        return {
+            "total_scans": 0,
+            "type_counts": {},
+            "severity_counts": {},
+            "total_cost_usd": 0,
+            "avg_cost_usd": 0,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -958,7 +1035,9 @@ async def list_prompts(identity: Identity = Depends(require_admin)):
 
 
 @router.put("/prompts/{agent_name}")
-async def update_prompt(agent_name: str, body: PromptUpdate, identity: Identity = Depends(require_admin)):
+async def update_prompt(
+    agent_name: str, body: PromptUpdate, identity: Identity = Depends(require_admin)
+):
     """Create or update a prompt override for an agent."""
     await storage.set_prompt_override(agent_name, body.content)
     return {"status": "saved", "agent_name": agent_name}
@@ -1013,7 +1092,9 @@ async def get_settings(identity: Identity = Depends(require_admin)):
         "default_model": default_model,
         "anthropic": {
             "api_key_masked": _mask_key(anthropic_key),
-            "api_key_source": "settings" if anthropic_db_key else ("env" if anthropic_env_key else ""),
+            "api_key_source": "settings"
+            if anthropic_db_key
+            else ("env" if anthropic_env_key else ""),
         },
         "azure_ai_foundry": {
             "endpoint_url": azure_endpoint,
@@ -1064,7 +1145,9 @@ async def update_settings(body: SettingsUpdate, identity: Identity = Depends(req
         await storage.set_global_config("llm.anthropic.api_key", body.anthropic_api_key)
 
     if body.azure_endpoint_url is not None:
-        await storage.set_global_config("llm.azure_ai_foundry.endpoint_url", body.azure_endpoint_url)
+        await storage.set_global_config(
+            "llm.azure_ai_foundry.endpoint_url", body.azure_endpoint_url
+        )
 
     if body.azure_api_key:
         await storage.set_global_config("llm.azure_ai_foundry.api_key", body.azure_api_key)

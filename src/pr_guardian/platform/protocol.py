@@ -60,31 +60,48 @@ class PlatformAdapter(Protocol):
     # --- Scan-mode methods ---
 
     async def fetch_recent_commits(
-        self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
+        self,
+        repo: str,
+        branch: str,
+        since: str,
+        until: str | None = None,
+        per_page: int = 100,
     ) -> list[dict]:
         """Fetch commits on branch since a date (ISO 8601)."""
         ...
 
     async def fetch_merged_prs(
-        self, repo: str, since: str, base: str = "main",
+        self,
+        repo: str,
+        since: str,
+        base: str = "main",
     ) -> list[dict]:
         """Fetch recently merged PRs."""
         ...
 
     async def fetch_file_content(
-        self, repo: str, path: str, ref: str = "HEAD",
+        self,
+        repo: str,
+        path: str,
+        ref: str = "HEAD",
     ) -> str:
         """Fetch file content from the repo."""
         ...
 
     async def list_repo_files(
-        self, repo: str, ref: str = "HEAD", path: str = "",
+        self,
+        repo: str,
+        ref: str = "HEAD",
+        path: str = "",
     ) -> list[str]:
         """List files in repo (recursive tree)."""
         ...
 
     async def list_recently_changed_files(
-        self, repo: str, ref: str = "HEAD", limit: int = 300,
+        self,
+        repo: str,
+        ref: str = "HEAD",
+        limit: int = 300,
     ) -> list[str]:
         """List files most recently touched on ``ref``, newest-first.
 
@@ -94,25 +111,37 @@ class PlatformAdapter(Protocol):
         ...
 
     async def fetch_pr_files(
-        self, repo: str, pr_id: int | str, project: str = "",
+        self,
+        repo: str,
+        pr_id: int | str,
+        project: str = "",
     ) -> list[dict]:
         """Fetch list of changed files for a PR (filename, additions, deletions)."""
         ...
 
     async def fetch_compare_diff(
-        self, repo: str, base_sha: str, head_sha: str, project: str = "",
+        self,
+        repo: str,
+        base_sha: str,
+        head_sha: str,
+        project: str = "",
     ) -> Diff:
         """Fetch diff between two commits. Used for incremental re-reviews."""
         ...
 
     async def fetch_commits_for_path(
-        self, repo: str, path: str, per_page: int = 1, project: str = "",
+        self,
+        repo: str,
+        path: str,
+        per_page: int = 1,
+        project: str = "",
     ) -> list[dict]:
         """Fetch recent commits that touched a specific file path."""
         ...
 
     async def fetch_pr_body_and_commits(
-        self, pr: PlatformPR,
+        self,
+        pr: PlatformPR,
     ) -> tuple[str, list[str]]:
         """Fetch the PR description body and a list of commit messages.
 

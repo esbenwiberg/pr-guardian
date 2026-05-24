@@ -16,7 +16,9 @@ def create_adapter(platform: str, *, token_override: str | None = None) -> Platf
     Use create_github_adapter() when you need async PAT resolution from the database.
     """
     if platform == "github":
-        token = token_override if token_override is not None else os.environ.get("GITHUB_TOKEN", "")
+        token = (
+            token_override if token_override is not None else os.environ.get("GITHUB_TOKEN", "")
+        )
         return GitHubAdapter(token=token)
 
     if platform == "ado":

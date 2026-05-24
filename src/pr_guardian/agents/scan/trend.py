@@ -1,4 +1,5 @@
 """Trend agent: analyzes patterns and trends in recent code changes."""
+
 from __future__ import annotations
 
 from pr_guardian.agents.scan.base import ScanBaseAgent

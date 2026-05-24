@@ -4,6 +4,7 @@ Revision ID: 013
 Revises: 012
 Create Date: 2026-05-04
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -19,9 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 def _table_exists(table: str) -> bool:
     conn = op.get_bind()
     result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.tables WHERE table_name = :table"
-        ),
+        sa.text("SELECT 1 FROM information_schema.tables WHERE table_name = :table"),
         {"table": table},
     )
     return result.scalar() is not None

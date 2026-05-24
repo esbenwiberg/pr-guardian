@@ -1,4 +1,5 @@
 """Tests for build_repo_diff selection modes + clamp_max_files."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
@@ -38,7 +39,10 @@ class TestBuildRepoDiffRecentSelection:
         adapter.list_repo_files = AsyncMock(side_effect=AssertionError("should not be called"))
 
         diff, meta = await build_repo_diff(
-            adapter, "owner/repo", selection="recent", max_files=10,
+            adapter,
+            "owner/repo",
+            selection="recent",
+            max_files=10,
         )
 
         adapter.list_recently_changed_files.assert_awaited_once()
@@ -59,7 +63,10 @@ class TestBuildRepoDiffRecentSelection:
         adapter.list_repo_files = AsyncMock()
 
         _, meta = await build_repo_diff(
-            adapter, "owner/repo", selection="recent", max_files=2,
+            adapter,
+            "owner/repo",
+            selection="recent",
+            max_files=2,
         )
         assert meta["selection_capped"] is True
 
@@ -71,7 +78,10 @@ class TestBuildRepoDiffRecentSelection:
 
         with pytest.raises(ValueError, match="Too large"):
             await build_repo_diff(
-                adapter, "owner/repo", selection="all", max_files=3,
+                adapter,
+                "owner/repo",
+                selection="all",
+                max_files=3,
             )
 
     @pytest.mark.asyncio
@@ -82,8 +92,10 @@ class TestBuildRepoDiffRecentSelection:
         adapter.list_repo_files = AsyncMock()
 
         _, meta = await build_repo_diff(
-            adapter, "owner/repo",
-            selection="recent", max_files=10,
+            adapter,
+            "owner/repo",
+            selection="recent",
+            max_files=10,
             max_bytes_per_file=100,
         )
         assert meta["files_truncated"] == 1

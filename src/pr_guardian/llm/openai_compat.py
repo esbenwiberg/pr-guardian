@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 
 from pr_guardian.llm.protocol import LLMResponse
 
@@ -25,6 +24,7 @@ class OpenAICompatClient:
         if self._client is None:
             import httpx
             import openai
+
             self._client = openai.AsyncOpenAI(
                 base_url=self._base_url,
                 api_key=self._api_key,

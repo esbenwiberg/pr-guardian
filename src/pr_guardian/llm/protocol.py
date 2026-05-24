@@ -7,6 +7,7 @@ from typing import Protocol
 @dataclass
 class LLMResponse:
     """Response from an LLM provider."""
+
     content: str
     model: str
     input_tokens: int = 0

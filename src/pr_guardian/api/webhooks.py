@@ -20,8 +20,11 @@ async def _load_dismissals(pr: PlatformPR) -> list[dict] | None:
     """Load active dismissals from DB for a PR, or None if DB unavailable."""
     try:
         from pr_guardian.persistence import storage
+
         return await storage.get_active_dismissals(
-            pr.pr_id, pr.repo, pr.platform.value,
+            pr.pr_id,
+            pr.repo,
+            pr.platform.value,
         )
     except Exception:
         return None
@@ -75,7 +78,9 @@ async def github_webhook(
     adapter = create_adapter("github")
     base_url = str(request.base_url).rstrip("/")
     dismissals = await _load_dismissals(pr)
-    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals))
+    await review_queue.enqueue(
+        pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals)
+    )
 
     log.info("webhook_accepted", platform="github", pr_id=pr.pr_id)
     return {"status": "queued", "pr_id": pr.pr_id}
@@ -101,6 +106,7 @@ async def ado_webhook(request: Request):
     # The webhook payload's lastMergeSourceCommit can lag behind pushes.
     # Resolve the real branch HEAD so the review sees the latest code.
     from pr_guardian.api.review import _hydrate_pr
+
     try:
         pr = await _hydrate_pr(adapter, pr, "ado")
     except Exception as exc:
@@ -111,7 +117,9 @@ async def ado_webhook(request: Request):
 
     base_url = str(request.base_url).rstrip("/")
     dismissals = await _load_dismissals(pr)
-    await review_queue.enqueue(pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals))
+    await review_queue.enqueue(
+        pr, run_review(pr, adapter, base_url=base_url, dismissals=dismissals)
+    )
 
     log.info("webhook_accepted", platform="ado", pr_id=pr.pr_id)
     return {"status": "queued", "pr_id": pr.pr_id}

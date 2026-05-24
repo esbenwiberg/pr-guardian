@@ -35,20 +35,25 @@ log = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Startup / shutdown: initialise DB, clean up on exit."""
     if os.environ.get("DATABASE_URL") or os.environ.get("GUARDIAN_DB_ENABLED", "").lower() in (
-        "1", "true", "yes",
+        "1",
+        "true",
+        "yes",
     ):
         from pr_guardian.persistence.database import close_db, init_db
+
         await init_db()
         log.info("db_ready")
         # Seed initial admin (idempotent)
         try:
             from pr_guardian.persistence import storage
+
             await storage.add_admin("ewi@projectum.com", added_by="system")
         except Exception as e:
             log.debug("admin_seed_skipped", error=str(e))
         # Start PR sync background loop
         import asyncio
         from pr_guardian.core.pr_sync import pr_sync_loop
+
         sync_task = asyncio.create_task(pr_sync_loop())
         yield
         sync_task.cancel()
@@ -58,7 +63,9 @@ async def lifespan(app: FastAPI):
             pass
         await close_db()
     else:
-        log.info("db_disabled", hint="Set DATABASE_URL or GUARDIAN_DB_ENABLED=1 to enable persistence")
+        log.info(
+            "db_disabled", hint="Set DATABASE_URL or GUARDIAN_DB_ENABLED=1 to enable persistence"
+        )
         yield
 
 
@@ -94,6 +101,7 @@ async def _no_cache_static(request, call_next):
         response.headers["Cache-Control"] = "no-cache, must-revalidate"
     return response
 
+
 _PROTOTYPES_DIR = Path(__file__).resolve().parent.parent.parent / "prototypes"
 if _PROTOTYPES_DIR.is_dir():
     app.mount(
@@ -101,5 +109,3 @@ if _PROTOTYPES_DIR.is_dir():
         StaticFiles(directory=str(_PROTOTYPES_DIR), html=True),
         name="prototypes",
     )
-
-

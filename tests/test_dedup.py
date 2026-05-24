@@ -248,7 +248,9 @@ class TestApplyValidationsMerge:
             {"index": 1, "action": "merge", "reason": "Same issue", "merge_into": 0},
         ]
         new_results, dismissed, downgraded, merged = _apply_validations(
-            results, flat, validations,
+            results,
+            flat,
+            validations,
         )
         assert merged == 1
         assert dismissed == 0
@@ -285,12 +287,19 @@ class TestApplyValidationsMerge:
         flat = _flatten_findings(results)
         validations = [
             {"index": 0, "action": "keep", "reason": "Good"},
-            {"index": 1, "action": "downgrade", "reason": "Overstated", "downgraded_severity": "medium"},
+            {
+                "index": 1,
+                "action": "downgrade",
+                "reason": "Overstated",
+                "downgraded_severity": "medium",
+            },
             {"index": 2, "action": "merge", "reason": "Same as 0", "merge_into": 0},
             {"index": 3, "action": "dismiss", "reason": "Noise"},
         ]
         new_results, dismissed, downgraded, merged = _apply_validations(
-            results, flat, validations,
+            results,
+            flat,
+            validations,
         )
         assert dismissed == 1
         assert downgraded == 1
@@ -310,7 +319,9 @@ class TestApplyValidationsMerge:
         flat = _flatten_findings(results)
         validations = [{"index": 0, "action": "keep", "reason": "Fine"}]
         new_results, dismissed, downgraded, merged = _apply_validations(
-            results, flat, validations,
+            results,
+            flat,
+            validations,
         )
         assert dismissed == 0
         assert downgraded == 0

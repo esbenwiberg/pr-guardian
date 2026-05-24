@@ -4,6 +4,7 @@ Revision ID: 015
 Revises: 014
 Create Date: 2026-05-07
 """
+
 from typing import Sequence, Union
 
 import sqlalchemy as sa
@@ -58,9 +59,7 @@ def upgrade() -> None:
             sa.Column("project", sa.String(256), nullable=False, server_default=""),
             sa.Column("repo", sa.String(256), nullable=False),
             sa.Column("excluded_by_email", sa.String(256), nullable=False, server_default=""),
-            sa.Column(
-                "created_at", sa.DateTime(timezone=True), server_default=sa.func.now()
-            ),
+            sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         )
         op.create_unique_constraint(
             "uq_excluded_repo",

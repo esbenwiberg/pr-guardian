@@ -1,5 +1,3 @@
-import pytest
-
 from pr_guardian.decision.validator import _apply_validations, _flatten_findings
 from pr_guardian.models.findings import (
     AgentResult,
@@ -58,7 +56,9 @@ class TestApplyValidations:
             {"index": 0, "action": "dismiss", "reason": "False positive"},
             {"index": 1, "action": "keep", "reason": "Real issue"},
         ]
-        new_results, dismissed, downgraded, _merged = _apply_validations(results, flat, validations)
+        new_results, dismissed, downgraded, _merged = _apply_validations(
+            results, flat, validations
+        )
         assert dismissed == 1
         assert downgraded == 0
         assert len(new_results[0].findings) == 1
@@ -68,10 +68,16 @@ class TestApplyValidations:
         results = [_agent("sec", [_finding(severity=Severity.HIGH)])]
         flat = _flatten_findings(results)
         validations = [
-            {"index": 0, "action": "downgrade", "reason": "Overstated",
-             "downgraded_severity": "medium"},
+            {
+                "index": 0,
+                "action": "downgrade",
+                "reason": "Overstated",
+                "downgraded_severity": "medium",
+            },
         ]
-        new_results, dismissed, downgraded, _merged = _apply_validations(results, flat, validations)
+        new_results, dismissed, downgraded, _merged = _apply_validations(
+            results, flat, validations
+        )
         assert dismissed == 0
         assert downgraded == 1
         assert new_results[0].findings[0].severity == Severity.MEDIUM
@@ -119,8 +125,12 @@ class TestApplyValidations:
         results = [_agent("sec", [_finding(severity=Severity.HIGH)])]
         flat = _flatten_findings(results)
         validations = [
-            {"index": 0, "action": "downgrade", "reason": "Bad",
-             "downgraded_severity": "not_a_severity"},
+            {
+                "index": 0,
+                "action": "downgrade",
+                "reason": "Bad",
+                "downgraded_severity": "not_a_severity",
+            },
         ]
         new_results, _, downgraded, _ = _apply_validations(results, flat, validations)
         assert downgraded == 0
@@ -149,8 +159,7 @@ class TestApplyValidations:
         results = [_agent("sec", [original])]
         flat = _flatten_findings(results)
         validations = [
-            {"index": 0, "action": "downgrade", "reason": "Lower",
-             "downgraded_severity": "low"},
+            {"index": 0, "action": "downgrade", "reason": "Lower", "downgraded_severity": "low"},
         ]
         _apply_validations(results, flat, validations)
         # Original should be untouched

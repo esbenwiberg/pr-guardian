@@ -1,4 +1,5 @@
 """Unit tests for the per-finding triage classifier (Phase 2)."""
+
 from __future__ import annotations
 
 import pytest
@@ -16,19 +17,23 @@ from pr_guardian.decision.finding_triage import (
 # classify_finding
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("severity,certainty,expected", [
-    ("critical", "detected",   DECISION),
-    ("critical", "uncertain",  DECISION),
-    ("high",     "detected",   DECISION),
-    ("high",     "suspected",  DECISION),
-    ("medium",   "detected",   DECISION),
-    ("medium",   "suspected",  FYI),
-    ("medium",   "uncertain",  FYI),
-    ("low",      "detected",   FYI),
-    ("low",      "suspected",  NOISE),
-    ("low",      "uncertain",  NOISE),
-    ("low",      "",           NOISE),
-])
+
+@pytest.mark.parametrize(
+    "severity,certainty,expected",
+    [
+        ("critical", "detected", DECISION),
+        ("critical", "uncertain", DECISION),
+        ("high", "detected", DECISION),
+        ("high", "suspected", DECISION),
+        ("medium", "detected", DECISION),
+        ("medium", "suspected", FYI),
+        ("medium", "uncertain", FYI),
+        ("low", "detected", FYI),
+        ("low", "suspected", NOISE),
+        ("low", "uncertain", NOISE),
+        ("low", "", NOISE),
+    ],
+)
 def test_classify_finding_matrix(severity, certainty, expected):
     finding = {"severity": severity, "certainty": certainty}
     assert classify_finding(finding) == expected
@@ -54,18 +59,25 @@ def test_severity_is_case_insensitive():
 # tag_findings_with_triage
 # ---------------------------------------------------------------------------
 
+
 def test_tag_findings_in_place_and_returns_counts():
     agent_results = [
-        {"agent_name": "security", "findings": [
-            {"severity": "high", "certainty": "detected"},
-            {"severity": "medium", "certainty": "suspected"},
-            {"severity": "low", "certainty": "uncertain"},
-            {"severity": "low", "certainty": "detected", "dismissal": {"id": "abc"}},
-        ]},
-        {"agent_name": "perf", "findings": [
-            {"severity": "critical", "certainty": "detected"},
-            {"severity": "low", "certainty": "uncertain"},
-        ]},
+        {
+            "agent_name": "security",
+            "findings": [
+                {"severity": "high", "certainty": "detected"},
+                {"severity": "medium", "certainty": "suspected"},
+                {"severity": "low", "certainty": "uncertain"},
+                {"severity": "low", "certainty": "detected", "dismissal": {"id": "abc"}},
+            ],
+        },
+        {
+            "agent_name": "perf",
+            "findings": [
+                {"severity": "critical", "certainty": "detected"},
+                {"severity": "low", "certainty": "uncertain"},
+            ],
+        },
     ]
 
     counts = tag_findings_with_triage(agent_results)

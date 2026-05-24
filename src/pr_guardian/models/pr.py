@@ -13,6 +13,7 @@ class Platform(str, Enum):
 @dataclass(frozen=True)
 class PlatformPR:
     """Normalized PR representation from any platform."""
+
     platform: Platform
     pr_id: str
     repo: str
@@ -28,8 +29,8 @@ class PlatformPR:
     # redundant GET when _hydrate_pr already retrieved the body.
     body: str | None = None
     # Platform-specific metadata for API callbacks
-    org: str = ""            # ADO org or GitHub owner
-    project: str = ""        # ADO project (empty for GitHub)
+    org: str = ""  # ADO org or GitHub owner
+    project: str = ""  # ADO project (empty for GitHub)
     install_id: int | None = None  # GitHub App installation ID
 
     @property
@@ -45,6 +46,7 @@ class PlatformPR:
 @dataclass
 class DiffFile:
     """A single file in a diff."""
+
     path: str
     status: Literal["added", "modified", "deleted", "renamed"]
     old_path: str | None = None  # for renames
@@ -56,6 +58,7 @@ class DiffFile:
 @dataclass
 class Diff:
     """Parsed PR diff."""
+
     files: list[DiffFile] = field(default_factory=list)
 
     @property

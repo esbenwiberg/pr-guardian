@@ -1,7 +1,7 @@
 """Tests for the /api/review/repo endpoint."""
+
 from __future__ import annotations
 
-import os
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -41,7 +41,6 @@ class TestManualRepoReviewValidation:
         assert resp.status_code == 400
 
 
-
 class TestManualRepoReviewQueueing:
     """With credentials present the endpoint always returns 200 (fire-and-forget)."""
 
@@ -49,7 +48,11 @@ class TestManualRepoReviewQueueing:
         """Happy path: credentials set → 200 with status=queued and task is scheduled."""
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -68,7 +71,11 @@ class TestManualRepoReviewQueueing:
         """Verify that create_task is invoked, not just fire-and-forget ignored."""
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -84,7 +91,11 @@ class TestManualRepoReviewQueueing:
 
     def test_queued_response_includes_ref(self, client):
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=_mock_adapter()),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=_mock_adapter(),
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -98,8 +109,13 @@ class TestManualRepoReviewQueueing:
     def test_max_files_is_clamped_to_hard_ceiling(self, client):
         """Caller-supplied max_files must be clamped to HARD_MAX_FILES."""
         from pr_guardian.core.repo_review import HARD_MAX_FILES
+
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=_mock_adapter()),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=_mock_adapter(),
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -111,7 +127,11 @@ class TestManualRepoReviewQueueing:
 
     def test_selection_recent_accepted(self, client):
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=_mock_adapter()),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=_mock_adapter(),
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -129,7 +149,6 @@ class TestRepoReviewBackground:
     async def test_diff_failure_marks_review_as_failed(self):
         """If build_repo_diff raises, the DB record is marked as error."""
         from pr_guardian.api.review import _run_repo_review_background
-        from pr_guardian.models.pr import Diff
 
         test_id = uuid.uuid4()
         mock_storage = MagicMock()
@@ -139,14 +158,19 @@ class TestRepoReviewBackground:
         adapter = _mock_adapter()
 
         with (
-            patch("pr_guardian.core.orchestrator.get_storage",
-                  return_value=mock_storage),
-            patch("pr_guardian.api.review.build_repo_diff",
-                  new_callable=AsyncMock,
-                  side_effect=ValueError("Repo too large")),
+            patch("pr_guardian.core.orchestrator.get_storage", return_value=mock_storage),
+            patch(
+                "pr_guardian.api.review.build_repo_diff",
+                new_callable=AsyncMock,
+                side_effect=ValueError("Repo too large"),
+            ),
         ):
             await _run_repo_review_background(
-                "owner/repo", "github", adapter, "HEAD", 300,
+                "owner/repo",
+                "github",
+                adapter,
+                "HEAD",
+                300,
             )
 
         mock_storage.mark_review_failed.assert_awaited_once()
@@ -165,24 +189,32 @@ class TestRepoReviewBackground:
         mock_storage.update_review_stage = AsyncMock()
         adapter = _mock_adapter()
         empty_meta = {
-            "selection": "all", "requested_max_files": 300,
-            "files_listed": 0, "files_skipped_binary": 0,
-            "files_included": 0, "files_truncated": 0,
-            "files_read_errors": 0, "selection_capped": False,
+            "selection": "all",
+            "requested_max_files": 300,
+            "files_listed": 0,
+            "files_skipped_binary": 0,
+            "files_included": 0,
+            "files_truncated": 0,
+            "files_read_errors": 0,
+            "selection_capped": False,
             "total_bytes": 0,
         }
 
         with (
-            patch("pr_guardian.core.orchestrator.get_storage",
-                  return_value=mock_storage),
-            patch("pr_guardian.api.review.build_repo_diff",
-                  new_callable=AsyncMock,
-                  return_value=(Diff(files=[]), empty_meta)),
-            patch("pr_guardian.api.review.run_review",
-                  new_callable=AsyncMock) as mock_run,
+            patch("pr_guardian.core.orchestrator.get_storage", return_value=mock_storage),
+            patch(
+                "pr_guardian.api.review.build_repo_diff",
+                new_callable=AsyncMock,
+                return_value=(Diff(files=[]), empty_meta),
+            ),
+            patch("pr_guardian.api.review.run_review", new_callable=AsyncMock) as mock_run,
         ):
             await _run_repo_review_background(
-                "owner/repo", "github", adapter, "HEAD", 300,
+                "owner/repo",
+                "github",
+                adapter,
+                "HEAD",
+                300,
             )
 
         mock_run.assert_awaited_once()

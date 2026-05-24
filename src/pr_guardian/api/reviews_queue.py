@@ -4,6 +4,7 @@ Merges PR reviews and repo scans into a single queue with `trigger_origin`
 and `stale` flags. Falls back to demo data when no DB is configured so the
 page is functional in dev sandboxes.
 """
+
 from __future__ import annotations
 
 import re
@@ -44,6 +45,7 @@ _ADO_TRIPLE_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$"
 # ---------------------------------------------------------------------------
 # Demo data — used when DB unavailable so the queue page is meaningful in dev.
 # ---------------------------------------------------------------------------
+
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
@@ -133,6 +135,7 @@ _DEMO_QUEUE = [
 # Shaping a queue row from a DB review record.
 # ---------------------------------------------------------------------------
 
+
 def _findings_breakdown(agent_results: list[dict[str, Any]] | None) -> dict[str, int]:
     counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
     if not agent_results:
@@ -146,7 +149,12 @@ def _findings_breakdown(agent_results: list[dict[str, Any]] | None) -> dict[str,
 
 
 def _estimated_minutes(findings: dict[str, int], files_changed: int) -> int:
-    weight = 6 * findings["high"] + 8 * findings["critical"] + 3 * findings["medium"] + 1 * findings["low"]
+    weight = (
+        6 * findings["high"]
+        + 8 * findings["critical"]
+        + 3 * findings["medium"]
+        + 1 * findings["low"]
+    )
     return max(0, weight + max(0, files_changed // 5))
 
 
@@ -189,6 +197,7 @@ def _shape_review(row: dict[str, Any]) -> dict[str, Any]:
 # Queue endpoint
 # ---------------------------------------------------------------------------
 
+
 @router.get("/queue")
 async def reviews_queue(request: Request):
     """Unified queue: PR reviews + repo scans in one list, sorted stale-first then newest-first."""
@@ -208,6 +217,7 @@ async def reviews_queue(request: Request):
 # ---------------------------------------------------------------------------
 # Trigger endpoint — accepts PR URL or owner/repo shorthand.
 # ---------------------------------------------------------------------------
+
 
 class TriggerRequest(BaseModel):
     url: str
@@ -266,6 +276,7 @@ async def trigger_review(req: TriggerRequest, request: Request):
     if gh or ado:
         # Reuse the existing review trigger so we don't fork logic.
         from pr_guardian.api.review import manual_review, ReviewRequest
+
         try:
             resp = await manual_review(
                 ReviewRequest(pr_url=url, comment_mode="none"),
@@ -287,17 +298,22 @@ async def trigger_review(req: TriggerRequest, request: Request):
 
     if req.mode == "scan":
         from pr_guardian.api.review import (
-            manual_repo_review, RepoReviewRequest, REPO_REVIEW_MAX_FILES,
+            manual_repo_review,
+            RepoReviewRequest,
+            REPO_REVIEW_MAX_FILES,
         )
+
         repo, platform = _resolve_repo_scan_target(url, req.platform)
         selection = req.selection if req.selection in ("all", "recent") else "all"
         try:
-            resp = await manual_repo_review(RepoReviewRequest(
-                repo=repo,
-                platform=platform,
-                selection=selection,
-                max_files=req.max_files or REPO_REVIEW_MAX_FILES,
-            ))
+            resp = await manual_repo_review(
+                RepoReviewRequest(
+                    repo=repo,
+                    platform=platform,
+                    selection=selection,
+                    max_files=req.max_files or REPO_REVIEW_MAX_FILES,
+                )
+            )
             return {
                 "id": f"scan-{resp.repo.replace('/', '-')}",
                 "status": resp.status,
@@ -371,9 +387,12 @@ def _build_summary_comment(
 
     if any(counts.values()):
         bits = []
-        if counts["accept"]: bits.append(f"{counts['accept']} accepted")
-        if counts["fix"]:    bits.append(f"{counts['fix']} fix requested")
-        if counts["dismiss"]: bits.append(f"{counts['dismiss']} dismissed")
+        if counts["accept"]:
+            bits.append(f"{counts['accept']} accepted")
+        if counts["fix"]:
+            bits.append(f"{counts['fix']} fix requested")
+        if counts["dismiss"]:
+            bits.append(f"{counts['dismiss']} dismissed")
         parts.append("---")
         parts.append("Per-concern decisions: " + " · ".join(bits) + ".")
 
@@ -403,7 +422,9 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
         raise HTTPException(400, f"Invalid comment_mode. Allowed: {sorted(_COMMENT_MODES)}")
     for fid, dec in body.decisions.items():
         if dec not in _DECISION_VALUES:
-            raise HTTPException(400, f"Decision for {fid!r} must be one of {sorted(_DECISION_VALUES)}")
+            raise HTTPException(
+                400, f"Decision for {fid!r} must be one of {sorted(_DECISION_VALUES)}"
+            )
 
     # Load the review. Without a DB or for demo IDs we still want to look
     # like we did the right thing so the UI flow can be exercised end-to-end.
@@ -434,7 +455,9 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                 fix_findings.append(f)
 
     # Build verdict comment.
-    summary = _build_summary_comment(body.decisions, fix_findings, body.comment_to_author, body.verdict)
+    summary = _build_summary_comment(
+        body.decisions, fix_findings, body.comment_to_author, body.verdict
+    )
 
     platform_str = (review.get("platform") or "").lower()
     actions: list[str] = []
@@ -495,16 +518,18 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                         certainty = Certainty((f.get("certainty") or "likely").lower())
                     except Exception:
                         certainty = Certainty.LIKELY
-                    inline_findings.append(Finding(
-                        severity=severity,
-                        certainty=certainty,
-                        category=f.get("category", "other"),
-                        language=f.get("language", "unknown"),
-                        file=f.get("file", ""),
-                        line=f.get("line"),
-                        description=f.get("description", ""),
-                        suggestion=f.get("suggestion", ""),
-                    ))
+                    inline_findings.append(
+                        Finding(
+                            severity=severity,
+                            certainty=certainty,
+                            category=f.get("category", "other"),
+                            language=f.get("language", "unknown"),
+                            file=f.get("file", ""),
+                            line=f.get("line"),
+                            description=f.get("description", ""),
+                            suggestion=f.get("suggestion", ""),
+                        )
+                    )
                 if inline_findings:
                     await adapter.post_inline_comments(pr, inline_findings)
                     actions.append("post_inline_comments")
@@ -526,7 +551,9 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                 # GitHub has no first-class block. Use request_changes + an
                 # advisory label hint in the comment body. ADO callers should
                 # extend with vote: -10 if/when that's wired through.
-                await adapter.request_changes(pr, summary + "\n\n_guardian:blocked — do not merge._")
+                await adapter.request_changes(
+                    pr, summary + "\n\n_guardian:blocked — do not merge._"
+                )
                 actions.append("request_changes")
                 actions.append("block_advisory")
         except Exception as exc:  # noqa: BLE001
@@ -536,18 +563,21 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
 
     # Always persist intent — even on platform failure.
     try:
-        await storage.append_review_log_entry(rev_uuid, {
-            "kind": "human_finalize",
-            "verdict": body.verdict,
-            "comment_mode": body.comment_mode,
-            "decisions": body.decisions,
-            "comment_to_author": body.comment_to_author,
-            "fix_findings": [f.get("id") for f in fix_findings if f.get("id")],
-            "platform_actions": actions,
-            "posted": posted,
-            "error": error,
-            "at": _now().isoformat(),
-        })
+        await storage.append_review_log_entry(
+            rev_uuid,
+            {
+                "kind": "human_finalize",
+                "verdict": body.verdict,
+                "comment_mode": body.comment_mode,
+                "decisions": body.decisions,
+                "comment_to_author": body.comment_to_author,
+                "fix_findings": [f.get("id") for f in fix_findings if f.get("id")],
+                "platform_actions": actions,
+                "posted": posted,
+                "error": error,
+                "at": _now().isoformat(),
+            },
+        )
     except Exception as exc:  # noqa: BLE001
         log.warning("finalize_log_persist_failed", review_id=review_id, error=str(exc))
 
@@ -557,7 +587,11 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
         rows = await storage.list_reviews(limit=20)
         for r in rows:
             rid = str(r.get("id") or "")
-            if rid and rid != review_id and (r.get("decision") in (None, "pending", "human_review")):
+            if (
+                rid
+                and rid != review_id
+                and (r.get("decision") in (None, "pending", "human_review"))
+            ):
                 next_id = rid
                 break
     except Exception:

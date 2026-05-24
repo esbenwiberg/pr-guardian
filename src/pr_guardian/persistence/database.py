@@ -3,6 +3,7 @@
 Engine and session are created lazily on first use so that importing this module
 does not require a reachable database or the asyncpg driver at import time.
 """
+
 from __future__ import annotations
 
 import os
@@ -15,9 +16,11 @@ def _get_database_url() -> str:
     )
     # Ensure the async driver is used regardless of how the URL was configured
     if raw.startswith("postgresql://"):
-        raw = "postgresql+asyncpg://" + raw[len("postgresql://"):]
+        raw = "postgresql+asyncpg://" + raw[len("postgresql://") :]
     # asyncpg uses 'ssl' not 'sslmode' — strip the incompatible param
-    raw = raw.replace("?sslmode=require", "?ssl=require").replace("&sslmode=require", "&ssl=require")
+    raw = raw.replace("?sslmode=require", "?ssl=require").replace(
+        "&sslmode=require", "&ssl=require"
+    )
     return raw
 
 
@@ -29,6 +32,7 @@ def _get_engine():
     global _engine
     if _engine is None:
         from sqlalchemy.ext.asyncio import create_async_engine
+
         _engine = create_async_engine(
             _get_database_url(),
             echo=False,
@@ -43,7 +47,10 @@ def _get_session_factory():
     global _session_factory
     if _session_factory is None:
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
-        _session_factory = async_sessionmaker(_get_engine(), class_=AsyncSession, expire_on_commit=False)
+
+        _session_factory = async_sessionmaker(
+            _get_engine(), class_=AsyncSession, expire_on_commit=False
+        )
     return _session_factory
 
 

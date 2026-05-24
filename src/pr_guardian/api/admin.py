@@ -1,4 +1,5 @@
 """Admin API: manage admins and API keys."""
+
 from __future__ import annotations
 
 import uuid
@@ -170,7 +171,9 @@ async def list_github_pats(identity: Identity = Depends(require_admin)):
 
 
 @router.post("/github-pats", status_code=201)
-async def create_github_pat(body: CreateGithubPatRequest, identity: Identity = Depends(require_admin)):
+async def create_github_pat(
+    body: CreateGithubPatRequest, identity: Identity = Depends(require_admin)
+):
     """Store a new named GitHub PAT."""
     name = body.name.strip()
     if not name:
@@ -244,9 +247,7 @@ async def list_excluded_repos(identity: Identity = Depends(require_admin)):
 
 
 @router.delete("/excluded-repos/{exclusion_id}")
-async def remove_excluded_repo(
-    exclusion_id: str, identity: Identity = Depends(require_admin)
-):
+async def remove_excluded_repo(exclusion_id: str, identity: Identity = Depends(require_admin)):
     """Restore a previously excluded repo to the PR dashboard."""
     removed = await storage.remove_excluded_repo(exclusion_id)
     if not removed:
@@ -315,9 +316,7 @@ async def add_exclusion_rule(
 
 
 @router.delete("/exclusion-rules/{rule_id}")
-async def remove_exclusion_rule(
-    rule_id: str, identity: Identity = Depends(require_admin)
-):
+async def remove_exclusion_rule(rule_id: str, identity: Identity = Depends(require_admin)):
     """Delete a wildcard exclusion rule."""
     removed = await storage.remove_exclusion_rule(rule_id)
     if not removed:

@@ -47,13 +47,13 @@ log = structlog.get_logger()
 # More-specific prefixes must come before shorter substrings (gpt-5.5 before gpt-5).
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     # Anthropic
-    "claude-opus":   (15.0,  75.0),
-    "claude-sonnet": (3.0,   15.0),
+    "claude-opus": (15.0, 75.0),
+    "claude-sonnet": (3.0, 15.0),
     # OpenAI GPT-5 family — longest prefix first
-    "gpt-5.5":       (5.0,   30.0),
-    "gpt-5.4":       (2.50,  15.0),
-    "gpt-5.2":       (0.875,  7.0),
-    "gpt-5":         (0.625,  5.0),
+    "gpt-5.5": (5.0, 30.0),
+    "gpt-5.4": (2.50, 15.0),
+    "gpt-5.2": (0.875, 7.0),
+    "gpt-5": (0.625, 5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)  # fallback
 
@@ -73,6 +73,7 @@ def _try_import_storage():
     """Lazily import storage to avoid failures when DB is not configured."""
     try:
         from pr_guardian.persistence import storage
+
         return storage
     except Exception:
         return None
@@ -81,6 +82,7 @@ def _try_import_storage():
 def get_storage():
     """Public accessor for lazily-imported storage (None when DB is not configured)."""
     return _try_import_storage()
+
 
 AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
@@ -115,30 +117,36 @@ async def run_review(
     # Create DB record only if one wasn't provided by the caller
     if storage and review_db_id is None:
         try:
-            review_db_id = await storage.create_review_record(pr, comment_mode=comment_mode, pat_name=pat_name)
+            review_db_id = await storage.create_review_record(
+                pr, comment_mode=comment_mode, pat_name=pat_name
+            )
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
 
     pipeline_log: list[dict] = []
 
     def _plog(level: str, stage: str, msg: str, **extra):
-        pipeline_log.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "level": level,
-            "stage": stage,
-            "msg": msg,
-            **{k: v for k, v in extra.items() if v is not None},
-        })
+        pipeline_log.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "stage": stage,
+                "msg": msg,
+                **{k: v for k, v in extra.items() if v is not None},
+            }
+        )
 
     def _emit(stage: str, detail: str = "", **extra):
-        event_bus.publish(ReviewEvent(
-            review_id=str(review_db_id) if review_db_id else "",
-            pr_id=pr.pr_id,
-            repo=pr.repo,
-            stage=stage,
-            detail=detail,
-            extra=extra,
-        ))
+        event_bus.publish(
+            ReviewEvent(
+                review_id=str(review_db_id) if review_db_id else "",
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                stage=stage,
+                detail=detail,
+                extra=extra,
+            )
+        )
 
     async def _update_stage(stage: str, detail: str = ""):
         _emit(stage, detail)
@@ -157,10 +165,18 @@ async def run_review(
 
     try:
         return await _run_pipeline(
-            pr, adapter, service_config, storage, review_db_id, pipeline_log,
-            _plog, _emit, _update_stage,
+            pr,
+            adapter,
+            service_config,
+            storage,
+            review_db_id,
+            pipeline_log,
+            _plog,
+            _emit,
+            _update_stage,
             post_comment=post_comment and not skip_platform_side_effects,
-            base_url=base_url, dismissals=dismissals,
+            base_url=base_url,
+            dismissals=dismissals,
             diff_override=diff_override,
             skip_platform_side_effects=skip_platform_side_effects,
             comment_mode=comment_mode,
@@ -198,17 +214,24 @@ async def _run_pipeline(
     # Fetch diff (or use pre-built synthetic diff, e.g. for repo reviews)
     if diff_override is not None:
         diff = diff_override
-        _plog("info", "discovery",
-              f"Using pre-built diff ({len(diff.files)} files) — skipping fetch_diff.")
+        _plog(
+            "info",
+            "discovery",
+            f"Using pre-built diff ({len(diff.files)} files) — skipping fetch_diff.",
+        )
     else:
         diff = await adapter.fetch_diff(pr)
     changed_files = diff.file_paths
     files_with_patch = sum(1 for f in diff.files if f.patch)
-    _plog("info", "discovery",
-          f"Fetched diff: {len(changed_files)} files, {files_with_patch} with patch content.")
+    _plog(
+        "info",
+        "discovery",
+        f"Fetched diff: {len(changed_files)} files, {files_with_patch} with patch content.",
+    )
     if changed_files and files_with_patch == 0:
-        _plog("warn", "discovery",
-              "No patch content retrieved — agents will have no code to review.")
+        _plog(
+            "warn", "discovery", "No patch content retrieved — agents will have no code to review."
+        )
 
     # Use temp dir as repo_path (in production, would be a shallow clone)
     repo_path = Path(tempfile.mkdtemp(prefix=f"review-{pr.pr_id}-"))
@@ -223,7 +246,11 @@ async def _run_pipeline(
     dep_graph = build_dep_graph(config.path_risk.critical_consumers or None)
     blast_radius = compute_blast_radius(changed_files, security_surface, dep_graph)
     change_profile = build_change_profile(
-        changed_files, diff, security_surface, blast_radius, config.file_roles,
+        changed_files,
+        diff,
+        security_surface,
+        blast_radius,
+        config.file_roles,
     )
     hotspots = await load_hotspots(pr.repo)
 
@@ -252,22 +279,33 @@ async def _run_pipeline(
 
     # Trust tier classification (path-based, deterministic)
     trust_tier_result = classify_trust_tier(
-        changed_files, config, context.repo_risk_class,
+        changed_files,
+        config,
+        context.repo_risk_class,
     )
     context.trust_tier_result = trust_tier_result
-    _plog("info", "discovery",
-          f"Trust tier: {trust_tier_result.resolved_tier.value}. "
-          f"Triggering files: {', '.join(trust_tier_result.triggering_files[:5]) or 'none'}.")
+    _plog(
+        "info",
+        "discovery",
+        f"Trust tier: {trust_tier_result.resolved_tier.value}. "
+        f"Triggering files: {', '.join(trust_tier_result.triggering_files[:5]) or 'none'}.",
+    )
 
     langs = list(language_map.languages.keys())
-    _plog("info", "discovery",
-          f"Parsed {len(changed_files)} files across {len(langs)} language(s): {', '.join(langs)}. "
-          f"{diff.lines_changed} lines changed.")
+    _plog(
+        "info",
+        "discovery",
+        f"Parsed {len(changed_files)} files across {len(langs)} language(s): {', '.join(langs)}. "
+        f"{diff.lines_changed} lines changed.",
+    )
     if security_surface.has_hits():
         surface_files = list(security_surface.classifications.keys())
-        _plog("info", "discovery",
-              f"Security surface files: {', '.join(surface_files[:10])}"
-              f"{f' (+{len(surface_files)-10} more)' if len(surface_files) > 10 else ''}")
+        _plog(
+            "info",
+            "discovery",
+            f"Security surface files: {', '.join(surface_files[:10])}"
+            f"{f' (+{len(surface_files) - 10} more)' if len(surface_files) > 10 else ''}",
+        )
     log.info(
         "discovery_complete",
         languages=langs,
@@ -278,21 +316,28 @@ async def _run_pipeline(
     # Stage 1: Mechanical Gates
     await _update_stage("mechanical", "Running mechanical checks")
     mechanical_results = await run_mechanical_checks(
-        repo_path, language_map, changed_files, config, pr.target_branch,
+        repo_path,
+        language_map,
+        changed_files,
+        config,
+        pr.target_branch,
     )
 
     passed_count = sum(1 for r in mechanical_results if r.passed)
     total_count = len(mechanical_results)
-    _plog("info", "mechanical",
-          f"Mechanical checks: {passed_count}/{total_count} passed.")
+    _plog("info", "mechanical", f"Mechanical checks: {passed_count}/{total_count} passed.")
     for r in mechanical_results:
         if not r.passed:
-            _plog("warn", "mechanical",
-                  f"{r.tool}: FAILED — {r.error or f'{len(r.findings)} finding(s)'}")
+            _plog(
+                "warn",
+                "mechanical",
+                f"{r.tool}: FAILED — {r.error or f'{len(r.findings)} finding(s)'}",
+            )
 
     if not all_checks_passed(mechanical_results):
         log.info("mechanical_gate_failed", pr_id=pr.pr_id)
         from pr_guardian.models.context import RiskTier
+
         _plog("error", "mechanical", "Mechanical gate failed — PR blocked.")
         result = ReviewResult(
             pr_id=pr.pr_id,
@@ -300,9 +345,7 @@ async def _run_pipeline(
             risk_tier=RiskTier.HIGH,
             repo_risk_class=context.repo_risk_class,
             review_id=str(review_db_id) if review_db_id else "",
-            mechanical_results=[
-                _convert_mechanical(r) for r in mechanical_results
-            ],
+            mechanical_results=[_convert_mechanical(r) for r in mechanical_results],
             mechanical_passed=False,
             decision=Decision.HARD_BLOCK,
             summary="Mechanical checks failed — PR blocked.",
@@ -310,9 +353,14 @@ async def _run_pipeline(
         )
         if post_comment:
             await _post_results(
-                adapter, pr, result, config,
-                base_url=base_url, comment_mode=comment_mode,
-                review_id=review_db_id, storage=storage,
+                adapter,
+                pr,
+                result,
+                config,
+                base_url=base_url,
+                comment_mode=comment_mode,
+                review_id=review_db_id,
+                storage=storage,
             )
         await _save_result(storage, review_db_id, result, _emit)
         return result
@@ -320,18 +368,29 @@ async def _run_pipeline(
     # Stage 2: Triage
     await _update_stage("triage", "Classifying risk and selecting agents")
     triage_result = classify(context, config)
-    _plog("info", "triage",
-          f"Risk tier: {triage_result.risk_tier.value}. "
-          f"Agents selected: {', '.join(sorted(triage_result.agent_set)) or 'none'}.")
+    _plog(
+        "info",
+        "triage",
+        f"Risk tier: {triage_result.risk_tier.value}. "
+        f"Agents selected: {', '.join(sorted(triage_result.agent_set)) or 'none'}.",
+    )
     for reason in triage_result.reasons:
         _plog("info", "triage", f"Reason: {reason}")
-    log.info("triage_complete", tier=triage_result.risk_tier.value, agents=sorted(triage_result.agent_set))
+    log.info(
+        "triage_complete",
+        tier=triage_result.risk_tier.value,
+        agents=sorted(triage_result.agent_set),
+    )
 
     # Build per-agent dismissal context strings
     agent_dismissal_context: dict[str, str] = {}
     if dismissals:
         for agent_name in triage_result.agent_set:
-            relevant = [d for d in dismissals if d.get("source_finding", {}).get("agent_name") == agent_name]
+            relevant = [
+                d
+                for d in dismissals
+                if d.get("source_finding", {}).get("agent_name") == agent_name
+            ]
             if relevant:
                 lines = [
                     "## Previously Dismissed Findings",
@@ -350,9 +409,12 @@ async def _run_pipeline(
                     lines.append("")
                 agent_dismissal_context[agent_name] = "\n".join(lines)
         if agent_dismissal_context:
-            _plog("info", "agents",
-                   f"Injecting dismissal context for {len(agent_dismissal_context)} agent(s) "
-                   f"({len(dismissals)} total dismissal(s)).")
+            _plog(
+                "info",
+                "agents",
+                f"Injecting dismissal context for {len(agent_dismissal_context)} agent(s) "
+                f"({len(dismissals)} total dismissal(s)).",
+            )
 
     # Stage 3: AI Agents (parallel)
     await _update_stage("agents", f"Running {len(triage_result.agent_set)} AI agents")
@@ -364,7 +426,9 @@ async def _run_pipeline(
             if agent_cls:
                 agent = agent_cls(config)
                 agent_tasks.append(
-                    agent.review(context, dismissal_context=agent_dismissal_context.get(agent_name))
+                    agent.review(
+                        context, dismissal_context=agent_dismissal_context.get(agent_name)
+                    )
                 )
 
         if agent_tasks:
@@ -395,18 +459,26 @@ async def _run_pipeline(
         if ar.error:
             _plog("error", "agents", f"Agent {ar.agent_name} error: {ar.error}")
         if extras.get("raw_response_preview"):
-            _plog("debug", "agents",
-                  f"Agent {ar.agent_name} raw response: {extras['raw_response_preview']}",
-                  agent=ar.agent_name)
+            _plog(
+                "debug",
+                "agents",
+                f"Agent {ar.agent_name} raw response: {extras['raw_response_preview']}",
+                agent=ar.agent_name,
+            )
 
     # Trust tier escalation (post-agents, one-way upward)
     trust_tier_result = maybe_escalate_trust(
-        context.trust_tier_result, agent_results, config.trust_tiers,
+        context.trust_tier_result,
+        agent_results,
+        config.trust_tiers,
     )
     context.trust_tier_result = trust_tier_result
     if trust_tier_result.escalated:
-        _plog("warn", "trust_escalation",
-              f"Trust tier escalated: {' | '.join(trust_tier_result.escalation_reasons)}")
+        _plog(
+            "warn",
+            "trust_escalation",
+            f"Trust tier escalated: {' | '.join(trust_tier_result.escalation_reasons)}",
+        )
 
     # Stage 4: Decision
     await _update_stage("decision", "Computing final verdict")
@@ -419,13 +491,19 @@ async def _run_pipeline(
     result.total_output_tokens = total_output_tokens
     result.cost_usd = round(total_cost, 6)
 
-    _plog("info", "decision",
-          f"Decision: {result.decision.value}. Score: {result.combined_score:.2f}. "
-          f"Risk tier: {result.risk_tier.value}.")
+    _plog(
+        "info",
+        "decision",
+        f"Decision: {result.decision.value}. Score: {result.combined_score:.2f}. "
+        f"Risk tier: {result.risk_tier.value}.",
+    )
     if total_cost > 0:
-        _plog("info", "decision",
-              f"Total tokens: {total_input_tokens}+{total_output_tokens}. "
-              f"Estimated cost: ${total_cost:.4f}.")
+        _plog(
+            "info",
+            "decision",
+            f"Total tokens: {total_input_tokens}+{total_output_tokens}. "
+            f"Estimated cost: ${total_cost:.4f}.",
+        )
     for t in result.sticky_triggers:
         _plog("info", "decision", f"Sticky trigger [{t.kind}]: {t.reason}")
     for reason in result.finding_reasons:
@@ -435,20 +513,27 @@ async def _run_pipeline(
     # Severity floor: suppress low-value findings per risk tier (display only,
     # scoring already happened on the full set inside decide()).
     filtered_results, suppressed_count = filter_findings(
-        result.agent_results, triage_result.risk_tier, config,
+        result.agent_results,
+        triage_result.risk_tier,
+        config,
     )
     result.agent_results = filtered_results
     if suppressed_count:
-        _plog("info", "noise_reduction",
-              f"Severity floor suppressed {suppressed_count} finding(s) "
-              f"(risk tier: {triage_result.risk_tier.value}).")
+        _plog(
+            "info",
+            "noise_reduction",
+            f"Severity floor suppressed {suppressed_count} finding(s) "
+            f"(risk tier: {triage_result.risk_tier.value}).",
+        )
 
     # Validator: adversarial critic challenges remaining findings.
     remaining_finding_count = sum(len(r.findings) for r in result.agent_results)
     if remaining_finding_count > 0:
         await _update_stage("validation", "Challenging findings with validator agent")
         validated_results, validator_meta = await validate_findings(
-            result.agent_results, context, config,
+            result.agent_results,
+            context,
+            config,
         )
         result.agent_results = validated_results
         if validator_meta.get("validator_ran"):
@@ -460,7 +545,9 @@ async def _run_pipeline(
             total_output_tokens += val_out
             if val_in or val_out:
                 val_cost = _estimate_cost(
-                    validator_meta.get("model") or config.validator.model_override or "", val_in, val_out,
+                    validator_meta.get("model") or config.validator.model_override or "",
+                    val_in,
+                    val_out,
                 )
                 total_cost += val_cost
             result.total_input_tokens = total_input_tokens
@@ -476,8 +563,11 @@ async def _run_pipeline(
             parts.append(f"out of {remaining_finding_count} finding(s).")
             _plog("info", "noise_reduction", ", ".join(parts))
         if validator_meta.get("error"):
-            _plog("warn", "noise_reduction",
-                  f"Validator error (findings kept as-is): {validator_meta['error']}")
+            _plog(
+                "warn",
+                "noise_reduction",
+                f"Validator error (findings kept as-is): {validator_meta['error']}",
+            )
 
     # Post-review dismissal matching
     if dismissals and storage:
@@ -487,6 +577,7 @@ async def _run_pipeline(
                 match_dismissals_to_findings,
                 archive_stale_dismissals,
             )
+
             # Build list of all findings with agent_name for matching.
             # For merged findings, also register contributing agents' signatures
             # so that dismissals from any contributing agent carry forward.
@@ -496,7 +587,9 @@ async def _run_pipeline(
                 for f in ar.findings:
                     agent_name = f.primary_agent or ar.agent_name
                     entry = {
-                        "file": f.file, "category": f.category, "agent_name": agent_name,
+                        "file": f.file,
+                        "category": f.category,
+                        "agent_name": agent_name,
                     }
                     all_findings_flat.append(entry)
                     active_sigs.add(_fsig(f.file, f.category, agent_name))
@@ -507,30 +600,43 @@ async def _run_pipeline(
                             active_sigs.add(_fsig(f.file, f.category, contrib_name))
 
             matched = await match_dismissals_to_findings(
-                pr.pr_id, pr.repo, pr.platform.value, all_findings_flat,
+                pr.pr_id,
+                pr.repo,
+                pr.platform.value,
+                all_findings_flat,
             )
             archived = await archive_stale_dismissals(
-                pr.pr_id, pr.repo, pr.platform.value, active_sigs,
+                pr.pr_id,
+                pr.repo,
+                pr.platform.value,
+                active_sigs,
             )
 
             # Adjust score: exclude false_positive/by_design from combined score
-            score_excluded = {sig for sig, d in matched.items() if d["status"] in ("false_positive", "by_design")}
+            score_excluded = {
+                sig for sig, d in matched.items() if d["status"] in ("false_positive", "by_design")
+            }
             if score_excluded:
-                _plog("info", "dismissals",
-                      f"{len(score_excluded)} dismissed finding(s) excluded from score "
-                      f"(false_positive/by_design).")
+                _plog(
+                    "info",
+                    "dismissals",
+                    f"{len(score_excluded)} dismissed finding(s) excluded from score "
+                    f"(false_positive/by_design).",
+                )
 
             if matched:
-                _plog("info", "dismissals",
-                      f"{len(matched)} finding(s) matched existing dismissals.")
+                _plog(
+                    "info", "dismissals", f"{len(matched)} finding(s) matched existing dismissals."
+                )
             if archived:
-                _plog("info", "dismissals",
-                      f"{archived} stale dismissal(s) archived (findings didn't reappear).")
+                _plog(
+                    "info",
+                    "dismissals",
+                    f"{archived} stale dismissal(s) archived (findings didn't reappear).",
+                )
 
             # Build review diff summary
-            prev_finding_sigs = {
-                d.get("signature") for d in dismissals
-            }
+            prev_finding_sigs = {d.get("signature") for d in dismissals}
             new_sigs = active_sigs - prev_finding_sigs
             resolved_sigs = prev_finding_sigs - active_sigs
             carried_sigs = active_sigs & prev_finding_sigs
@@ -540,9 +646,12 @@ async def _run_pipeline(
                 "carried_over": len(carried_sigs),
                 "dismissed": len(matched),
             }
-            _plog("info", "dismissals",
-                  f"Review diff: {len(new_sigs)} new, {len(resolved_sigs)} resolved, "
-                  f"{len(carried_sigs)} carried over, {len(matched)} dismissed.")
+            _plog(
+                "info",
+                "dismissals",
+                f"Review diff: {len(new_sigs)} new, {len(resolved_sigs)} resolved, "
+                f"{len(carried_sigs)} carried over, {len(matched)} dismissed.",
+            )
 
         except Exception as e:
             log.warning("dismissal_matching_failed", error=str(e))
@@ -552,9 +661,14 @@ async def _run_pipeline(
     # Post results
     if post_comment:
         await _post_results(
-            adapter, pr, result, config,
-            base_url=base_url, comment_mode=comment_mode,
-            review_id=review_db_id, storage=storage,
+            adapter,
+            pr,
+            result,
+            config,
+            base_url=base_url,
+            comment_mode=comment_mode,
+            review_id=review_db_id,
+            storage=storage,
         )
 
     # Persist to DB
@@ -594,7 +708,8 @@ async def run_re_review(
     if storage:
         try:
             review_db_id = await storage.create_review_record(
-                pr, comment_mode=original_review.get("comment_mode", "summary"),
+                pr,
+                comment_mode=original_review.get("comment_mode", "summary"),
             )
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
@@ -602,18 +717,27 @@ async def run_re_review(
     pipeline_log: list[dict] = []
 
     def _plog(level: str, stage: str, msg: str, **extra):
-        pipeline_log.append({
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "level": level, "stage": stage, "msg": msg,
-            **{k: v for k, v in extra.items() if v is not None},
-        })
+        pipeline_log.append(
+            {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "level": level,
+                "stage": stage,
+                "msg": msg,
+                **{k: v for k, v in extra.items() if v is not None},
+            }
+        )
 
     def _emit(stage: str, detail: str = "", **extra):
-        event_bus.publish(ReviewEvent(
-            review_id=str(review_db_id) if review_db_id else "",
-            pr_id=pr.pr_id, repo=pr.repo, stage=stage,
-            detail=detail, extra=extra,
-        ))
+        event_bus.publish(
+            ReviewEvent(
+                review_id=str(review_db_id) if review_db_id else "",
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                stage=stage,
+                detail=detail,
+                extra=extra,
+            )
+        )
 
     async def _update_stage(stage: str, detail: str = ""):
         _emit(stage, detail)
@@ -627,9 +751,18 @@ async def run_re_review(
 
     try:
         return await _run_re_review_pipeline(
-            pr, adapter, original_review, service_config, storage,
-            review_db_id, pipeline_log, _plog, _emit, _update_stage,
-            post_comment=post_comment, base_url=base_url,
+            pr,
+            adapter,
+            original_review,
+            service_config,
+            storage,
+            review_db_id,
+            pipeline_log,
+            _plog,
+            _emit,
+            _update_stage,
+            post_comment=post_comment,
+            base_url=base_url,
         )
     except Exception as exc:
         if storage and review_db_id:
@@ -649,7 +782,9 @@ async def _run_re_review_pipeline(
     storage,
     review_db_id: uuid.UUID | None,
     pipeline_log: list[dict],
-    _plog, _emit, _update_stage,
+    _plog,
+    _emit,
+    _update_stage,
     *,
     post_comment: bool = True,
     base_url: str = "",
@@ -670,7 +805,9 @@ async def _run_re_review_pipeline(
     if old_sha and new_sha and old_sha != new_sha:
         try:
             incr_diff = await adapter.fetch_compare_diff(
-                pr.repo, old_sha, new_sha,
+                pr.repo,
+                old_sha,
+                new_sha,
                 project=getattr(pr, "project", "") or "",
             )
             # Build a text representation of the incremental diff
@@ -682,16 +819,25 @@ async def _run_re_review_pipeline(
                 else:
                     parts.append("*[no patch content]*")
             incremental_diff_text = "\n".join(parts)
-            _plog("info", "discovery",
-                  f"Incremental diff: {len(incr_diff.files)} file(s) changed "
-                  f"between {old_sha[:8]} and {new_sha[:8]}.")
+            _plog(
+                "info",
+                "discovery",
+                f"Incremental diff: {len(incr_diff.files)} file(s) changed "
+                f"between {old_sha[:8]} and {new_sha[:8]}.",
+            )
         except Exception as e:
-            _plog("warn", "discovery",
-                  f"Could not fetch incremental diff: {e}. "
-                  f"Re-evaluating findings without new code context.")
+            _plog(
+                "warn",
+                "discovery",
+                f"Could not fetch incremental diff: {e}. "
+                f"Re-evaluating findings without new code context.",
+            )
     else:
-        _plog("info", "discovery",
-              "No new commits since last review. Re-evaluating findings on their own merits.")
+        _plog(
+            "info",
+            "discovery",
+            "No new commits since last review. Re-evaluating findings on their own merits.",
+        )
 
     # --- Step 2: Collect non-dismissed findings grouped by agent ---
     await _update_stage("discovery", "Collecting original findings")
@@ -700,8 +846,11 @@ async def _run_re_review_pipeline(
     if storage:
         try:
             from pr_guardian.persistence.storage import finding_signature
+
             dismissals = await storage.get_active_dismissals(
-                pr.pr_id, pr.repo, pr.platform.value,
+                pr.pr_id,
+                pr.repo,
+                pr.platform.value,
             )
             for d in dismissals:
                 dismissed_sigs.add(d["signature"])
@@ -717,8 +866,11 @@ async def _run_re_review_pipeline(
         for f in agent_result.get("findings", []):
             total_original += 1
             from pr_guardian.persistence.storage import finding_signature
+
             sig = finding_signature(
-                f.get("file", ""), f.get("category", ""), agent_name,
+                f.get("file", ""),
+                f.get("category", ""),
+                agent_name,
             )
             if sig in dismissed_sigs:
                 total_dismissed += 1
@@ -726,9 +878,12 @@ async def _run_re_review_pipeline(
             agent_findings.setdefault(agent_name, []).append(f)
 
     active_findings = sum(len(fs) for fs in agent_findings.values())
-    _plog("info", "discovery",
-          f"Original review: {total_original} finding(s), "
-          f"{total_dismissed} dismissed, {active_findings} to re-evaluate.")
+    _plog(
+        "info",
+        "discovery",
+        f"Original review: {total_original} finding(s), "
+        f"{total_dismissed} dismissed, {active_findings} to re-evaluate.",
+    )
 
     comment_mode = original_review.get("comment_mode", "summary")
     original_review_id = original_review.get("review_id", "")
@@ -736,20 +891,28 @@ async def _run_re_review_pipeline(
     if active_findings == 0:
         _plog("info", "decision", "No active findings to re-evaluate. Auto-approving.")
         result = ReviewResult(
-            pr_id=pr.pr_id, repo=pr.repo,
+            pr_id=pr.pr_id,
+            repo=pr.repo,
             risk_tier=RiskTier.TRIVIAL,
             repo_risk_class=_parse_risk_class(original_review.get("repo_risk_class")),
             review_id=str(review_db_id) if review_db_id else "",
-            mechanical_results=[], mechanical_passed=True,
-            decision=Decision.AUTO_APPROVE, agent_results=[],
+            mechanical_results=[],
+            mechanical_passed=True,
+            decision=Decision.AUTO_APPROVE,
+            agent_results=[],
             summary="Re-review: all original findings have been dismissed.",
             pipeline_log=pipeline_log,
         )
         if post_comment:
             await _post_results(
-                adapter, pr, result, config,
-                base_url=base_url, comment_mode=comment_mode,
-                review_id=review_db_id, storage=storage,
+                adapter,
+                pr,
+                result,
+                config,
+                base_url=base_url,
+                comment_mode=comment_mode,
+                review_id=review_db_id,
+                storage=storage,
                 original_review_id=original_review_id,
             )
         await _save_result(storage, review_db_id, result, _emit)
@@ -777,25 +940,30 @@ async def _run_re_review_pipeline(
         if getattr(pr, "project", "") and "/" not in pr.repo:
             repo_arg = f"{pr.project}/{pr.repo}"
         for fpath in file_paths_ordered:
-            fetch_tasks.append(
-                adapter.fetch_file_content(repo_arg, fpath, ref=new_sha)
-            )
+            fetch_tasks.append(adapter.fetch_file_content(repo_arg, fpath, ref=new_sha))
         results = await asyncio.gather(*fetch_tasks, return_exceptions=True)
         for fpath, result in zip(file_paths_ordered, results):
             if isinstance(result, Exception):
-                _plog("debug", "discovery",
-                      f"Could not fetch {fpath} at {new_sha[:8]}: {result}")
+                _plog("debug", "discovery", f"Could not fetch {fpath} at {new_sha[:8]}: {result}")
             elif result:
                 current_file_contents[fpath] = result
 
-        _plog("info", "discovery",
-              f"Fetched current content for {len(current_file_contents)}/{len(finding_files)} finding file(s).")
+        _plog(
+            "info",
+            "discovery",
+            f"Fetched current content for {len(current_file_contents)}/{len(finding_files)} finding file(s).",
+        )
 
     # --- Step 3: Run agents in re-evaluation mode ---
-    await _update_stage("agents", f"Re-evaluating {active_findings} finding(s) across {len(agent_findings)} agent(s)")
+    await _update_stage(
+        "agents",
+        f"Re-evaluating {active_findings} finding(s) across {len(agent_findings)} agent(s)",
+    )
 
     pr_metadata = {
-        "title": pr.title, "repo": pr.repo, "author": pr.author,
+        "title": pr.title,
+        "repo": pr.repo,
+        "author": pr.author,
     }
 
     total_input_tokens = 0
@@ -810,8 +978,12 @@ async def _run_re_review_pipeline(
             continue
         agent = agent_cls(config)
         re_eval_tasks.append(
-            agent.re_evaluate(findings, incremental_diff_text, pr_metadata,
-                              current_file_contents=current_file_contents)
+            agent.re_evaluate(
+                findings,
+                incremental_diff_text,
+                pr_metadata,
+                current_file_contents=current_file_contents,
+            )
         )
         agent_names_ordered.append(agent_name)
 
@@ -836,27 +1008,35 @@ async def _run_re_review_pipeline(
 
             if status == "resolved":
                 resolved_count += 1
-                _plog("info", "agents",
-                      f"Agent {agent_name}: finding {idx+1} RESOLVED — {ev.get('reason', '')[:100]}")
+                _plog(
+                    "info",
+                    "agents",
+                    f"Agent {agent_name}: finding {idx + 1} RESOLVED — {ev.get('reason', '')[:100]}",
+                )
                 continue
 
             severity = ev.get("updated_severity") or orig.get("severity", "low")
             description = ev.get("updated_description") or orig.get("description", "")
             if status == "updated":
-                _plog("info", "agents",
-                      f"Agent {agent_name}: finding {idx+1} UPDATED — {ev.get('reason', '')[:100]}")
+                _plog(
+                    "info",
+                    "agents",
+                    f"Agent {agent_name}: finding {idx + 1} UPDATED — {ev.get('reason', '')[:100]}",
+                )
 
-            kept.append(Finding(
-                severity=Severity(severity),
-                certainty=Certainty(orig.get("certainty", "uncertain")),
-                category=orig.get("category", ""),
-                language=orig.get("language", ""),
-                file=orig.get("file", ""),
-                line=orig.get("line"),
-                description=description,
-                suggestion=orig.get("suggestion", ""),
-                cwe=orig.get("cwe"),
-            ))
+            kept.append(
+                Finding(
+                    severity=Severity(severity),
+                    certainty=Certainty(orig.get("certainty", "uncertain")),
+                    category=orig.get("category", ""),
+                    language=orig.get("language", ""),
+                    file=orig.get("file", ""),
+                    line=orig.get("line"),
+                    description=description,
+                    suggestion=orig.get("suggestion", ""),
+                    cwe=orig.get("cwe"),
+                )
+            )
 
         # Track tokens from first evaluation's meta
         if evaluations and evaluations[0].get("_meta"):
@@ -868,25 +1048,34 @@ async def _run_re_review_pipeline(
             agent_cost = _estimate_cost(meta.get("model", ""), in_tok, out_tok)
             total_cost += agent_cost
 
-        verdict = Verdict.PASS if not kept else (
-            Verdict.FLAG_HUMAN if any(f.severity in (Severity.HIGH, Severity.CRITICAL) for f in kept)
-            else Verdict.WARN
+        verdict = (
+            Verdict.PASS
+            if not kept
+            else (
+                Verdict.FLAG_HUMAN
+                if any(f.severity in (Severity.HIGH, Severity.CRITICAL) for f in kept)
+                else Verdict.WARN
+            )
         )
 
-        _plog("info", "agents",
-              f"Agent {agent_name}: {len(kept)} kept, {resolved_count} resolved.")
+        _plog(
+            "info", "agents", f"Agent {agent_name}: {len(kept)} kept, {resolved_count} resolved."
+        )
 
-        kept_findings.append(AgentResult(
-            agent_name=agent_name,
-            verdict=verdict,
-            findings=kept,
-        ))
+        kept_findings.append(
+            AgentResult(
+                agent_name=agent_name,
+                verdict=verdict,
+                findings=kept,
+            )
+        )
 
     # Compute decision
     all_kept = sum(len(ar.findings) for ar in kept_findings)
     has_high = any(
         f.severity in (Severity.HIGH, Severity.CRITICAL)
-        for ar in kept_findings for f in ar.findings
+        for ar in kept_findings
+        for f in ar.findings
     )
 
     if all_kept == 0:
@@ -897,20 +1086,27 @@ async def _run_re_review_pipeline(
         summary_text = f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved). High-severity findings need attention."
     else:
         decision = Decision.HUMAN_REVIEW
-        summary_text = f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved)."
+        summary_text = (
+            f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved)."
+        )
 
-    risk_tier = RiskTier.HIGH if has_high else (RiskTier.MEDIUM if all_kept > 0 else RiskTier.TRIVIAL)
+    risk_tier = (
+        RiskTier.HIGH if has_high else (RiskTier.MEDIUM if all_kept > 0 else RiskTier.TRIVIAL)
+    )
 
     # Build combined score from kept findings
     from pr_guardian.decision.engine import combined_score as calc_score
+
     score = calc_score(kept_findings, config) if all_kept > 0 else 0.0
 
     result = ReviewResult(
-        pr_id=pr.pr_id, repo=pr.repo,
+        pr_id=pr.pr_id,
+        repo=pr.repo,
         risk_tier=risk_tier,
         repo_risk_class=_parse_risk_class(original_review.get("repo_risk_class")),
         review_id=str(review_db_id) if review_db_id else "",
-        mechanical_results=[], mechanical_passed=True,
+        mechanical_results=[],
+        mechanical_passed=True,
         decision=decision,
         agent_results=kept_findings,
         combined_score=score,
@@ -930,21 +1126,35 @@ async def _run_re_review_pipeline(
 
     if post_comment:
         await _post_results(
-            adapter, pr, result, config,
-            base_url=base_url, comment_mode=comment_mode,
-            review_id=review_db_id, storage=storage,
+            adapter,
+            pr,
+            result,
+            config,
+            base_url=base_url,
+            comment_mode=comment_mode,
+            review_id=review_db_id,
+            storage=storage,
             original_review_id=original_review_id,
         )
     await _save_result(storage, review_db_id, result, _emit)
 
-    log.info("re_review_complete", pr_id=pr.pr_id, decision=decision.value,
-             kept=all_kept, resolved=active_findings - all_kept)
+    log.info(
+        "re_review_complete",
+        pr_id=pr.pr_id,
+        decision=decision.value,
+        kept=all_kept,
+        resolved=active_findings - all_kept,
+    )
     return result
 
 
 def _parse_risk_class(value: str | None) -> RepoRiskClass:
     """Parse a risk class string, with fallback."""
-    mapping = {"standard": RepoRiskClass.STANDARD, "elevated": RepoRiskClass.ELEVATED, "critical": RepoRiskClass.CRITICAL}
+    mapping = {
+        "standard": RepoRiskClass.STANDARD,
+        "elevated": RepoRiskClass.ELEVATED,
+        "critical": RepoRiskClass.CRITICAL,
+    }
     return mapping.get(value or "", RepoRiskClass.STANDARD)
 
 
@@ -971,12 +1181,15 @@ async def _save_result(storage, review_db_id, result, _emit) -> None:
 def _convert_mechanical(r) -> object:
     """Convert MechanicalCheckResult to the output model."""
     from pr_guardian.models.output import MechanicalResult
+
     return MechanicalResult(
         tool=r.tool,
         passed=r.passed,
-        severity=r.severity.value if hasattr(r.severity, 'value') else str(r.severity),
-        findings=[{"file": f.file, "line": f.line, "rule": f.rule, "message": f.message}
-                  for f in r.findings],
+        severity=r.severity.value if hasattr(r.severity, "value") else str(r.severity),
+        findings=[
+            {"file": f.file, "line": f.line, "rule": f.rule, "message": f.message}
+            for f in r.findings
+        ],
         error=r.error,
     )
 
@@ -1010,8 +1223,14 @@ async def _post_results(
 
     if comment_mode == "inline":
         await _post_inline_and_summary(
-            adapter, pr, result, config, comment, labels,
-            review_id=review_id, storage=storage,
+            adapter,
+            pr,
+            result,
+            config,
+            comment,
+            labels,
+            review_id=review_id,
+            storage=storage,
             original_review_id=original_review_id,
         )
         return
@@ -1080,8 +1299,7 @@ async def _post_inline_and_summary(
         f
         for ar in result.agent_results
         for f in ar.findings
-        if f.line is not None
-        and SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord
+        if f.line is not None and SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord
     ]
 
     # Collect qualifying findings from mechanical results
@@ -1093,15 +1311,17 @@ async def _post_inline_and_summary(
             line = f_dict.get("line")
             if line is None:
                 continue
-            qualifying.append(Finding(
-                severity=tool_sev,
-                certainty=Certainty.DETECTED,
-                category=f_dict.get("rule", mech.tool),
-                language="",
-                file=f_dict.get("file", ""),
-                line=line,
-                description=f_dict.get("message", ""),
-            ))
+            qualifying.append(
+                Finding(
+                    severity=tool_sev,
+                    certainty=Certainty.DETECTED,
+                    category=f_dict.get("rule", mech.tool),
+                    language="",
+                    file=f_dict.get("file", ""),
+                    line=line,
+                    description=f_dict.get("message", ""),
+                )
+            )
 
     # Delete stale inline comments from the previous review (re-review path)
     if original_review_id and storage:
@@ -1118,7 +1338,11 @@ async def _post_inline_and_summary(
             posted_ids = await adapter.post_inline_comments(pr, qualifying)
             if posted_ids and storage and review_id:
                 await storage.save_inline_comment_ids(
-                    review_id, posted_ids, pr.platform.value, pr.pr_id, pr.repo,
+                    review_id,
+                    posted_ids,
+                    pr.platform.value,
+                    pr.pr_id,
+                    pr.repo,
                 )
         except Exception as e:
             log.error("post_inline_comments_failed", pr_id=pr.pr_id, error=str(e))

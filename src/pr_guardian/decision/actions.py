@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 from pr_guardian.models.context import TrustTier
-from pr_guardian.models.findings import Finding, Verdict
+from pr_guardian.models.findings import Finding
 from pr_guardian.models.output import Decision, ReviewResult
 
 SEVERITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -99,16 +99,13 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     detail_url = _detail_url(result.review_id, base_url)
     if detail_url:
         lines.append("")
-        lines.append(
-            f"[\U0001f50e View full findings \u2192]({detail_url})"
-        )
+        lines.append(f"[\U0001f50e View full findings \u2192]({detail_url})")
 
     lines.append("")
     lines.append("---")
     lines.append("*PR Guardian \u2014 automated review*")
 
     return "\n".join(lines)
-
 
 
 def _trust_tier_display(result: ReviewResult) -> str:

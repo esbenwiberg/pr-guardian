@@ -4,6 +4,7 @@ Layer 1: Built-in defaults (always available)
 Layer 2: Derived from security_surface config (if no explicit trust_tiers)
 Layer 3: Explicit trust_tiers.rules (full control)
 """
+
 from __future__ import annotations
 
 from fnmatch import fnmatch
@@ -15,39 +16,73 @@ from pr_guardian.models.context import (
     RepoRiskClass,
     TrustTier,
     TrustTierResult,
-    max_trust_tier,
 )
 
 log = structlog.get_logger()
 
 # Layer 1: Built-in defaults — common conventions that work across most codebases.
 _BUILTIN_RULES: list[tuple[TrustTier, list[str], str]] = [
-    (TrustTier.AI_ONLY, [
-        "**/*.md", "**/docs/**", "CHANGELOG*",
-        "**/package-lock.json", "**/*.lock",
-        "**/migrations/**", "**/.prettierrc*", "**/.eslintrc*",
-        "**/generated/**",
-    ], "Formatting, docs, or generated files"),
-
-    (TrustTier.SPOT_CHECK, [
-        "**/tests/**", "**/*.test.*", "**/*.spec.*",
-        "**/controllers/**", "**/handlers/**",
-        "**/models/**", "**/repositories/**",
-    ], "Standard CRUD, tests, or data access"),
-
-    (TrustTier.MANDATORY_HUMAN, [
-        "**/middleware/**", "**/services/**",
-        "**/infra/**", "**/terraform/**", "**/docker/**", "**/k8s/**",
-        "**/config/**", "**/.env*",
-        ".github/workflows/**", "**/Dockerfile*",
-    ], "Business logic, infrastructure, or configuration"),
-
-    (TrustTier.HUMAN_PRIMARY, [
-        "**/auth/**", "**/crypto/**", "**/security/**",
-        "**/middleware/auth*", "**/permissions/**", "**/rbac/**",
-        "**/oauth/**", "**/jwt/**",
-        "**/payments/**", "**/billing/**", "**/secrets/**",
-    ], "Security-critical code"),
+    (
+        TrustTier.AI_ONLY,
+        [
+            "**/*.md",
+            "**/docs/**",
+            "CHANGELOG*",
+            "**/package-lock.json",
+            "**/*.lock",
+            "**/migrations/**",
+            "**/.prettierrc*",
+            "**/.eslintrc*",
+            "**/generated/**",
+        ],
+        "Formatting, docs, or generated files",
+    ),
+    (
+        TrustTier.SPOT_CHECK,
+        [
+            "**/tests/**",
+            "**/*.test.*",
+            "**/*.spec.*",
+            "**/controllers/**",
+            "**/handlers/**",
+            "**/models/**",
+            "**/repositories/**",
+        ],
+        "Standard CRUD, tests, or data access",
+    ),
+    (
+        TrustTier.MANDATORY_HUMAN,
+        [
+            "**/middleware/**",
+            "**/services/**",
+            "**/infra/**",
+            "**/terraform/**",
+            "**/docker/**",
+            "**/k8s/**",
+            "**/config/**",
+            "**/.env*",
+            ".github/workflows/**",
+            "**/Dockerfile*",
+        ],
+        "Business logic, infrastructure, or configuration",
+    ),
+    (
+        TrustTier.HUMAN_PRIMARY,
+        [
+            "**/auth/**",
+            "**/crypto/**",
+            "**/security/**",
+            "**/middleware/auth*",
+            "**/permissions/**",
+            "**/rbac/**",
+            "**/oauth/**",
+            "**/jwt/**",
+            "**/payments/**",
+            "**/billing/**",
+            "**/secrets/**",
+        ],
+        "Security-critical code",
+    ),
 ]
 
 # Layer 2: Mapping from security_surface classifications to trust tiers.
@@ -95,8 +130,7 @@ def classify_trust_tier(
     all_tiers = list(result.file_tiers.values())
     pr_tier = max(all_tiers, key=lambda t: _TIER_ORDER[t])
     triggering: list[str] = [
-        fp for fp, ft in result.file_tiers.items()
-        if ft == pr_tier and ft != default_tier
+        fp for fp, ft in result.file_tiers.items() if ft == pr_tier and ft != default_tier
     ]
 
     result.resolved_tier = pr_tier

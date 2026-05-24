@@ -158,7 +158,9 @@ class BaseAgent:
             parts.append(f"```\n{incremental_diff}\n```")
         else:
             parts.append("\n## Changes Since Last Review\n")
-            parts.append("*No new commits since the last review. Re-evaluate findings on their own merits.*")
+            parts.append(
+                "*No new commits since the last review. Re-evaluate findings on their own merits.*"
+            )
 
         # Include current file content so the agent can verify findings against
         # the actual code at HEAD (critical when patches are missing or the
@@ -177,7 +179,10 @@ class BaseAgent:
                 max_lines = 300
                 lines = content.splitlines()
                 if len(lines) > max_lines:
-                    content = "\n".join(lines[:max_lines]) + f"\n... ({len(lines) - max_lines} more lines truncated)"
+                    content = (
+                        "\n".join(lines[:max_lines])
+                        + f"\n... ({len(lines) - max_lines} more lines truncated)"
+                    )
                 parts.append(f"### {fp}")
                 parts.append(f"```\n{content}\n```\n")
 
@@ -217,7 +222,9 @@ class BaseAgent:
                 for i in range(len(findings))
             ]
 
-    async def review(self, context: ReviewContext, *, dismissal_context: str | None = None) -> AgentResult:
+    async def review(
+        self, context: ReviewContext, *, dismissal_context: str | None = None
+    ) -> AgentResult:
         """Run the agent review. Override for custom behavior."""
         languages = list(context.language_map.languages.keys())
         override = await storage.get_prompt_override(self.agent_name)
@@ -225,7 +232,8 @@ class BaseAgent:
         system_prompt += f"\n\n{AGENT_OUTPUT_SCHEMA}"
 
         user_message = build_agent_context(
-            context, self.agent_name,
+            context,
+            self.agent_name,
             max_context_tokens=self.config.agents.max_context_tokens,
             dismissal_context=dismissal_context,
         )

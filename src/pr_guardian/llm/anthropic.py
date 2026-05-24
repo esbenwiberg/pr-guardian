@@ -25,6 +25,7 @@ class AnthropicClient:
         if self._client is None:
             import anthropic
             import httpx
+
             kwargs: dict = {
                 "api_key": self._api_key,
                 "timeout": httpx.Timeout(self._timeout_seconds, connect=10.0),

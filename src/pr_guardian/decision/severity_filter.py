@@ -5,16 +5,16 @@ runs *after* scoring to remove findings that are noise for the given risk tier,
 so developers only see actionable items. Suppressed findings are still reflected
 in the combined_score and decision — this is display-level filtering only.
 """
+
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import replace
 
 import structlog
 
 from pr_guardian.config.schema import GuardianConfig, SeverityFloorRule
 from pr_guardian.models.context import RiskTier
-from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
+from pr_guardian.models.findings import AgentResult, Finding, Verdict
 
 log = structlog.get_logger()
 

@@ -19,9 +19,7 @@ def _compute_ci_status(runs: list[dict]) -> str:
         return "unknown"
     in_progress = any(r.get("status") != "completed" for r in runs)
     conclusions = {
-        r.get("conclusion")
-        for r in runs
-        if r.get("status") == "completed" and r.get("conclusion")
+        r.get("conclusion") for r in runs if r.get("status") == "completed" and r.get("conclusion")
     }
     if any(c in ("failure", "timed_out", "action_required") for c in conclusions):
         return "failure"
@@ -91,17 +89,21 @@ class GitHubAdapter:
         diff_files: list[DiffFile] = []
         for f in files_data:
             status_map = {
-                "added": "added", "removed": "deleted",
-                "modified": "modified", "renamed": "renamed",
+                "added": "added",
+                "removed": "deleted",
+                "modified": "modified",
+                "renamed": "renamed",
             }
-            diff_files.append(DiffFile(
-                path=f.get("filename", ""),
-                status=status_map.get(f.get("status", ""), "modified"),
-                old_path=f.get("previous_filename"),
-                additions=f.get("additions", 0),
-                deletions=f.get("deletions", 0),
-                patch=f.get("patch", ""),
-            ))
+            diff_files.append(
+                DiffFile(
+                    path=f.get("filename", ""),
+                    status=status_map.get(f.get("status", ""), "modified"),
+                    old_path=f.get("previous_filename"),
+                    additions=f.get("additions", 0),
+                    deletions=f.get("deletions", 0),
+                    patch=f.get("patch", ""),
+                )
+            )
         return Diff(files=diff_files)
 
     async def post_comment(self, pr: PlatformPR, body: str) -> None:
@@ -162,7 +164,12 @@ class GitHubAdapter:
     # --- Scan-mode methods ---
 
     async def fetch_recent_commits(
-        self, repo: str, branch: str, since: str, until: str | None = None, per_page: int = 100,
+        self,
+        repo: str,
+        branch: str,
+        since: str,
+        until: str | None = None,
+        per_page: int = 100,
     ) -> list[dict]:
         """Fetch commits on branch since a date (ISO 8601)."""
         client = self._get_client()
@@ -186,7 +193,10 @@ class GitHubAdapter:
         return all_commits
 
     async def fetch_merged_prs(
-        self, repo: str, since: str, base: str = "main",
+        self,
+        repo: str,
+        since: str,
+        base: str = "main",
     ) -> list[dict]:
         """Fetch recently merged PRs (closed + merged_at >= since)."""
         client = self._get_client()
@@ -210,7 +220,10 @@ class GitHubAdapter:
         return merged
 
     async def fetch_file_content(
-        self, repo: str, path: str, ref: str = "HEAD",
+        self,
+        repo: str,
+        path: str,
+        ref: str = "HEAD",
     ) -> str:
         """Fetch file content from the repo."""
         client = self._get_client()
@@ -226,7 +239,10 @@ class GitHubAdapter:
         return data.get("content", "")
 
     async def list_repo_files(
-        self, repo: str, ref: str = "HEAD", path: str = "",
+        self,
+        repo: str,
+        ref: str = "HEAD",
+        path: str = "",
     ) -> list[str]:
         """List files in repo (recursive tree)."""
         client = self._get_client()
@@ -239,7 +255,10 @@ class GitHubAdapter:
         return [item["path"] for item in tree if item.get("type") == "blob"]
 
     async def list_recently_changed_files(
-        self, repo: str, ref: str = "HEAD", limit: int = 300,
+        self,
+        repo: str,
+        ref: str = "HEAD",
+        limit: int = 300,
     ) -> list[str]:
         """Walk recent commits on ``ref`` and return up to ``limit`` unique paths.
 
@@ -304,7 +323,11 @@ class GitHubAdapter:
         return ordered
 
     async def fetch_compare_diff(
-        self, repo: str, base_sha: str, head_sha: str, project: str = "",
+        self,
+        repo: str,
+        base_sha: str,
+        head_sha: str,
+        project: str = "",
     ) -> Diff:
         """Fetch diff between two commits using the compare API."""
         client = self._get_client()
@@ -317,21 +340,28 @@ class GitHubAdapter:
         diff_files: list[DiffFile] = []
         for f in data.get("files", []):
             status_map = {
-                "added": "added", "removed": "deleted",
-                "modified": "modified", "renamed": "renamed",
+                "added": "added",
+                "removed": "deleted",
+                "modified": "modified",
+                "renamed": "renamed",
             }
-            diff_files.append(DiffFile(
-                path=f.get("filename", ""),
-                status=status_map.get(f.get("status", ""), "modified"),
-                old_path=f.get("previous_filename"),
-                additions=f.get("additions", 0),
-                deletions=f.get("deletions", 0),
-                patch=f.get("patch", ""),
-            ))
+            diff_files.append(
+                DiffFile(
+                    path=f.get("filename", ""),
+                    status=status_map.get(f.get("status", ""), "modified"),
+                    old_path=f.get("previous_filename"),
+                    additions=f.get("additions", 0),
+                    deletions=f.get("deletions", 0),
+                    patch=f.get("patch", ""),
+                )
+            )
         return Diff(files=diff_files)
 
     async def fetch_pr_files(
-        self, repo: str, pr_id: int | str, project: str = "",
+        self,
+        repo: str,
+        pr_id: int | str,
+        project: str = "",
     ) -> list[dict]:
         """Fetch changed files for a PR."""
         client = self._get_client()
@@ -343,7 +373,11 @@ class GitHubAdapter:
         return resp.json()
 
     async def fetch_commits_for_path(
-        self, repo: str, path: str, per_page: int = 1, project: str = "",
+        self,
+        repo: str,
+        path: str,
+        per_page: int = 1,
+        project: str = "",
     ) -> list[dict]:
         """Fetch recent commits touching a specific file."""
         client = self._get_client()
@@ -355,7 +389,8 @@ class GitHubAdapter:
         return resp.json()
 
     async def fetch_pr_body_and_commits(
-        self, pr: PlatformPR,
+        self,
+        pr: PlatformPR,
     ) -> tuple[str, list[str]]:
         """Fetch the PR description and commit messages for capability clustering.
 
@@ -421,7 +456,9 @@ class GitHubAdapter:
                 if exc.response.status_code == 422:
                     log.debug(
                         "github_inline_comment_skipped",
-                        file=file, line=line, reason="line_not_in_diff",
+                        file=file,
+                        line=line,
+                        reason="line_not_in_diff",
                     )
                 else:
                     raise
@@ -511,9 +548,7 @@ class GitHubAdapter:
                         params={"per_page": 100},
                     )
                     if ci_resp.status_code == 200:
-                        pr["_ci_status"] = _compute_ci_status(
-                            ci_resp.json().get("check_runs", [])
-                        )
+                        pr["_ci_status"] = _compute_ci_status(ci_resp.json().get("check_runs", []))
                     else:
                         pr["_ci_status"] = "unknown"
                 except Exception:

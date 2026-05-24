@@ -1,4 +1,5 @@
 """Tests for the POST /api/review endpoint."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -58,8 +59,16 @@ class TestPRReviewQueueing:
         """comment_mode=inline must return 202 without fetching the PR from GitHub."""
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -84,12 +93,21 @@ class TestPRReviewQueueing:
         and the fallback link to /reviews/{id} returns 422.
         """
         import uuid as _uuid
+
         mock_adapter = _mock_adapter()
         fake_id = _uuid.uuid4()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=fake_id),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                return_value=fake_id,
+            ),
         ):
             resp = client.post(
                 "/api/review",
@@ -104,9 +122,17 @@ class TestPRReviewQueueing:
         knows it can't track the run live."""
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, side_effect=RuntimeError("no db")),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("no db"),
+            ),
         ):
             resp = client.post(
                 "/api/review",
@@ -119,8 +145,16 @@ class TestPRReviewQueueing:
     def test_comment_mode_summary_accepted(self, client):
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -136,8 +170,16 @@ class TestPRReviewQueueing:
     def test_comment_mode_none_accepted(self, client):
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task"),
         ):
             resp = client.post(
@@ -150,8 +192,16 @@ class TestPRReviewQueueing:
         """_run_review_background must be called with the stub (no live network call)."""
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             client.post(
@@ -165,8 +215,16 @@ class TestPRReviewQueueing:
     def test_dry_run_returns_without_queuing(self, client):
         mock_adapter = _mock_adapter()
         with (
-            patch("pr_guardian.api.review.create_github_adapter", new_callable=AsyncMock, return_value=mock_adapter),
-            patch("pr_guardian.persistence.storage.create_review_record", new_callable=AsyncMock, return_value=None),
+            patch(
+                "pr_guardian.api.review.create_github_adapter",
+                new_callable=AsyncMock,
+                return_value=mock_adapter,
+            ),
+            patch(
+                "pr_guardian.persistence.storage.create_review_record",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
             patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
         ):
             resp = client.post(
@@ -188,14 +246,27 @@ class TestPRReviewBackground:
         from pr_guardian.models.pr import Platform, PlatformPR
 
         stub = PlatformPR(
-            platform=Platform.GITHUB, pr_id="1", repo="owner/repo",
-            repo_url="", source_branch="", target_branch="",
-            author="", title="", head_commit_sha="", org="owner",
+            platform=Platform.GITHUB,
+            pr_id="1",
+            repo="owner/repo",
+            repo_url="",
+            source_branch="",
+            target_branch="",
+            author="",
+            title="",
+            head_commit_sha="",
+            org="owner",
         )
         adapter = _mock_adapter()
 
-        with patch("pr_guardian.api.review._hydrate_pr", new_callable=AsyncMock, side_effect=RuntimeError("creds expired")):
-            await _run_review_background(stub, adapter, "none", "http://localhost", platform_name="github")
+        with patch(
+            "pr_guardian.api.review._hydrate_pr",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("creds expired"),
+        ):
+            await _run_review_background(
+                stub, adapter, "none", "http://localhost", platform_name="github"
+            )
         # Should not raise; error is logged and swallowed
 
     @pytest.mark.asyncio
@@ -204,19 +275,31 @@ class TestPRReviewBackground:
         from pr_guardian.models.pr import Platform, PlatformPR
 
         stub = PlatformPR(
-            platform=Platform.GITHUB, pr_id="1", repo="owner/repo",
-            repo_url="", source_branch="", target_branch="",
-            author="", title="", head_commit_sha="", org="owner",
+            platform=Platform.GITHUB,
+            pr_id="1",
+            repo="owner/repo",
+            repo_url="",
+            source_branch="",
+            target_branch="",
+            author="",
+            title="",
+            head_commit_sha="",
+            org="owner",
         )
         import dataclasses
+
         hydrated = dataclasses.replace(stub, title="My PR", author="alice")
         adapter = _mock_adapter()
 
         with (
-            patch("pr_guardian.api.review._hydrate_pr", new_callable=AsyncMock, return_value=hydrated),
+            patch(
+                "pr_guardian.api.review._hydrate_pr", new_callable=AsyncMock, return_value=hydrated
+            ),
             patch("pr_guardian.api.review.run_review", new_callable=AsyncMock) as mock_run,
         ):
-            await _run_review_background(stub, adapter, "inline", "http://localhost", platform_name="github")
+            await _run_review_background(
+                stub, adapter, "inline", "http://localhost", platform_name="github"
+            )
 
         mock_run.assert_awaited_once()
         assert mock_run.call_args.kwargs.get("comment_mode") == "inline"

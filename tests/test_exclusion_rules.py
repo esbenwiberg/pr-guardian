@@ -1,4 +1,5 @@
 """Tests for wildcard exclusion rules: matcher, storage, admin API, sync filter."""
+
 from __future__ import annotations
 
 import uuid
@@ -27,6 +28,7 @@ def _session_cm(session):
     @asynccontextmanager
     async def _factory():
         yield session
+
     return _factory
 
 
@@ -75,39 +77,92 @@ class TestRepoMatchesRules:
         assert repo_matches_rules([], "github", "acme", "", "acme/foo") is False
 
     def test_exact_match_via_patterns(self):
-        rules = [{"platform": "github", "org_pattern": "acme", "project_pattern": "", "repo_pattern": "acme/foo"}]
+        rules = [
+            {
+                "platform": "github",
+                "org_pattern": "acme",
+                "project_pattern": "",
+                "repo_pattern": "acme/foo",
+            }
+        ]
         assert repo_matches_rules(rules, "github", "acme", "", "acme/foo") is True
 
     def test_org_wildcard_matches_all_repos(self):
-        rules = [{"platform": "github", "org_pattern": "acme", "project_pattern": "", "repo_pattern": ""}]
+        rules = [
+            {
+                "platform": "github",
+                "org_pattern": "acme",
+                "project_pattern": "",
+                "repo_pattern": "",
+            }
+        ]
         assert repo_matches_rules(rules, "github", "acme", "", "acme/foo") is True
         assert repo_matches_rules(rules, "github", "acme", "", "acme/bar") is True
         assert repo_matches_rules(rules, "github", "other", "", "other/foo") is False
 
     def test_repo_pattern_wildcard(self):
-        rules = [{"platform": "github", "org_pattern": "acme", "project_pattern": "", "repo_pattern": "acme/test-*"}]
+        rules = [
+            {
+                "platform": "github",
+                "org_pattern": "acme",
+                "project_pattern": "",
+                "repo_pattern": "acme/test-*",
+            }
+        ]
         assert repo_matches_rules(rules, "github", "acme", "", "acme/test-foo") is True
         assert repo_matches_rules(rules, "github", "acme", "", "acme/prod-foo") is False
 
     def test_platform_isolation(self):
-        rules = [{"platform": "github", "org_pattern": "", "project_pattern": "", "repo_pattern": "*"}]
+        rules = [
+            {"platform": "github", "org_pattern": "", "project_pattern": "", "repo_pattern": "*"}
+        ]
         assert repo_matches_rules(rules, "github", "x", "", "x/y") is True
         assert repo_matches_rules(rules, "ado", "x", "p", "y") is False
 
     def test_ado_project_pattern(self):
-        rules = [{"platform": "ado", "org_pattern": "", "project_pattern": "Legacy*", "repo_pattern": ""}]
-        assert repo_matches_rules(rules, "ado", "https://dev.azure.com/x", "LegacyApps", "foo") is True
-        assert repo_matches_rules(rules, "ado", "https://dev.azure.com/x", "ModernApps", "foo") is False
+        rules = [
+            {
+                "platform": "ado",
+                "org_pattern": "",
+                "project_pattern": "Legacy*",
+                "repo_pattern": "",
+            }
+        ]
+        assert (
+            repo_matches_rules(rules, "ado", "https://dev.azure.com/x", "LegacyApps", "foo")
+            is True
+        )
+        assert (
+            repo_matches_rules(rules, "ado", "https://dev.azure.com/x", "ModernApps", "foo")
+            is False
+        )
 
     def test_question_mark_wildcard(self):
-        rules = [{"platform": "github", "org_pattern": "", "project_pattern": "", "repo_pattern": "acme/v?"}]
+        rules = [
+            {
+                "platform": "github",
+                "org_pattern": "",
+                "project_pattern": "",
+                "repo_pattern": "acme/v?",
+            }
+        ]
         assert repo_matches_rules(rules, "github", "acme", "", "acme/v1") is True
         assert repo_matches_rules(rules, "github", "acme", "", "acme/v12") is False
 
     def test_any_rule_match_is_enough(self):
         rules = [
-            {"platform": "github", "org_pattern": "miss", "project_pattern": "", "repo_pattern": ""},
-            {"platform": "github", "org_pattern": "acme", "project_pattern": "", "repo_pattern": ""},
+            {
+                "platform": "github",
+                "org_pattern": "miss",
+                "project_pattern": "",
+                "repo_pattern": "",
+            },
+            {
+                "platform": "github",
+                "org_pattern": "acme",
+                "project_pattern": "",
+                "repo_pattern": "",
+            },
         ]
         assert repo_matches_rules(rules, "github", "acme", "", "acme/foo") is True
 
@@ -335,16 +390,21 @@ class TestSyncTimeFilter:
         adapter.list_repo_open_prs = AsyncMock(return_value=[])
         adapter.close = AsyncMock()
 
-        rules = [{
-            "platform": "github",
-            "org_pattern": "acme",
-            "project_pattern": "",
-            "repo_pattern": "acme/test-*",
-        }]
+        rules = [
+            {
+                "platform": "github",
+                "org_pattern": "acme",
+                "project_pattern": "",
+                "repo_pattern": "acme/test-*",
+            }
+        ]
 
         with (
             patch("pr_guardian.platform.github.GitHubAdapter", return_value=adapter),
-            patch("pr_guardian.core.pr_sync.storage.list_exclusion_rules", AsyncMock(return_value=rules)),
+            patch(
+                "pr_guardian.core.pr_sync.storage.list_exclusion_rules",
+                AsyncMock(return_value=rules),
+            ),
         ):
             await pr_sync._sync_github("token-xyz")
 
@@ -383,7 +443,9 @@ class TestMultiPatSync:
             called_tokens.append(token)
 
         with (
-            patch("pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=pats)),
+            patch(
+                "pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=pats)
+            ),
             patch("pr_guardian.core.pr_sync.storage.resolve_github_token", side_effect=_resolve),
             patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
         ):
@@ -431,7 +493,9 @@ class TestMultiPatSync:
             called_tokens.append(token)
 
         with (
-            patch("pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=pats)),
+            patch(
+                "pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=pats)
+            ),
             patch("pr_guardian.core.pr_sync.storage.resolve_github_token", side_effect=_resolve),
             patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
         ):
