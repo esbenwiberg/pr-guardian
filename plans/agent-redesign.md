@@ -22,16 +22,27 @@ missing, instead of confident nonsense.
 
 ---
 
-## Prompt-Level Changes (all six specialist agents)
+## Prompt-Level Changes (all specialist agents)
 
-| Change | Why |
-|---|---|
-| **Diff-header citation is a hard rule.** Every finding must cite a file path that appears as a header in the diff. Drop findings without one. | Machine-checkable scope rule. Eliminates whole categories of hallucinated findings before the validator runs. |
-| **Context lines are read-only.** Lines without a `+` prefix may only inform context, never serve as the basis for a finding. | Currently enforced post-hoc by the validator. Pushing it upstream into each specialist's base prompt reduces validator load. |
-| **JSON-only output, no markdown fences.** | Already in `validator/base.md`. The six specialists don't enforce output format — adding it hardens parsing. |
+Goal: push precision upstream into the specialist prompt so the validator
+critic has less noise to clean up. All eight changes are conservative —
+none of them increase recall.
 
-Source: borrowed from autopod's `pre-submit-review.ts` and `review-agentic-runner.ts`
-reviewer prompts.
+| Change | Why | Source |
+|---|---|---|
+| **Diff-header citation is a hard rule.** Every finding must cite a file path that appears as a header in the diff. Drop findings without one. | Machine-checkable scope rule. Eliminates whole categories of hallucinated findings before the validator runs. | autopod |
+| **Context lines are read-only.** Lines without a `+` prefix may only inform context, never serve as the basis for a finding. | Currently enforced post-hoc by the validator. Pushing it upstream into each specialist's base prompt reduces validator load. | autopod |
+| **JSON-only output, no markdown fences.** | Already in `validator/base.md`. The six specialists don't enforce output format — adding it hardens parsing. | autopod |
+| **"You only see the diff" disclaimer.** Explicit instruction that the agent is reviewing diff hunks, not the full codebase — so don't flag "this function is undefined" / "this duplicates existing code" / "import is missing" type findings when the referent could exist outside the diff window. | Counters a common LLM failure mode where the agent treats the diff as the whole world. Qodo PR-Agent uses this verbatim. | Gap 1, prompt-engineering-patterns |
+| **Verbatim quote per finding.** Each finding must include a `quote` field containing the exact diff line(s) it's about. | Anti-hallucination anchor. If the model can't quote the offending line, the finding is likely fabricated. Complementary to the diff-header rule (which scopes to file; quote scopes to line). | Gap 4, prompt-engineering-patterns |
+| **"Would the author actually fix this?" self-check.** Before emitting a finding, the agent considers whether a reasonable author would change their code in response. If the answer is "probably not — it's a preference/nitpick/style," skip it. | Cheap internal filter that catches preferenced-as-bug findings before they ship. | Gap 5, prompt-engineering-patterns |
+| **"Empty findings list is acceptable" — stated explicitly.** Tell the model directly that returning `[]` is the correct answer when nothing real is wrong. | Counters the LLM's bias toward generating output even when none is warranted. One line, high impact. | Gap 7, prompt-engineering-patterns |
+| **"Provably affected" rule.** Findings must demonstrate causal impact on the diff's behavior, not theoretical risk. A finding like "this could potentially be slow" is dismissed; "this loop calls the API once per item in `items` (line 42) — N+1" is kept. | Forces evidence-based reasoning over speculation. Pairs naturally with the verbatim-quote rule. | Gap 8, prompt-engineering-patterns |
+
+Sources: autopod's `pre-submit-review.ts` and `review-agentic-runner.ts`
+reviewer prompts (rows 1–3); `plans/prompt-engineering-patterns.md` survey
+(rows 4–8). Findings 2, 3, 6, 9, 10 from the prompt-engineering survey
+were considered and deferred or rejected — see that file for rationale.
 
 ---
 
@@ -92,43 +103,42 @@ it needs.
 
 ---
 
-## Research: Architecture Anchor Discovery
+## Reviewer Tool Access Scope
 
-Before implementing the `architecture` agent's anchor-discovery step, catalogue
-what to look for across ecosystems. Output should be a precedence-ordered
-discovery spec.
+Today: all six specialists are diff-only. No repo read, no tool use. The
+verifier-framed agents (`intent`, `architecture`) need *some* read access
+to do their job — referenced spec files for `intent`, anchor docs for
+`architecture`.
 
-**Cross-language conventions:**
-- `docs/adr/` / `docs/architecture/decisions/` (ADRs)
-- `ARCHITECTURE.md`
-- `AGENTS.md`, `CLAUDE.md`
-- `CONVENTIONS.md`, `docs/conventions/`
-- `CONTRIBUTING.md` (architecture-relevant sections)
-- `.cursorrules`, `.github/copilot-instructions.md`
+| Agent | Tool access |
+|---|---|
+| `intent` | **Scoped read** — referenced spec files in `specs/` (and similar) |
+| `architecture` | **Scoped read** — anchor docs discovered via the algorithm in `architecture-anchor-discovery.md` |
+| `security`, `performance`, `code_quality_observability`, `test_quality`, `hotspot` | **Diff-only.** No change. |
 
-**Ecosystem-specific:**
-- **.NET**: `.sln` structure, `Directory.Build.props`, `.editorconfig`, layered folder conventions (Domain / Application / Infrastructure)
-- **Python**: `pyproject.toml` layout, `src/` vs flat, package boundary conventions
-- **Node / TypeScript**: workspaces (`package.json`, `nx.json`, `turbo.json`, `lerna.json`), `tsconfig` path mappings
-- **JVM**: Maven / Gradle multi-module structure
-- **Go**: `internal/`, `cmd/`, `pkg/` conventions
-- **Rust**: workspace structure
+Hard rule that survives even with tool access: **findings stay scoped to
+files that appear as headers in the diff.** Tools verify the diff against
+context; they never produce findings about unrelated code. Same constraint
+autopod enforces on its agentic reviewer.
 
-**Architecture-as-code:**
-- C4 model files, Structurizr DSL
-- PlantUML, Mermaid diagrams in `docs/`
-- arc42 templates, `.arch/` directories
-- dependency-cruiser / depcruise configs
+---
 
-**Per-repo override:**
-- `.pr-guardian.yml::architecture_docs` — explicit list of files the team wants
-  the agent to treat as architectural ground truth
+## Research
 
-**Spec output should include:**
-- Precedence order (which signals win when multiple are present)
-- What each file type tells the agent (rules vs. conventions vs. examples)
-- How strongly to weight each (ADR > AGENTS.md > sibling-file pattern)
-- When the union of available signals counts as "enough anchor" vs. "skip"
+Completed:
+
+- `plans/architecture-anchor-discovery.md` — precedence-ordered discovery
+  spec for the `architecture` agent's anchor files, including weighting,
+  "enough anchor" thresholds, cheapest-first discovery algorithm, and
+  monorepo edge cases. Real-world validation against
+  kubernetes/next.js/nx/dotnet-eShop/rust/Django.
+- `plans/prompt-engineering-patterns.md` — survey of Anthropic, OpenAI
+  Codex, Qodo PR-Agent, Anthropic's `claude-code`, and LLM-as-judge
+  guidance. 10 ranked gaps; 5 adopted (rows 4–8 of the Prompt-Level
+  Changes table above), 5 deferred or rejected.
+- `plans/ona-review-patterns.md` — supplement covering how Ona (Gitpod
+  rebrand) approaches review, and what's distinctive vs. the leaders
+  already surveyed.
 
 ---
 
@@ -138,6 +148,19 @@ discovery spec.
   Security ← threat model. Tests ← testing conventions doc. Performance ← perf
   budget doc. Same mechanism, different anchor source. Nail `intent` and
   `architecture` first; revisit once they're stable.
+- **Uncertainty-triggered tool escalation.** When a specialist's certainty
+  is low, run a second pass with read-only repo tools to verify or
+  withdraw the finding. Conceptually appealing but architecturally heavy
+  (agentic loop, cost, latency, eval complexity). Defer until the scoped-
+  read pattern on `intent`/`architecture` is proven.
+- **Coverage-at-source / precision-at-validator inversion.** Anthropic's
+  Code Review Harnesses doc recommends specialists fish broadly and let
+  the validator critic prune. Guardian today does the opposite —
+  specialists self-restrain. Plausibly higher recall but raises noise
+  risk; deferred given prior bad experience with noisy findings.
+- **Few-shot examples in specialist prompts.** Effective but maintenance
+  cost is real. Revisit if specific failure modes recur after the other
+  prompt-level changes land.
 
 ---
 
