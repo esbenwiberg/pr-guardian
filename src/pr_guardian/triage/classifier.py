@@ -28,7 +28,7 @@ class TriageResult:
 
 
 ALL_AGENTS = frozenset({
-    "security_privacy", "performance", "architecture_intent",
+    "security_privacy", "performance", "intent", "architecture",
     "code_quality_observability", "test_quality", "hotspot",
 })
 

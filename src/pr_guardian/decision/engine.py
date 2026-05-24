@@ -29,7 +29,8 @@ CERTAINTY_WEIGHT = {
 DEFAULT_AGENT_WEIGHTS = {
     "security_privacy": 3.0,
     "test_quality": 2.5,
-    "architecture_intent": 2.0,
+    "intent": 1.0,
+    "architecture": 1.0,
     "performance": 1.5,
     "hotspot": 1.5,
     "code_quality_observability": 1.0,
@@ -84,12 +85,13 @@ def combined_score(
     agent_results: list[AgentResult],
     config: GuardianConfig,
 ) -> float:
-    """Weighted average of agent scores."""
+    """Weighted average of agent scores. Skipped agents contribute no score."""
     weights_cfg = config.weights
     weight_map = {
         "security_privacy": weights_cfg.security_privacy,
         "test_quality": weights_cfg.test_quality,
-        "architecture_intent": weights_cfg.architecture_intent,
+        "intent": weights_cfg.intent,
+        "architecture": weights_cfg.architecture,
         "performance": weights_cfg.performance,
         "hotspot": weights_cfg.hotspot,
         "code_quality_observability": weights_cfg.code_quality_observability,
@@ -99,6 +101,8 @@ def combined_score(
     total_weight = 0.0
 
     for result in agent_results:
+        if result.status == "skipped":
+            continue
         weight = weight_map.get(result.agent_name, 1.0)
         score = agent_score(result, config)
         total_weighted += score * weight
@@ -121,6 +125,8 @@ def check_overrides(
     detected_medium_plus = 0
     suspected_count = 0
     for result in agent_results:
+        if result.status == "skipped":
+            continue
         if result.verdict == Verdict.FLAG_HUMAN:
             finding_reasons.append(f"Agent {result.agent_name} flagged for human review")
         for finding in result.findings:
@@ -301,6 +307,8 @@ def _check_reject(
     actionable_count = 0
 
     for result in agent_results:
+        if result.status == "skipped":
+            continue
         for finding in result.findings:
             validated = validated_certainty(finding, config)
             if (
@@ -326,9 +334,11 @@ def _apply_matrix(
     config: GuardianConfig,
 ) -> Decision:
     """Apply the decision matrix from the design doc."""
-    has_flags = any(r.verdict == Verdict.FLAG_HUMAN for r in agent_results)
-    has_warns = any(r.verdict == Verdict.WARN for r in agent_results)
-    all_pass = all(r.verdict == Verdict.PASS for r in agent_results)
+    # Skipped agents do not count as pass, warn, or flag — exclude from verdict checks.
+    ran_results = [r for r in agent_results if r.status != "skipped"]
+    has_flags = any(r.verdict == Verdict.FLAG_HUMAN for r in ran_results)
+    has_warns = any(r.verdict == Verdict.WARN for r in ran_results)
+    all_pass = all(r.verdict == Verdict.PASS for r in ran_results)
     threshold = config.thresholds.auto_approve_max_score
 
     if tier == RiskTier.TRIVIAL:
@@ -357,6 +367,6 @@ def _apply_matrix(
         return Decision.AUTO_APPROVE
 
     # HIGH: only auto-approve when agents actually ran and all pass clean
-    if agent_results and all_pass and score <= threshold:
+    if ran_results and all_pass and score <= threshold:
         return Decision.AUTO_APPROVE
     return Decision.HUMAN_REVIEW

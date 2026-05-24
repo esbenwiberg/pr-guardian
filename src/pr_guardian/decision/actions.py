@@ -12,7 +12,8 @@ SEVERITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2, "critical": 
 _AGENT_LABELS: dict[str, str] = {
     "security_privacy": "Security & Privacy",
     "performance": "Performance",
-    "architecture_intent": "Architecture & Intent",
+    "intent": "Intent",
+    "architecture": "Architecture",
     "code_quality_observability": "Code Quality",
     "test_quality": "Test Quality",
     "hotspot": "Hotspots",

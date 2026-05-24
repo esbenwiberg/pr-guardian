@@ -4,6 +4,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
 
+AgentStatus = Literal["ran", "skipped"]
+
 
 class Severity(str, Enum):
     LOW = "low"
@@ -45,6 +47,7 @@ class Finding:
     file: str
     line: int | None
     description: str
+    quote: str = ""
     suggestion: str = ""
     cwe: str | None = None
     compliance: str | None = None
@@ -61,6 +64,8 @@ class AgentResult:
     """Output from a single AI agent."""
     agent_name: str
     verdict: Verdict
+    status: AgentStatus = "ran"
+    status_reason: str | None = None
     languages_reviewed: list[str] = field(default_factory=list)
     findings: list[Finding] = field(default_factory=list)
     cross_language_findings: list[Finding] = field(default_factory=list)

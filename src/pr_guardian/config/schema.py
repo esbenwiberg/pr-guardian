@@ -39,7 +39,8 @@ class ThresholdsConfig(BaseModel):
 class WeightsConfig(BaseModel):
     security_privacy: float = 3.0
     test_quality: float = 2.5
-    architecture_intent: float = 2.0
+    intent: float = 1.0
+    architecture: float = 1.0
     performance: float = 1.5
     hotspot: float = 1.5
     code_quality_observability: float = 1.0

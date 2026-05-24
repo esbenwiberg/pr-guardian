@@ -88,7 +88,7 @@ def build_change_profile(
     if profile.touches_data_layer:
         profile.implied_agents.add("performance")
     if profile.crosses_architecture_boundary:
-        profile.implied_agents.add("architecture_intent")
+        profile.implied_agents.add("architecture")
 
     # Trivial shortcut
     profile.skip_agents = (
