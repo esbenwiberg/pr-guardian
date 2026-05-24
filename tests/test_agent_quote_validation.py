@@ -322,3 +322,150 @@ class TestPrLevelIntentException:
             file="src/app.py",
         )
         assert BaseAgent._is_valid_finding(finding, DIFF_MAP) is False
+
+
+# ---------------------------------------------------------------------------
+# quote_added_line — cross_language_findings filtering parallels findings
+# ---------------------------------------------------------------------------
+
+class TestParseResponseCrossLanguageQuoteFiltering:
+    """cross_language_findings get the same quote validation as findings."""
+
+    def _agent(self) -> BaseAgent:
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "security_privacy"
+        return agent
+
+    def _raw_with_cross(self, cross: list[dict]) -> str:
+        return json.dumps({
+            "verdict": "warn",
+            "verdict_explanation": "cross-lang issues",
+            "languages_reviewed": ["python"],
+            "findings": [],
+            "cross_language_findings": cross,
+        })
+
+    def test_quote_added_line_valid_cross_language_finding_kept(self):
+        """A valid-quote cross_language finding is kept by the parser."""
+        raw = self._raw_with_cross([{
+            "severity": "high",
+            "certainty": "detected",
+            "category": "API contract drift",
+            "language": "python",
+            "file": "src/app.py",
+            "line": 10,
+            "quote": "return user.is_admin or allow_all",
+            "description": "Backend change breaks frontend contract.",
+            "suggestion": "Coordinate the API field rename.",
+        }])
+        result = self._agent()._parse_response(raw, ["python"], diff_map=DIFF_MAP)
+        assert len(result.cross_language_findings) == 1
+        assert result.cross_language_findings[0].category == "API contract drift"
+
+    def test_quote_added_line_mismatched_cross_language_finding_dropped(self):
+        """A mismatched-quote cross_language finding is dropped."""
+        raw = self._raw_with_cross([{
+            "severity": "high",
+            "certainty": "detected",
+            "category": "API drift",
+            "language": "python",
+            "file": "src/app.py",
+            "line": 10,
+            "quote": "this line is not in any diff",
+            "description": "Drift.",
+            "suggestion": "",
+        }])
+        result = self._agent()._parse_response(raw, ["python"], diff_map=DIFF_MAP)
+        assert len(result.cross_language_findings) == 0
+
+    def test_quote_added_line_empty_quote_cross_language_finding_dropped(self):
+        """A cross_language finding with an empty quote is dropped."""
+        raw = self._raw_with_cross([{
+            "severity": "high",
+            "certainty": "detected",
+            "category": "API drift",
+            "language": "python",
+            "file": "src/app.py",
+            "line": 10,
+            "quote": "",
+            "description": "No quote provided.",
+            "suggestion": "",
+        }])
+        result = self._agent()._parse_response(raw, ["python"], diff_map=DIFF_MAP)
+        assert len(result.cross_language_findings) == 0
+
+    def test_quote_added_line_no_diff_map_keeps_cross_language_finding(self):
+        """Without diff_map, cross_language findings are not validated either."""
+        raw = self._raw_with_cross([{
+            "severity": "high",
+            "certainty": "detected",
+            "category": "API drift",
+            "language": "python",
+            "file": "src/app.py",
+            "line": 10,
+            "quote": "",
+            "description": "No quote but no diff_map.",
+            "suggestion": "",
+        }])
+        result = self._agent()._parse_response(raw, ["python"])  # no diff_map
+        assert len(result.cross_language_findings) == 1
+
+    def test_quote_added_line_mixed_valid_invalid_cross_language(self):
+        """Valid cross_language findings are kept; invalid ones dropped, in mixed input."""
+        raw = self._raw_with_cross([
+            {
+                "severity": "high",
+                "certainty": "detected",
+                "category": "API drift kept",
+                "language": "python",
+                "file": "src/app.py",
+                "line": 10,
+                "quote": "return user.is_admin or allow_all",
+                "description": "Valid.",
+                "suggestion": "",
+            },
+            {
+                "severity": "medium",
+                "certainty": "suspected",
+                "category": "API drift dropped",
+                "language": "python",
+                "file": "src/app.py",
+                "line": 10,
+                "quote": "not in the diff",
+                "description": "Invalid.",
+                "suggestion": "",
+            },
+        ])
+        result = self._agent()._parse_response(raw, ["python"], diff_map=DIFF_MAP)
+        assert len(result.cross_language_findings) == 1
+        assert result.cross_language_findings[0].category == "API drift kept"
+
+
+class TestPrLevelIntentExceptionCrossLanguage:
+    """The scope-opacity exception is honored on the cross_language path too."""
+
+    def test_pr_level_intent_exception_via_cross_language_findings_kept(self):
+        """A scope-opacity cross_language finding with line=None is kept."""
+        raw = json.dumps({
+            "verdict": "warn",
+            "verdict_explanation": "scope opacity via cross-lang",
+            "languages_reviewed": [],
+            "findings": [],
+            "cross_language_findings": [{
+                "severity": "medium",
+                "certainty": "suspected",
+                "category": SCOPE_OPACITY_CATEGORY,
+                "language": "",
+                "file": "",
+                "line": None,
+                "quote": "PR title/body lacks a useful intent anchor",
+                "description": "No anchor.",
+                "suggestion": "Add a description.",
+            }],
+        })
+        agent = BaseAgent.__new__(BaseAgent)
+        agent.agent_name = "intent"
+        result = agent._parse_response(raw, [], diff_map=DIFF_MAP)
+        assert len(result.cross_language_findings) == 1
+        assert result.cross_language_findings[0].category == SCOPE_OPACITY_CATEGORY
+        assert result.cross_language_findings[0].line is None
