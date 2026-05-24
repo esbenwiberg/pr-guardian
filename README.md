@@ -39,7 +39,7 @@
 
 PR Guardian runs as a hosted service — not in your CI pipeline. It receives webhooks from GitHub or Azure DevOps, runs mechanical checks + AI agent review in parallel, and posts a verdict. Authors still click merge. Guardian never auto-merges.
 
-## How It Works
+## Architecture
 
 ```
 PR Created ──> Discovery ──> Mechanical Gates ──> Triage ──> AI Agents ──> Decision
@@ -100,6 +100,29 @@ pr-guardian review --repo owner/repo --pr 42
 # Validate config
 pr-guardian config check
 ```
+
+## Build
+
+The project builds with the standard PEP 517 toolchain — no custom build system.
+
+```bash
+pip install -e ".[dev]"        # editable install for development
+python -m build --sdist --wheel  # produce dist/*.tar.gz and dist/*.whl
+```
+
+`pip install -e ".[dev]"` is enough for the test and lint workflow; `python -m build` is only needed when cutting a release artifact. CI runs both on every push.
+
+## Test
+
+```bash
+python -m pytest -q            # full suite (~3s, ~500 tests)
+python -m pytest tests/test_orchestrator.py -k webhook   # a slice
+ruff check . && ruff format --check .   # lint + format
+mypy src                       # type check
+bash scripts/repofit-check.sh --include executed   # agent-fitness audit
+```
+
+The suite is hermetic — no network, no docker, no Postgres required. Tests that exercise persistence use the in-memory `aiosqlite` driver. CI runs lint → typecheck → tests → build → audit on every PR; see `.github/workflows/ci.yml`.
 
 ## Deployment
 
@@ -195,6 +218,10 @@ src/pr_guardian/
 ├── platform/        # GitHub + Azure DevOps adapters
 └── triage/          # Risk classification + hotspot detection
 ```
+
+## Contributing
+
+Branch from `main`, keep PRs focused, and use Conventional Commits (`feat:`, `fix:`, `docs:`, …) so the changelog stays mechanical. The full conventions live in `CONTRIBUTING.md`; the project layout, layer boundaries, and invariants live in `ARCHITECTURE.md`. Run `python -m pytest -q && mypy src && ruff check .` before opening a PR — pre-push hooks enforce the same on `git push`.
 
 ## Supported Platforms
 

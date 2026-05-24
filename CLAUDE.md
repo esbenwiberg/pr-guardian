@@ -103,6 +103,35 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
 - `docs/decisions/` — ADRs explaining *why* the codebase looks the way it does.
 - `specs/<feature>/` — current and recent feature specs, the design source of truth.
 
+## Layers & invariants
+
+The codebase enforces three architectural rules via `import-linter` (see
+`[tool.importlinter]` in `pyproject.toml`). Violations break CI.
+
+1. **`mechanical/` must not import `llm/`.** Deterministic gates stay
+   deterministic — no LLM calls from semgrep, gitleaks, dep checks, or PII
+   scans. If a mechanical check needs nuance, escalate via triage, not LLM.
+2. **`decision/` is IO-free.** The decision engine takes findings + config in,
+   returns a verdict out. No database, no HTTP, no platform calls. This is
+   what lets the scoring logic be tested in milliseconds and reasoned about
+   independent of integration state.
+3. **`core/` must not import `api/` or `dashboard/`.** The orchestrator drives
+   the pipeline — surface layers depend on `core/`, not the other way around.
+   If you find yourself wanting to call into `api/` from `core/`, the right
+   move is to lift the shared concept up.
+
+## Testing patterns
+
+- **In-memory DB is the default for tests.** `aiosqlite` swaps in for
+  Postgres via the same SQLAlchemy URL pattern. Don't mock the storage layer
+  if an integration test can hit the real one.
+- **Agents are tested against fixture `ReviewContext` objects** in
+  `tests/fixtures/`. Add a new fixture when adding a new agent finding type.
+- **Mechanical gates have golden-output tests.** When changing a gate,
+  update the golden fixture rather than relaxing the assertion.
+- **`asyncio_mode = auto`.** Test functions can be `async def` without a
+  decorator. Use `pytest.mark.parametrize` over `for` loops in tests.
+
 ## Don'ts
 
 - Don't add fallbacks or "happy path" guards for impossible inputs at internal

@@ -26,6 +26,11 @@ repos:
   # Pre-commit (file-by-file) runs ruff. Pre-push runs the slow checks.
   - repo: local
     hooks:
+      - id: conventional-commit
+        name: Conventional Commits subject
+        entry: scripts/check-commit-msg.sh
+        language: system
+        stages: [commit-msg]
       - id: mypy
         name: mypy (src)
         entry: mypy

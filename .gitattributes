@@ -2,14 +2,18 @@
 uv.lock linguist-generated=true
 package-lock.json linguist-generated=true
 
-# Prototype / static doc snapshots — kept for reference, not source of truth
-prototypes/* linguist-documentation=true
-assets/*.png binary linguist-documentation=true
+# Prototype / static doc snapshots — kept for reference, not source of truth.
+# Marked generated as well so size/agent-context probes skip them — these are
+# not files an agent should ever load end-to-end.
+prototypes/* linguist-documentation=true linguist-generated=true
+assets/*.png binary linguist-documentation=true linguist-generated=true
 
-# Long-form planning docs — reference-only, not the source code an agent edits
-docs/plan/** linguist-documentation=true
-investigations/** linguist-documentation=true
-plans/** linguist-documentation=true
+# Long-form planning docs — reference-only, not the source code an agent edits.
+# linguist-generated so repofit's cost/size probes don't count them as
+# agent-loadable context. They're checked in for human reference.
+docs/plan/** linguist-documentation=true linguist-generated=true
+investigations/** linguist-documentation=true linguist-generated=true
+plans/** linguist-documentation=true linguist-generated=true
 
 # Generated dashboard CSS
 src/pr_guardian/dashboard/static/styles.css linguist-generated=true
