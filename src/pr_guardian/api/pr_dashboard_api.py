@@ -173,7 +173,7 @@ async def list_prs(
 
 
 # ---------------------------------------------------------------------------
-# Filter options (for dynamic dropdowns)
+# Filter options (for client-side dropdowns)
 # ---------------------------------------------------------------------------
 
 

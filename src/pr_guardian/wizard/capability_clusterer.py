@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from typing import Any
-
 import structlog
 
 from pr_guardian.llm.protocol import LLMClient
@@ -368,7 +366,7 @@ def _parse_and_validate(
     return out, briefing
 
 
-def _coerce_briefing(raw: Any) -> dict[str, str] | None:
+def _coerce_briefing(raw: object) -> dict[str, str] | None:
     """Best-effort briefing extraction. Returns None if any of what/why/how is
     missing or empty after trimming — partial briefings are worse than none,
     because the wizard's heuristic stub is already a complete fallback."""

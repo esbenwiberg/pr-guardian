@@ -17,7 +17,7 @@ these into config when usage tells us where the boundaries should sit.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from typing import Iterable
 
 # The three classes, exported as constants so callers (tests, the
 # dashboard JSON enricher, the wizard's JS via the JSON envelope) all
@@ -29,7 +29,7 @@ DECISION = "decision"
 VALID_CLASSES = (NOISE, FYI, DECISION)
 
 
-def classify_finding(finding: dict[str, Any]) -> str:
+def classify_finding(finding: dict[str, object]) -> str:
     """Return one of NOISE / FYI / DECISION for a single finding dict.
 
     Decision rules (first match wins):
@@ -44,8 +44,8 @@ def classify_finding(finding: dict[str, Any]) -> str:
     if finding.get("dismissal"):
         return NOISE
 
-    sev = (finding.get("severity") or "").lower()
-    cert = (finding.get("certainty") or "").lower()
+    sev = str(finding.get("severity") or "").lower()
+    cert = str(finding.get("certainty") or "").lower()
 
     if sev in ("high", "critical"):
         return DECISION
@@ -58,14 +58,19 @@ def classify_finding(finding: dict[str, Any]) -> str:
     return DECISION
 
 
-def tag_findings_with_triage(agent_results: Iterable[dict[str, Any]]) -> dict[str, int]:
+def tag_findings_with_triage(agent_results: Iterable[dict[str, object]]) -> dict[str, int]:
     """Annotate every finding dict in-place with a `triage` field.
 
     Returns a counts dict {noise, fyi, decision} for use in summary UIs.
     """
     counts = {NOISE: 0, FYI: 0, DECISION: 0}
     for agent in agent_results or []:
-        for finding in agent.get("findings") or []:
+        findings_raw = agent.get("findings") or []
+        if not isinstance(findings_raw, list):
+            continue
+        for finding in findings_raw:
+            if not isinstance(finding, dict):
+                continue
             cls = classify_finding(finding)
             finding["triage"] = cls
             counts[cls] += 1

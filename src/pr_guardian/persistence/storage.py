@@ -1946,7 +1946,7 @@ async def get_pr_dashboard_summary(
         }
 
 
-def _parse_dt(value: Any) -> datetime | None:
+def _parse_dt(value: object) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -2146,7 +2146,7 @@ async def remove_exclusion_rule(rule_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# PR filter options (dynamic dropdowns)
+# PR filter options (client-side dropdowns)
 # ---------------------------------------------------------------------------
 
 

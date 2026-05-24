@@ -6,7 +6,7 @@ import asyncio
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from typing import AsyncIterator
 
 
 @dataclass
@@ -17,7 +17,7 @@ class ReviewEvent:
     stage: str
     detail: str = ""
     timestamp: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    extra: dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, object] = field(default_factory=dict)
 
     def to_sse(self) -> str:
         return f"data: {json.dumps(asdict(self))}\n\n"
