@@ -84,7 +84,7 @@ after analyzing the actual diff content — never lower it.
   "Because it matched `**/auth/**` in your trust tier config." No LLM black box.
 - **Fast and free.** Runs in microseconds with zero API calls. Available before any
   agents execute, so it can influence which agents run and how the pipeline behaves.
-- **Configurable per-repo.** Teams own their tier patterns in `.pr-guardian.yml`.
+- **Configurable per-repo.** Teams own their tier patterns in `review.yml`.
   A payments service makes `**/api/**` mandatory-human. A docs repo makes everything
   ai-only.
 
@@ -290,7 +290,7 @@ prioritize. Never dump a wall of text.
 
 ## Configuration
 
-### Trust tier rules in `.pr-guardian.yml`
+### Trust tier rules in `review.yml`
 
 ```yaml
 trust_tiers:
@@ -396,7 +396,7 @@ three-layer fallback:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Layer 3: Explicit trust_tiers config in .pr-guardian.yml           │
+│  Layer 3: Explicit trust_tiers config in review.yml           │
 │  Used when: repo defines trust_tiers.rules                          │
 │  → Full control. Overrides everything below.                        │
 └──────────────────────────────┬──────────────────────────────────────┘
@@ -422,7 +422,7 @@ three-layer fallback:
                                ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Layer 1: Built-in smart defaults (always available)                │
-│  Used when: repo has no .pr-guardian.yml or no relevant config      │
+│  Used when: repo has no review.yml or no relevant config      │
 │  → Common conventions that work across most codebases.              │
 │                                                                     │
 │  Defaults:                                                          │

@@ -128,7 +128,7 @@ cd infra/azure && bash deploy.sh
 
 ## Configuration
 
-Drop a `.pr-guardian.yml` in your repo root to customize behavior:
+Drop a `review.yml` in your repo root to customize behavior:
 
 ```yaml
 repo_risk_class: standard          # standard | elevated | critical
