@@ -23,11 +23,17 @@ log = structlog.get_logger()
 
 # Same pricing table as the main orchestrator
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus": (15.0, 75.0),
-    "claude-sonnet": (3.0, 15.0),
-    "claude-haiku": (0.80, 4.0),
-    "gpt-4o-mini": (0.15, 0.60),
-    "gpt-4o": (2.50, 10.0),
+    "claude-opus":   (15.0,  75.0),
+    "claude-sonnet": (3.0,   15.0),
+    "claude-haiku":  (0.80,   4.0),
+    "gpt-4.5":       (75.0, 150.0),
+    "gpt-4o-mini":   (0.15,   0.60),
+    "gpt-4o":        (2.50,  10.0),
+    "o4-mini":       (1.10,   4.40),
+    "o3-mini":       (1.10,   4.40),
+    "o3":            (10.0,  40.0),
+    "o1-mini":       (3.0,   12.0),
+    "o1":            (15.0,  60.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)
 

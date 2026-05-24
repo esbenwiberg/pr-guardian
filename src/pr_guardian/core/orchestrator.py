@@ -46,16 +46,21 @@ log = structlog.get_logger()
 # Per-million-token pricing (input, output) — best-effort estimates.
 # Users can override via config in the future; this covers common models.
 # More-specific prefixes must come before shorter ones that are substrings
-# of them (e.g. "gpt-4o-mini" before "gpt-4o", "gpt-4-turbo" before "gpt-4").
+# of them (e.g. "gpt-4o-mini" before "gpt-4o", "o1-mini" before "o1").
 _TOKEN_PRICES: dict[str, tuple[float, float]] = {
-    "claude-opus":      (15.0, 75.0),
-    "claude-sonnet":    (3.0, 15.0),
-    "claude-haiku":     (0.80, 4.0),
-    "gpt-4o-mini":      (0.15, 0.60),
-    "gpt-4o":           (2.50, 10.0),
-    "gpt-4-turbo":      (10.0, 30.0),
-    "gpt-4":            (30.0, 60.0),
-    "gpt-3.5":          (0.50, 1.50),
+    # Anthropic
+    "claude-opus":   (15.0,  75.0),
+    "claude-sonnet": (3.0,   15.0),
+    "claude-haiku":  (0.80,   4.0),
+    # OpenAI — specific prefixes before their substrings
+    "gpt-4.5":       (75.0, 150.0),
+    "gpt-4o-mini":   (0.15,   0.60),
+    "gpt-4o":        (2.50,  10.0),
+    "o4-mini":       (1.10,   4.40),
+    "o3-mini":       (1.10,   4.40),
+    "o3":            (10.0,  40.0),
+    "o1-mini":       (3.0,   12.0),
+    "o1":            (15.0,  60.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)  # fallback
 
