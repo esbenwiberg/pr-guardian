@@ -1,4 +1,5 @@
-from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.config.schema import GuardianConfig, WeightsConfig
+from pr_guardian.decision.actions import _AGENT_LABELS
 from pr_guardian.models.context import (
     BlastRadius,
     ChangeProfile,
@@ -10,7 +11,7 @@ from pr_guardian.models.context import (
 )
 from pr_guardian.models.languages import LanguageMap
 from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
-from pr_guardian.triage.classifier import classify
+from pr_guardian.triage.classifier import ALL_AGENTS, classify
 from pathlib import Path
 
 
@@ -110,3 +111,35 @@ class TestTriage:
         )
         result = classify(ctx, GuardianConfig())
         assert "security_privacy" in result.agent_set
+
+
+class Test_split_agents:
+    def test_intent_has_default_weight_1_0(self):
+        cfg = GuardianConfig()
+        assert cfg.weights.intent == 1.0
+
+    def test_architecture_has_default_weight_1_0(self):
+        cfg = GuardianConfig()
+        assert cfg.weights.architecture == 1.0
+
+    def test_architecture_intent_not_in_default_weights(self):
+        cfg = GuardianConfig()
+        assert not hasattr(cfg.weights, "architecture_intent")
+
+    def test_intent_in_all_agents(self):
+        assert "intent" in ALL_AGENTS
+
+    def test_architecture_in_all_agents(self):
+        assert "architecture" in ALL_AGENTS
+
+    def test_architecture_intent_not_in_all_agents(self):
+        assert "architecture_intent" not in ALL_AGENTS
+
+    def test_intent_has_display_label(self):
+        assert "intent" in _AGENT_LABELS
+
+    def test_architecture_has_display_label(self):
+        assert "architecture" in _AGENT_LABELS
+
+    def test_architecture_intent_not_in_display_labels(self):
+        assert "architecture_intent" not in _AGENT_LABELS

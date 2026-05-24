@@ -206,3 +206,70 @@ class TestDecisionMatrix:
         )
         result = decide(ctx, [], RiskTier.TRIVIAL, GuardianConfig())
         assert result.decision == Decision.HUMAN_REVIEW
+
+
+class TestSkippedAgent:
+    def test_skipped_agent_contributes_no_score(self):
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        score = combined_score([skipped], GuardianConfig())
+        assert score == 0.0
+
+    def test_skipped_agent_with_ran_agent_score_unaffected(self):
+        ran = AgentResult(
+            agent_name="security_privacy",
+            verdict=Verdict.WARN,
+            findings=[_make_finding(severity=Severity.HIGH)],
+        )
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        score_with_skipped = combined_score([ran, skipped], GuardianConfig())
+        score_without_skipped = combined_score([ran], GuardianConfig())
+        assert score_with_skipped == score_without_skipped
+
+    def test_skipped_agent_not_counted_as_pass_in_matrix(self):
+        # If only a skipped agent exists at HIGH tier, it should NOT auto-approve
+        # (skipped is not a clean pass; ran_results is empty so guard fires)
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        ctx = _make_context()
+        result = decide(ctx, [skipped], RiskTier.HIGH, GuardianConfig())
+        assert result.decision == Decision.HUMAN_REVIEW
+
+    def test_skipped_agent_remains_in_review_result(self):
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        ran = AgentResult(agent_name="security_privacy", verdict=Verdict.PASS)
+        ctx = _make_context()
+        result = decide(ctx, [ran, skipped], RiskTier.LOW, GuardianConfig())
+        names = [r.agent_name for r in result.agent_results]
+        assert "architecture" in names
+        assert result.agent_results[names.index("architecture")].status == "skipped"
+
+    def test_skipped_agent_does_not_add_finding_reasons(self):
+        # A skipped agent with FLAG_HUMAN verdict should not generate finding reasons
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.FLAG_HUMAN,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        ctx = _make_context()
+        result = decide(ctx, [skipped], RiskTier.TRIVIAL, GuardianConfig())
+        assert not any("architecture" in r for r in result.finding_reasons)
