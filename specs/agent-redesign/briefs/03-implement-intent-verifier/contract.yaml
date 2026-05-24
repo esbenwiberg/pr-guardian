@@ -1,0 +1,69 @@
+contract_version: 1
+title: "Implement intent verifier"
+depends_on:
+  - 01-add-review-contracts
+  - 02-harden-prompts-and-quotes
+scenarios:
+  - id: intent-anchor-heuristic
+    given:
+      - "a PR title/body and optional referenced specs paths"
+    when:
+      - "the intent anchor helper classifies the anchor"
+    then:
+      - "a fetchable specs markdown path is useful"
+      - "at least 80 non-template concrete title/body characters are useful"
+      - "empty templates and generic misc/update/refactor/fixes text are missing"
+  - id: intent-medium-high-scope-opacity
+    given:
+      - "a medium or high risk PR with no useful intent anchor"
+    when:
+      - "intent verification runs and the size gate is met"
+    then:
+      - "Guardian emits one PR-level scope-opacity finding"
+      - "the finding is severity medium and certainty suspected"
+      - "the finding has line null and a PR-level quote"
+  - id: intent-low-not-scheduled
+    given:
+      - "a low risk PR with or without a useful anchor"
+    when:
+      - "triage selects agents"
+    then:
+      - "intent is not included in the agent set"
+  - id: no-workitem-v1
+    given:
+      - "a PR body mentions an issue or work item"
+    when:
+      - "intent anchors are loaded"
+    then:
+      - "no GitHub issue API or Azure DevOps work item API is called"
+      - "only PR title/body and referenced specs paths are considered"
+required_facts:
+  - id: fact-intent-anchor-heuristic
+    proves: [intent-anchor-heuristic]
+    kind: unit-test
+    artifact:
+      path: tests/test_intent_agent.py
+      change: create
+    command: python -m pytest tests/test_intent_agent.py -k anchor_heuristic -q
+  - id: fact-intent-medium-high-scope-opacity
+    proves: [intent-medium-high-scope-opacity]
+    kind: unit-test
+    artifact:
+      path: tests/test_intent_agent.py
+      change: create
+    command: python -m pytest tests/test_intent_agent.py -k intent_medium_high -q
+  - id: fact-intent-low-not-scheduled
+    proves: [intent-low-not-scheduled]
+    kind: unit-test
+    artifact:
+      path: tests/test_triage.py
+      change: update
+    command: python -m pytest tests/test_triage.py -k intent_low_not_scheduled -q
+  - id: fact-no-workitem-v1
+    proves: [no-workitem-v1]
+    kind: unit-test
+    artifact:
+      path: tests/test_intent_agent.py
+      change: create
+    command: python -m pytest tests/test_intent_agent.py -k no_workitem -q
+human_review: []

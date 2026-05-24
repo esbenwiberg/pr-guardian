@@ -1,0 +1,52 @@
+contract_version: 1
+title: "Add review contracts and split taxonomy"
+depends_on: []
+scenarios:
+  - id: skipped-agent-nonscoring
+    given:
+      - "an agent result with status skipped and no findings"
+    when:
+      - "the decision engine computes combined score and applies the matrix"
+    then:
+      - "the skipped result contributes no score"
+      - "the skipped result is not counted as a clean pass"
+      - "the skipped result remains present for downstream persistence"
+  - id: split-agent-defaults
+    given:
+      - "the default Guardian config and PR summary labels are loaded"
+    when:
+      - "the split review taxonomy is inspected"
+    then:
+      - "intent has default weight 1.0"
+      - "architecture has default weight 1.0"
+      - "architecture_intent is not present in default weights or display labels"
+  - id: quote-field-contract
+    given:
+      - "a Finding is constructed by parser or tests"
+    when:
+      - "the finding is passed through shared model code"
+    then:
+      - "quote is a first-class string field"
+required_facts:
+  - id: fact-skipped-agent-nonscoring
+    proves: [skipped-agent-nonscoring]
+    kind: unit-test
+    artifact:
+      path: tests/test_decision.py
+      change: update
+    command: python -m pytest tests/test_decision.py -k skipped_agent -q
+  - id: fact-split-agent-defaults
+    proves: [split-agent-defaults]
+    kind: unit-test
+    artifact:
+      path: tests/test_triage.py
+      change: update
+    command: python -m pytest tests/test_triage.py -k split_agents -q
+  - id: fact-agent-contract-types
+    proves: [quote-field-contract]
+    kind: unit-test
+    artifact:
+      path: tests/test_agent_contracts.py
+      change: create
+    command: python -m pytest tests/test_agent_contracts.py -q
+human_review: []

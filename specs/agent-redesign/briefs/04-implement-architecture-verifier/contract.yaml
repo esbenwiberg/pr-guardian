@@ -1,0 +1,71 @@
+contract_version: 1
+title: "Implement architecture anchor discovery"
+depends_on:
+  - 01-add-review-contracts
+  - 02-harden-prompts-and-quotes
+scenarios:
+  - id: architecture-anchor-modes
+    given:
+      - "a repo with different combinations of architecture anchors"
+    when:
+      - "architecture anchor discovery runs for changed paths"
+    then:
+      - "explicit architecture_docs or rank 1-3 signals select full verifier mode"
+      - "rank 7-10 signals without stronger anchors select narrow local-pattern mode"
+      - "sibling-only or no usable signals select skip mode"
+  - id: architecture-path-scoped
+    given:
+      - "a repo with anchors that apply to only one package subtree"
+    when:
+      - "changed files belong to multiple path scopes"
+    then:
+      - "each changed path receives only the anchors scoped to that subtree"
+      - "unmatched paths can skip without disabling anchored paths"
+  - id: architecture-skip-status
+    given:
+      - "no architecture anchor applies to the changed files"
+    when:
+      - "the architecture agent runs"
+    then:
+      - "the result has status skipped"
+      - "the status_reason is no architecture context found"
+      - "the result has no findings and contributes no score"
+  - id: local-pattern-low-suspected
+    given:
+      - "only narrow local-pattern evidence exists"
+    when:
+      - "the architecture agent emits a finding"
+    then:
+      - "the finding is low severity and suspected certainty"
+      - "the finding is quote-grounded"
+      - "the finding does not make a global architecture-rule claim"
+required_facts:
+  - id: fact-architecture-anchor-modes
+    proves: [architecture-anchor-modes]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_anchors.py
+      change: create
+    command: python -m pytest tests/test_architecture_anchors.py -k anchor_modes -q
+  - id: fact-architecture-path-scoped
+    proves: [architecture-path-scoped]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_anchors.py
+      change: create
+    command: python -m pytest tests/test_architecture_anchors.py -k path_scoped -q
+  - id: fact-architecture-skip-status
+    proves: [architecture-skip-status]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_agent.py
+      change: create
+    command: python -m pytest tests/test_architecture_agent.py -k skip_status -q
+  - id: fact-local-pattern-low-suspected
+    proves: [local-pattern-low-suspected]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_agent.py
+      change: create
+    command: python -m pytest tests/test_architecture_agent.py -k local_pattern -q
+human_review: []

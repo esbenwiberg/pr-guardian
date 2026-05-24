@@ -1,0 +1,52 @@
+contract_version: 1
+title: "Harden prompts and quote validation"
+depends_on:
+  - 01-add-review-contracts
+scenarios:
+  - id: quote-added-line
+    given:
+      - "an agent emits normal findings with quotes"
+    when:
+      - "the parser validates those findings against the visible diff"
+    then:
+      - "findings with exact added-line quotes are kept"
+      - "findings with missing, mismatched, context-line, or deleted-line quotes are discarded"
+  - id: pr-level-intent-exception
+    given:
+      - "the intent agent emits a scope-opacity finding"
+    when:
+      - "the finding has line null and a PR title/body quote"
+    then:
+      - "the parser keeps that specific PR-level finding"
+      - "other line-null findings remain invalid unless explicitly allowed"
+  - id: inline-comments-quote-free
+    given:
+      - "a quote-backed finding qualifies for inline comments"
+    when:
+      - "the platform inline comment body is built"
+    then:
+      - "the body contains severity, category, description, and suggestion"
+      - "the body does not contain the quote field"
+required_facts:
+  - id: fact-quote-added-line
+    proves: [quote-added-line]
+    kind: unit-test
+    artifact:
+      path: tests/test_agent_quote_validation.py
+      change: create
+    command: python -m pytest tests/test_agent_quote_validation.py -k quote_added_line -q
+  - id: fact-pr-level-intent-exception
+    proves: [pr-level-intent-exception]
+    kind: unit-test
+    artifact:
+      path: tests/test_agent_quote_validation.py
+      change: create
+    command: python -m pytest tests/test_agent_quote_validation.py -k pr_level_intent_exception -q
+  - id: fact-inline-comments-quote-free
+    proves: [inline-comments-quote-free]
+    kind: unit-test
+    artifact:
+      path: tests/test_inline_comments.py
+      change: update
+    command: python -m pytest tests/test_inline_comments.py -k quote_free -q
+human_review: []

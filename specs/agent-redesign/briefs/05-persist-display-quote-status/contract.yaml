@@ -1,0 +1,63 @@
+contract_version: 1
+title: "Persist and display quote and skipped status"
+depends_on:
+  - 01-add-review-contracts
+  - 02-harden-prompts-and-quotes
+  - 03-implement-intent-verifier
+  - 04-implement-architecture-verifier
+scenarios:
+  - id: quote-status-api-roundtrip
+    given:
+      - "a review result containing a quote-backed finding and a skipped architecture agent"
+    when:
+      - "the result is saved and fetched through the dashboard review endpoint"
+    then:
+      - "the finding includes quote"
+      - "the architecture agent includes status skipped"
+      - "the architecture agent includes the skip reason"
+  - id: review-detail-renders-quote-status
+    given:
+      - "the review detail page loads a review with a quote-backed finding and skipped architecture"
+    when:
+      - "the browser renders the agent cards and finding cards"
+    then:
+      - "the finding card shows a monospaced diff quote strip"
+      - "the architecture card shows Architecture skipped - no architecture context found"
+  - id: human-review-quote-visible
+    given:
+      - "human review and wizard surfaces receive quote-backed findings"
+    when:
+      - "the finding callouts are rendered"
+    then:
+      - "the quote strip is visible in Guardian UI"
+      - "PR inline comment bodies remain quote-free"
+required_facts:
+  - id: fact-quote-status-api-roundtrip
+    proves: [quote-status-api-roundtrip]
+    kind: integration-test
+    artifact:
+      path: tests/test_storage_agent_contracts.py
+      change: create
+    command: python -m pytest tests/test_storage_agent_contracts.py -k quote_status_roundtrip -q
+  - id: fact-dashboard-quote-status-payload
+    proves: [quote-status-api-roundtrip]
+    kind: integration-test
+    artifact:
+      path: tests/test_dashboard_quote_status.py
+      change: create
+    command: python -m pytest tests/test_dashboard_quote_status.py -k quote_status_payload -q
+  - id: fact-review-detail-browser-quote-status
+    proves: [review-detail-renders-quote-status]
+    kind: browser-test
+    artifact:
+      path: tests/browser/test_review_detail_quote_status.py
+      change: create
+    command: python -m pytest tests/browser/test_review_detail_quote_status.py -q
+  - id: fact-human-review-quote-visible
+    proves: [human-review-quote-visible]
+    kind: integration-test
+    artifact:
+      path: tests/test_dashboard_quote_status.py
+      change: create
+    command: python -m pytest tests/test_dashboard_quote_status.py -k human_review_quote -q
+human_review: []
