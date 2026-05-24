@@ -273,3 +273,39 @@ class TestSkippedAgent:
         ctx = _make_context()
         result = decide(ctx, [skipped], RiskTier.TRIVIAL, GuardianConfig())
         assert not any("architecture" in r for r in result.finding_reasons)
+
+    def test_skipped_agent_only_at_low_tier_does_not_auto_approve(self):
+        # Vacuous all_pass when ran_results is empty must not auto-approve at LOW tier
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        ctx = _make_context()
+        result = decide(ctx, [skipped], RiskTier.LOW, GuardianConfig())
+        assert result.decision == Decision.HUMAN_REVIEW
+
+    def test_skipped_agent_only_at_medium_tier_does_not_auto_approve(self):
+        # Vacuous has_flags=False/has_warns=False when ran_results is empty must not auto-approve
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        ctx = _make_context()
+        result = decide(ctx, [skipped], RiskTier.MEDIUM, GuardianConfig())
+        assert result.decision == Decision.HUMAN_REVIEW
+
+    def test_skipped_agent_only_elevated_low_tier_does_not_auto_approve(self):
+        # all_pass vacuously True with ran_results empty must not auto-approve at ELEVATED+LOW
+        skipped = AgentResult(
+            agent_name="architecture",
+            verdict=Verdict.PASS,
+            status="skipped",
+            status_reason="no architecture context found",
+        )
+        ctx = _make_context(repo_risk_class=RepoRiskClass.ELEVATED)
+        result = decide(ctx, [skipped], RiskTier.LOW, GuardianConfig())
+        assert result.decision == Decision.HUMAN_REVIEW

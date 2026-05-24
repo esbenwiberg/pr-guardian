@@ -346,6 +346,12 @@ def _apply_matrix(
             return Decision.HUMAN_REVIEW
         return Decision.AUTO_APPROVE
 
+    # For non-trivial tiers: if agents were scheduled but all were skipped, there
+    # is no analysis to support auto-approve. Skipped ≠ pass — always escalate.
+    # (Empty agent_results means no agents were scheduled; that uses original matrix behavior.)
+    if agent_results and not ran_results:
+        return Decision.HUMAN_REVIEW
+
     if tier == RiskTier.LOW:
         if repo_risk == RepoRiskClass.CRITICAL:
             return Decision.HUMAN_REVIEW
