@@ -143,3 +143,48 @@ class Test_split_agents:
 
     def test_architecture_intent_not_in_display_labels(self):
         assert "architecture_intent" not in _AGENT_LABELS
+
+
+class TestIntentScheduling:
+    def test_intent_low_not_scheduled(self):
+        """Intent agent must never be in the agent set for a low-risk PR."""
+        ctx = _make_context()  # default: LOW risk, single file, no risk signals
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier == RiskTier.LOW
+        assert "intent" not in result.agent_set
+
+    def test_intent_scheduled_for_high(self):
+        """Intent agent is included in the agent set for high-risk PRs."""
+        surface = SecuritySurface()
+        surface.classify("src/auth/handler.py", "security_critical")
+        ctx = _make_context(
+            changed_files=["src/auth/handler.py"],
+            security_surface=surface,
+            change_profile=ChangeProfile(
+                file_roles={"src/auth/handler.py": {FileRole.PRODUCTION}},
+                has_production_changes=True,
+                touches_security_surface=True,
+            ),
+        )
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier == RiskTier.HIGH
+        assert "intent" in result.agent_set
+
+    def test_intent_not_scheduled_when_disabled(self):
+        """Intent agent is skipped when intent_verification.enabled=False."""
+        from pr_guardian.config.schema import IntentVerificationConfig
+        cfg = GuardianConfig()
+        cfg.intent_verification = IntentVerificationConfig(enabled=False)
+        surface = SecuritySurface()
+        surface.classify("src/auth/handler.py", "security_critical")
+        ctx = _make_context(
+            changed_files=["src/auth/handler.py"],
+            security_surface=surface,
+            change_profile=ChangeProfile(
+                file_roles={"src/auth/handler.py": {FileRole.PRODUCTION}},
+                has_production_changes=True,
+                touches_security_surface=True,
+            ),
+        )
+        result = classify(ctx, cfg)
+        assert "intent" not in result.agent_set

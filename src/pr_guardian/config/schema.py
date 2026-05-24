@@ -79,6 +79,10 @@ class IntentVerificationConfig(BaseModel):
     enabled: bool = True
     work_item_source: str = "auto"
     require_linked_work_item: bool = False
+    # Size gate: emit scope-opacity finding only when the PR meets this threshold.
+    # Changed_files >= size_gate_files OR lines_changed >= size_gate_lines.
+    size_gate_files: int = 5
+    size_gate_lines: int = 150
 
 
 class PrivacyConfig(BaseModel):

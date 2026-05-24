@@ -81,7 +81,21 @@ def classify(context: ReviewContext, config: GuardianConfig) -> TriageResult:
     if profile.has_production_changes and result.risk_tier != RiskTier.TRIVIAL:
         result.agent_set.add("test_quality")
 
-    return _apply_amplifiers(result, context, config)
+    result = _apply_amplifiers(result, context, config)
+
+    # Intent is scheduled for medium/high risk tiers only (never for low/trivial).
+    # Check after amplifiers so tier bumps (e.g. cross-stack LOW→MEDIUM) are included.
+    # Discard in all other cases — ALL_AGENTS (used for HIGH) already includes intent,
+    # so we must explicitly remove it when the config disables intent verification.
+    if (
+        result.risk_tier in (RiskTier.MEDIUM, RiskTier.HIGH)
+        and config.intent_verification.enabled
+    ):
+        result.agent_set.add("intent")
+    else:
+        result.agent_set.discard("intent")
+
+    return result
 
 
 def _has_medium_signals(

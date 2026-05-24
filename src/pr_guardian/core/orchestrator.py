@@ -11,6 +11,7 @@ import structlog
 from pr_guardian.agents.architecture_intent import ArchitectureIntentAgent
 from pr_guardian.agents.code_quality_obs import CodeQualityObservabilityAgent
 from pr_guardian.agents.hotspot import HotspotAgent
+from pr_guardian.agents.intent import IntentAgent
 from pr_guardian.agents.performance import PerformanceAgent
 from pr_guardian.agents.security_privacy import SecurityPrivacyAgent
 from pr_guardian.agents.test_quality import TestQualityAgent
@@ -85,6 +86,7 @@ def get_storage():
 AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
     "performance": PerformanceAgent,
+    "intent": IntentAgent,
     "architecture_intent": ArchitectureIntentAgent,
     "code_quality_observability": CodeQualityObservabilityAgent,
     "test_quality": TestQualityAgent,
@@ -362,7 +364,11 @@ async def _run_pipeline(
         for agent_name in triage_result.agent_set:
             agent_cls = AGENT_REGISTRY.get(agent_name)
             if agent_cls:
-                agent = agent_cls(config)
+                # IntentAgent needs the platform adapter to fetch referenced spec files.
+                if agent_name == "intent":
+                    agent = agent_cls(config, adapter=adapter)
+                else:
+                    agent = agent_cls(config)
                 agent_tasks.append(
                     agent.review(context, dismissal_context=agent_dismissal_context.get(agent_name))
                 )
