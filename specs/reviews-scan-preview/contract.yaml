@@ -1,0 +1,51 @@
+contract_version: 1
+title: "Add repo scan preview to Reviews"
+depends_on: []
+scenarios:
+  - id: repo-target-resolver-contract
+    given:
+      - "the /reviews trigger resolver receives supported repo-scan input"
+    when:
+      - "GitHub URLs, GitHub .git URLs, ADO URLs, ADO triple shorthand, and ambiguous two-segment shorthand are resolved"
+    then:
+      - "the resolver returns the canonical repo string and platform used by the scan trigger"
+  - id: trigger-route-uses-canonical-scan-target
+    given:
+      - "the user submits scan mode through /api/reviews/trigger"
+    when:
+      - "the body contains a full GitHub repo URL"
+    then:
+      - "the route calls the repo review trigger with repo=octocat/spoon and platform=github"
+      - "the JSON response includes repo=octocat/spoon and platform=github"
+  - id: reviews-scan-preview-renders
+    given:
+      - "the /reviews page is open"
+    when:
+      - "the user types a GitHub repo URL into the paste bar"
+    then:
+      - "the scan options row is visible"
+      - "the preview says Will scan GitHub repo: octocat/spoon"
+      - "no network call is required for the preview"
+required_facts:
+  - id: fact-repo-target-resolver
+    proves: [repo-target-resolver-contract]
+    kind: unit-test
+    artifact:
+      path: tests/test_trigger_dispatch.py
+      change: update
+    command: python -m pytest tests/test_trigger_dispatch.py::TestResolveRepoScanTarget -q
+  - id: fact-trigger-route-canonical-target
+    proves: [trigger-route-uses-canonical-scan-target]
+    kind: integration-test
+    artifact:
+      path: tests/test_trigger_dispatch.py
+      change: update
+    command: python -m pytest tests/test_trigger_dispatch.py::TestTriggerRouteScanDispatch -q
+  - id: fact-reviews-scan-preview
+    proves: [reviews-scan-preview-renders]
+    kind: browser-test
+    artifact:
+      path: tests/browser/reviews_scan_preview.spec.mjs
+      change: create
+    command: node tests/browser/reviews_scan_preview.spec.mjs
+human_review: []
