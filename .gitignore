@@ -1,14 +1,40 @@
+# Python
 __pycache__/
 *.pyc
 *.egg-info/
+*.egg
 .venv/
 .pytest_cache/
-uv.lock
-*.egg
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
 dist/
 build/
+
+# Node
 node_modules/
 tailwindcss-linux-x64
-tailwindcss-linux-x64
+
+# Secrets / local config
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# OS / editor junk
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Tool state
 .playwright-mcp/
 .autopod/
+.repofit/cache/
+repofit-report.html
