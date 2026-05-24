@@ -1,0 +1,53 @@
+contract_version: 1
+title: Hydrate intent anchors
+depends_on:
+  - 01-add-anchor-contracts-and-config
+scenarios:
+  - id: intent-anchor-extraction
+    given:
+      - "a PR has title/body text, linked work item syntax, and a referenced specs/foo/design.md file"
+    when:
+      - "intent anchor hydration runs"
+    then:
+      - "the returned anchor set includes PR claim text"
+      - "the returned anchor set includes linked work-item text when fetched"
+      - "the returned anchor set includes bounded spec snippets"
+  - id: platform-work-item-fetch
+    given:
+      - "GitHub and ADO adapters receive supported work-item references"
+    when:
+      - "the issue or work-item APIs succeed, return 404, or fail"
+    then:
+      - "success returns title/body fields"
+      - "failures return None with no raised exception"
+  - id: missing-intent-anchor-policy
+    given:
+      - "a medium/high review has no body, linked item, spec reference, or useful title"
+    when:
+      - "intent behavior is derived"
+    then:
+      - "the agent can flag scope opacity at the verdict level"
+      - "the system does not create an uncited file finding"
+required_facts:
+  - id: fact-intent-anchor-extraction
+    proves: [intent-anchor-extraction]
+    kind: unit-test
+    artifact:
+      path: tests/test_intent_anchor_discovery.py
+      change: create
+    command: python -m pytest tests/test_intent_anchor_discovery.py::test_title_body_work_item_and_spec_refs_become_anchors -q
+  - id: fact-platform-work-item-fetch
+    proves: [platform-work-item-fetch]
+    kind: unit-test
+    artifact:
+      path: tests/test_github_adapter.py
+      change: update
+    command: python -m pytest tests/test_github_adapter.py::test_fetch_work_item_issue_degrades_gracefully tests/test_ado_adapter.py::test_fetch_work_item_degrades_gracefully -q
+  - id: fact-missing-intent-anchor-policy
+    proves: [missing-intent-anchor-policy]
+    kind: unit-test
+    artifact:
+      path: tests/test_intent_anchor_discovery.py
+      change: create
+    command: python -m pytest tests/test_intent_anchor_discovery.py::test_medium_high_missing_anchor_policy_is_agent_level -q
+human_review: []

@@ -1,0 +1,53 @@
+contract_version: 1
+title: Split agents and scoped context
+depends_on:
+  - 02-discover-architecture-anchors
+  - 03-hydrate-intent-anchors
+scenarios:
+  - id: scoped-anchor-context
+    given:
+      - "ReviewContext contains architecture and intent anchor sets"
+    when:
+      - "agent context is built for each specialist"
+    then:
+      - "architecture receives only architecture anchors"
+      - "intent receives only intent anchors"
+      - "legacy and other specialists receive neither anchor block"
+  - id: architecture-skip-no-llm
+    given:
+      - "architecture discovery mode is skip"
+    when:
+      - "ArchitectureAgent.review is called"
+    then:
+      - "it returns pass with the exact skip note"
+      - "the LLM client is not invoked"
+  - id: pass-explanation-schema
+    given:
+      - "an agent intentionally skips but did not find a problem"
+    when:
+      - "AgentResult is parsed and carried forward"
+    then:
+      - "pass verdicts may retain verdict_explanation for status display"
+required_facts:
+  - id: fact-scoped-anchor-context
+    proves: [scoped-anchor-context]
+    kind: unit-test
+    artifact:
+      path: tests/test_agent_context_anchors.py
+      change: create
+    command: python -m pytest tests/test_agent_context_anchors.py::test_anchor_context_only_reaches_matching_agents -q
+  - id: fact-architecture-skip-no-llm
+    proves: [architecture-skip-no-llm]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_agent.py
+      change: create
+    command: python -m pytest tests/test_architecture_agent.py::test_skip_mode_returns_pass_note_without_llm_call -q
+  - id: fact-pass-explanation-schema
+    proves: [pass-explanation-schema]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_agent.py
+      change: create
+    command: python -m pytest tests/test_architecture_agent.py::test_pass_verdict_can_carry_status_note -q
+human_review: []

@@ -1,0 +1,38 @@
+contract_version: 1
+title: Add anchor contracts and config
+depends_on: []
+scenarios:
+  - id: split-config-contract
+    given:
+      - "a repo config uses architecture/intent weights or the legacy architecture_intent key"
+    when:
+      - "GuardianConfig is constructed"
+    then:
+      - "new architecture and intent weights are available to scoring"
+      - "legacy-only config maps architecture_intent to both new weights"
+      - "explicit architecture or intent weights override the legacy alias"
+  - id: anchor-context-types
+    given:
+      - "architecture and intent anchors are discovered before agents run"
+    when:
+      - "ReviewContext is built"
+    then:
+      - "the architecture anchor set can be attached"
+      - "the intent anchor set can be attached"
+      - "the anchor sets use serializable primitive fields"
+required_facts:
+  - id: fact-split-config-contract
+    proves: [split-config-contract]
+    kind: unit-test
+    artifact:
+      path: tests/test_agent_split_config.py
+      change: create
+    command: python -m pytest tests/test_agent_split_config.py::test_split_weights_and_legacy_alias -q
+  - id: fact-anchor-context-types
+    proves: [anchor-context-types]
+    kind: unit-test
+    artifact:
+      path: tests/test_agent_split_config.py
+      change: create
+    command: python -m pytest tests/test_agent_split_config.py::test_review_context_accepts_anchor_sets -q
+human_review: []

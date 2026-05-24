@@ -1,0 +1,55 @@
+contract_version: 1
+title: Discover architecture anchors
+depends_on:
+  - 01-add-anchor-contracts-and-config
+scenarios:
+  - id: explicit-architecture-docs-win
+    given:
+      - "review.yml declares architecture_docs"
+    when:
+      - "architecture discovery runs"
+    then:
+      - "only declared docs are used"
+      - "mode is full_verifier"
+      - "missing declared docs are reported as non-fatal discovery warnings"
+  - id: architecture-mode-thresholds
+    given:
+      - "repos with accepted ADRs, only structural hints, or no usable anchors"
+    when:
+      - "discovery finalizes an anchor set"
+    then:
+      - "accepted ADRs produce full_verifier mode"
+      - "structural hints alone produce narrow_local_pattern mode"
+      - "no usable anchors produce skip mode"
+  - id: architecture-path-scope-and-staleness
+    given:
+      - "a monorepo with path-scoped docs, stale docs, and an AGENTS.md with build-only sections"
+    when:
+      - "changed paths are classified"
+    then:
+      - "anchors apply only to matching scopes"
+      - "stale docs are demoted"
+      - "build-only AGENTS content is ignored"
+required_facts:
+  - id: fact-explicit-architecture-docs-win
+    proves: [explicit-architecture-docs-win]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_anchor_discovery.py
+      change: create
+    command: python -m pytest tests/test_architecture_anchor_discovery.py::test_explicit_architecture_docs_force_full_verifier -q
+  - id: fact-architecture-mode-thresholds
+    proves: [architecture-mode-thresholds]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_anchor_discovery.py
+      change: create
+    command: python -m pytest tests/test_architecture_anchor_discovery.py::test_anchor_thresholds_select_full_narrow_or_skip -q
+  - id: fact-architecture-path-scope-and-staleness
+    proves: [architecture-path-scope-and-staleness]
+    kind: unit-test
+    artifact:
+      path: tests/test_architecture_anchor_discovery.py
+      change: create
+    command: python -m pytest tests/test_architecture_anchor_discovery.py::test_path_scopes_stale_docs_and_agents_filtering -q
+human_review: []

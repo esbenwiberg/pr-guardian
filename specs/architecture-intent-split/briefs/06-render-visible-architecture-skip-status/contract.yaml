@@ -1,0 +1,37 @@
+contract_version: 1
+title: Render visible architecture skip status
+depends_on:
+  - 05-wire-orchestration-triage-scoring
+scenarios:
+  - id: visible-architecture-skip-browser
+    given:
+      - "the review detail page receives an architecture agent result with verdict pass and verdict_explanation set to no architecture context found - agent skipped"
+    when:
+      - "the page renders in a browser"
+    then:
+      - "the Architecture agent card is present"
+      - "the skip note is visible as Review note"
+      - "the card still shows zero findings and pass verdict"
+  - id: dashboard-payload-preserves-pass-note
+    given:
+      - "storage contains an agent result with pass verdict and verdict_explanation"
+    when:
+      - "the dashboard review payload is serialized"
+    then:
+      - "verdict_explanation is present for pass results"
+required_facts:
+  - id: fact-visible-architecture-skip-browser
+    proves: [visible-architecture-skip-browser]
+    kind: browser-test
+    artifact:
+      path: tests/browser/review_detail_skip_status.spec.mjs
+      change: create
+    command: node tests/browser/review_detail_skip_status.spec.mjs
+  - id: fact-dashboard-payload-preserves-pass-note
+    proves: [dashboard-payload-preserves-pass-note]
+    kind: unit-test
+    artifact:
+      path: tests/test_dashboard_triage_enrichment.py
+      change: update
+    command: python -m pytest tests/test_dashboard_triage_enrichment.py::test_pass_verdict_explanation_visible_in_payload -q
+human_review: []

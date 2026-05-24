@@ -1,0 +1,66 @@
+contract_version: 1
+title: Wire orchestration, triage, scoring, and legacy support
+depends_on:
+  - 04-split-agents-and-scoped-context
+scenarios:
+  - id: triage-selects-split-agents
+    given:
+      - "a fresh high-risk review is classified"
+    when:
+      - "agent_set is built"
+    then:
+      - "intent and architecture are selected"
+      - "architecture_intent is not selected"
+  - id: change-profile-implies-architecture
+    given:
+      - "production changes cross three module boundaries"
+    when:
+      - "change profile implied agents are computed"
+    then:
+      - "architecture is implied"
+      - "architecture_intent is not implied"
+  - id: split-agent-scoring
+    given:
+      - "agent results from intent and architecture"
+    when:
+      - "combined_score is computed"
+    then:
+      - "configured split weights are used"
+      - "legacy architecture_intent weight aliases when needed"
+  - id: legacy-rereview-registry
+    given:
+      - "an old review stored findings from architecture_intent"
+    when:
+      - "focused re-review groups findings by agent"
+    then:
+      - "the legacy agent still resolves from AGENT_REGISTRY"
+required_facts:
+  - id: fact-triage-selects-split-agents
+    proves: [triage-selects-split-agents]
+    kind: unit-test
+    artifact:
+      path: tests/test_triage.py
+      change: update
+    command: python -m pytest tests/test_triage.py::TestTriage::test_high_risk_selects_split_architecture_and_intent -q
+  - id: fact-change-profile-implies-architecture
+    proves: [change-profile-implies-architecture]
+    kind: unit-test
+    artifact:
+      path: tests/test_change_profile.py
+      change: update
+    command: python -m pytest tests/test_change_profile.py::TestChangeProfile::test_architecture_boundary_three_modules_flags_architecture_agent -q
+  - id: fact-split-agent-scoring
+    proves: [split-agent-scoring]
+    kind: unit-test
+    artifact:
+      path: tests/test_decision.py
+      change: update
+    command: python -m pytest tests/test_decision.py::TestScoring::test_split_agent_weights_and_legacy_alias -q
+  - id: fact-legacy-rereview-registry
+    proves: [legacy-rereview-registry]
+    kind: unit-test
+    artifact:
+      path: tests/test_dashboard_triage_enrichment.py
+      change: update
+    command: python -m pytest tests/test_dashboard_triage_enrichment.py::test_legacy_architecture_intent_agent_remains_rereviewable -q
+human_review: []
