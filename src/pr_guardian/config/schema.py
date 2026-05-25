@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -73,6 +75,14 @@ class AutoApproveConfig(BaseModel):
 class AgentsConfig(BaseModel):
     max_context_tokens: int = 120_000
     timeout_seconds: int = 120
+
+
+class ArchitectureConfig(BaseModel):
+    """Architecture agent mode override and explicit path-scope configuration."""
+    mode_override: Literal["auto", "full_verifier", "narrow_local_pattern", "skip"] = "auto"
+    # Maps changed-file glob patterns to explicit anchor file paths for monorepo scoping.
+    # e.g. {"apps/api/**": ["docs/adr/", "apps/api/ARCHITECTURE.md"]}
+    path_scopes: dict[str, list[str]] = Field(default_factory=dict)
 
 
 class IntentVerificationConfig(BaseModel):
@@ -253,6 +263,9 @@ class GuardianConfig(BaseModel):
     intent_verification: IntentVerificationConfig = Field(
         default_factory=IntentVerificationConfig
     )
+    # Explicit team-declared anchor files (rank 1). Overrides anchor auto-discovery.
+    architecture_docs: list[str] = Field(default_factory=list)
+    architecture: ArchitectureConfig = Field(default_factory=ArchitectureConfig)
     privacy: PrivacyConfig = Field(default_factory=PrivacyConfig)
     test_quality: TestQualityConfig = Field(default_factory=TestQualityConfig)
     feedback: FeedbackConfig = Field(default_factory=FeedbackConfig)

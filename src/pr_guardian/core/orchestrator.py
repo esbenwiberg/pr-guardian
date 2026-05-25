@@ -8,6 +8,7 @@ from pathlib import Path
 
 import structlog
 
+from pr_guardian.agents.architecture import ArchitectureAgent
 from pr_guardian.agents.architecture_intent import ArchitectureIntentAgent
 from pr_guardian.agents.code_quality_obs import CodeQualityObservabilityAgent
 from pr_guardian.agents.hotspot import HotspotAgent
@@ -87,7 +88,8 @@ AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
     "performance": PerformanceAgent,
     "intent": IntentAgent,
-    "architecture_intent": ArchitectureIntentAgent,
+    "architecture": ArchitectureAgent,
+    "architecture_intent": ArchitectureIntentAgent,  # legacy; not scheduled by triage
     "code_quality_observability": CodeQualityObservabilityAgent,
     "test_quality": TestQualityAgent,
     "hotspot": HotspotAgent,
@@ -364,8 +366,9 @@ async def _run_pipeline(
         for agent_name in triage_result.agent_set:
             agent_cls = AGENT_REGISTRY.get(agent_name)
             if agent_cls:
-                # IntentAgent needs the platform adapter to fetch referenced spec files.
-                if agent_name == "intent":
+                # Intent and architecture agents need the platform adapter to
+                # fetch spec files and architecture anchor documents.
+                if agent_name in ("intent", "architecture"):
                     agent = agent_cls(config, adapter=adapter)
                 else:
                     agent = agent_cls(config)
