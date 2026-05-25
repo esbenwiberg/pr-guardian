@@ -1,171 +1,158 @@
 from __future__ import annotations
 
-import json
 import os
-import socket
 import subprocess
-import sys
 import textwrap
-import time
-import uuid
 from pathlib import Path
-from urllib.request import urlopen
 
 import pytest
 
 
-def _free_port() -> int:
-    with socket.socket() as sock:
-        sock.bind(("127.0.0.1", 0))
-        return int(sock.getsockname()[1])
-
-
-def _playwright_available() -> bool:
-    check = subprocess.run(
-        ["node", "-e", "require('playwright');"],
-        cwd=Path(__file__).resolve().parents[2],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    return check.returncode == 0
-
-
 def test_review_detail_renders_quote_strip_and_skipped_architecture(tmp_path):
-    if not _playwright_available():
-        pytest.skip("node playwright dependency is not installed")
-
-    repo = Path(__file__).resolve().parents[2]
-    review_id = str(uuid.uuid4())
-    port = _free_port()
-    base_url = f"http://127.0.0.1:{port}"
-    screenshot_path = repo / "test-results" / "review-detail-quote-status.png"
-    screenshot_path.parent.mkdir(exist_ok=True)
-    chromium_executable = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE")
-    if not chromium_executable:
-        candidates = sorted(Path("/opt/pw-browsers").glob("chromium_headless_shell-*/chrome-linux/headless_shell"))
-        chromium_executable = str(candidates[-1]) if candidates else ""
-
-    env = os.environ.copy()
-    env["PYTHONPATH"] = str(repo / "src")
-    env.pop("DATABASE_URL", None)
-    env.pop("GUARDIAN_DB_ENABLED", None)
-    server = subprocess.Popen(
+    probe = subprocess.run(
         [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "pr_guardian.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--log-level",
-            "warning",
+            "node",
+            "-e",
+            "const { chromium } = require('playwright');"
+            "chromium.launch({headless:true}).then(b=>b.close()).catch(e=>{console.error(e.message); process.exit(1);})",
         ],
-        cwd=repo,
-        env=env,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        cwd=Path.cwd(),
+        text=True,
+        capture_output=True,
+        timeout=10,
     )
-    try:
-        deadline = time.time() + 15
-        while True:
-            try:
-                with urlopen(f"{base_url}/reviews/{review_id}", timeout=1) as resp:
-                    if resp.status == 200:
-                        break
-            except Exception:
-                if time.time() > deadline:
-                    raise
-                time.sleep(0.2)
+    if probe.returncode != 0:
+        pytest.skip("Playwright Chromium is not installed in this environment")
 
-        review_payload = {
-            "id": review_id,
-            "pr_id": "42",
-            "repo": "org/repo",
-            "platform": "github",
-            "author": "dev",
-            "title": "Add auth fast path",
-            "source_branch": "feature",
-            "target_branch": "main",
-            "head_commit_sha": "abc123",
-            "pr_url": "https://github.com/org/repo/pull/42",
-            "risk_tier": "medium",
-            "repo_risk_class": "standard",
-            "combined_score": 42,
-            "decision": "human_review",
-            "summary": "Review summary.",
-            "mechanical_results": [],
-            "agent_results": [
-                {
-                    "agent_name": "architecture",
-                    "verdict": "pass",
-                    "status": "skipped",
-                    "status_reason": "no architecture context found",
-                    "findings": [],
-                },
-                {
-                    "agent_name": "intent",
-                    "verdict": "flag_human",
-                    "status": "ran",
-                    "status_reason": None,
-                    "findings": [
-                        {
-                            "id": str(uuid.uuid4()),
-                            "severity": "medium",
-                            "certainty": "suspected",
-                            "category": "scope-opacity",
-                            "language": "text",
-                            "file": "",
-                            "line": None,
-                            "description": "PR intent lacks a specific auth anchor.",
-                            "quote": "PR description: fixes auth stuff",
-                        }
-                    ],
-                },
-            ],
-            "sticky_triggers": [],
-            "finding_reasons": [],
-            "triage_counts": {"noise": 0, "fyi": 1, "decision": 0},
-            "dismissal_count": 0,
-            "prior_dismissals": [],
-        }
-        script = textwrap.dedent(
+    evidence_dir = Path(os.environ.get("PR_GUARDIAN_BROWSER_EVIDENCE", "test-results/quote-status"))
+    evidence_dir.mkdir(parents=True, exist_ok=True)
+    screenshot_path = evidence_dir / "review-detail-quote-status.png"
+    log_path = evidence_dir / "review-detail-quote-status.log"
+
+    script = tmp_path / "review_detail_quote_status.mjs"
+    script.write_text(
+        textwrap.dedent(
             f"""
-            const {{ chromium }} = require('playwright');
-            (async () => {{
-              const launchOptions = {{ headless: true }};
-              if ({json.dumps(chromium_executable)}) launchOptions.executablePath = {json.dumps(chromium_executable)};
-              const browser = await chromium.launch(launchOptions);
-              const page = await browser.newPage({{ viewport: {{ width: 1280, height: 900 }} }});
-              await page.route('**/api/dashboard/reviews/{review_id}', route => route.fulfill({{
-                status: 200,
-                contentType: 'application/json',
-                body: JSON.stringify({json.dumps(review_payload)}),
-              }}));
-              await page.goto('{base_url}/reviews/{review_id}', {{ waitUntil: 'networkidle' }});
-              await page.getByText('Architecture skipped - no architecture context found').waitFor();
-              await page.locator('[data-quote-strip]').filter({{ hasText: 'PR description: fixes auth stuff' }}).waitFor();
-              await page.screenshot({{ path: {json.dumps(str(screenshot_path))}, fullPage: true }});
-              await browser.close();
-            }})().catch(err => {{
-              console.error(err);
-              process.exit(1);
+            import http from 'node:http';
+            import fs from 'node:fs/promises';
+            import path from 'node:path';
+            import {{ chromium }} from 'playwright';
+
+            const root = process.cwd();
+            const reviewId = '00000000-0000-4000-8000-000000000042';
+            const review = {{
+              id: reviewId,
+              pr_id: '42',
+              repo: 'org/repo',
+              platform: 'github',
+              author: 'dev',
+              title: 'Wire auth guard',
+              decision: 'human_review',
+              risk_tier: 'medium',
+              combined_score: 0.72,
+              summary: 'Review summary',
+              started_at: new Date().toISOString(),
+              finished_at: new Date().toISOString(),
+              duration_ms: 1200,
+              cost_usd: 0.01,
+              mechanical_results: [],
+              sticky_triggers: [],
+              finding_reasons: [],
+              dismissal_count: 0,
+              prior_dismissals: [],
+              agent_results: [
+                {{
+                  agent_name: 'security_privacy',
+                  verdict: 'warn',
+                  status: 'ran',
+                  status_reason: null,
+                  findings: [{{
+                    id: 'finding-1',
+                    severity: 'high',
+                    certainty: 'detected',
+                    category: 'authorization',
+                    language: 'python',
+                    file: 'src/auth.py',
+                    line: 17,
+                    description: 'The new guard can be bypassed.',
+                    quote: 'return user.is_admin or allow_all',
+                    suggestion: 'Remove the allow_all path.',
+                    cwe: 'CWE-863',
+                    triage: 'decision'
+                  }}]
+                }},
+                {{
+                  agent_name: 'architecture',
+                  verdict: 'pass',
+                  status: 'skipped',
+                  status_reason: 'no architecture context found',
+                  findings: []
+                }}
+              ]
+            }};
+
+            const server = http.createServer(async (req, res) => {{
+              const url = new URL(req.url, 'http://127.0.0.1');
+              if (url.pathname === `/api/dashboard/reviews/${{reviewId}}`) {{
+                res.writeHead(200, {{ 'content-type': 'application/json' }});
+                res.end(JSON.stringify(review));
+                return;
+              }}
+              if (url.pathname === `/reviews/${{reviewId}}`) {{
+                const html = await fs.readFile(path.join(root, 'src/pr_guardian/dashboard/review_detail.html'), 'utf8');
+                res.writeHead(200, {{ 'content-type': 'text/html' }});
+                res.end(html);
+                return;
+              }}
+              if (url.pathname.startsWith('/static/')) {{
+                const filePath = path.join(root, 'src/pr_guardian/dashboard/static', url.pathname.slice('/static/'.length));
+                try {{
+                  const body = await fs.readFile(filePath);
+                  const type = filePath.endsWith('.css') ? 'text/css' : 'application/javascript';
+                  res.writeHead(200, {{ 'content-type': type }});
+                  res.end(body);
+                }} catch {{
+                  res.writeHead(404);
+                  res.end('missing static asset');
+                }}
+                return;
+              }}
+              res.writeHead(404);
+              res.end('not found');
             }});
+
+            await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+            const port = server.address().port;
+            let browser;
+            try {{
+              browser = await chromium.launch({{ headless: true }});
+              const page = await browser.newPage({{ viewport: {{ width: 1280, height: 900 }} }});
+              const messages = [];
+              page.on('console', msg => messages.push(`${{msg.type()}}: ${{msg.text()}}`));
+              await page.goto(`http://127.0.0.1:${{port}}/reviews/${{reviewId}}`, {{ waitUntil: 'networkidle' }});
+              await page.getByText('return user.is_admin or allow_all').waitFor({{ timeout: 5000 }});
+              await page.getByText('Architecture skipped - no architecture context found').waitFor({{ timeout: 5000 }});
+              const quoteFont = await page.locator('[data-quote-strip]').first().evaluate(el => getComputedStyle(el).fontFamily);
+              if (!/mono|Consolas|Menlo/i.test(quoteFont)) {{
+                throw new Error(`quote strip is not monospaced: ${{quoteFont}}`);
+              }}
+              await page.screenshot({{ path: {str(screenshot_path)!r}, fullPage: true }});
+              await fs.writeFile({str(log_path)!r}, messages.join('\\n') || 'no browser console messages\\n');
+            }} finally {{
+              if (browser) await browser.close();
+              server.close();
+            }}
             """
         )
-        result = subprocess.run(
-            ["node", "-e", script],
-            cwd=repo,
-            text=True,
-            capture_output=True,
-            timeout=30,
-        )
-        assert result.returncode == 0, result.stderr
-        assert screenshot_path.exists()
-    finally:
-        server.terminate()
-        try:
-            server.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            server.kill()
+    )
+
+    result = subprocess.run(
+        ["node", str(script)],
+        cwd=Path.cwd(),
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert screenshot_path.exists()
+    assert log_path.exists()

@@ -343,7 +343,7 @@ function render(d) {
       const verdictBg = agent.verdict === 'pass' ? '' : agent.verdict === 'warn' ? 'bg-orange-400/[0.02]' : agent.verdict === 'flag_human' ? 'bg-red-400/[0.03]' : '';
       const explanation = agent.verdict_explanation;
       const showExplanation = explanation && agent.verdict !== 'pass';
-      const statusMessage = renderAgentStatusMessage(agent);
+      const statusHtml = renderAgentStatus(agent);
       return `
         <div class="card mb-4 overflow-hidden border-l-[3px] ${verdictBorder} ${verdictBg}" data-agent-idx="${ai}">
           <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/40 transition-colors" onclick="toggleAgent(${ai})">
@@ -353,15 +353,11 @@ function render(d) {
             <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
             ${hasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
+          ${statusHtml}
           ${showExplanation ? `
           <div class="px-5 py-3 bg-slate-800/30 border-t border-slate-700/30 text-sm text-slate-300">
             <span class="text-xs font-semibold uppercase tracking-wider text-slate-500 mr-2">Review focus:</span>
             ${esc(explanation)}
-          </div>
-          ` : ''}
-          ${statusMessage ? `
-          <div class="px-5 py-3 bg-slate-800/30 border-t border-slate-700/30 text-sm text-slate-300">
-            ${statusMessage}
           </div>
           ` : ''}
           <div class="findings-collapse border-t border-slate-700/50" id="findings-${ai}">
@@ -407,6 +403,22 @@ function render(d) {
   updateSelectionCount();
 }
 
+function renderAgentStatus(agent) {
+  if (agent.agent_name === 'architecture' && agent.status === 'skipped') {
+    const reason = agent.status_reason || 'no architecture context found';
+    return `
+          <div class="px-5 py-3 bg-slate-800/30 border-t border-slate-700/30 text-sm text-slate-300" data-agent-status="architecture-skipped">
+            Architecture skipped - ${esc(reason)}
+          </div>`;
+  }
+  return '';
+}
+
+function renderQuoteStrip(f) {
+  if (!f.quote) return '';
+  return `<div class="mt-1.5 rounded border border-slate-700/50 bg-slate-950/60 px-2.5 py-1.5 font-mono text-xs text-emerald-300 whitespace-pre-wrap break-words" data-quote-strip>${esc(f.quote)}</div>`;
+}
+
 function renderFinding(ai, fi, f, agentName) {
   const key = `${ai}-${fi}`;
   const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : '';
@@ -426,7 +438,7 @@ function renderFinding(ai, fi, f, agentName) {
             ${f.cwe ? `<span class="text-xs text-slate-500">${esc(f.cwe)}</span>` : ''}
           </div>
           ${loc ? `<div class="font-mono text-xs text-emerald-400 mt-1.5">${esc(loc)}</div>` : ''}
-          ${renderQuoteStrip(f.quote)}
+          ${renderQuoteStrip(f)}
           <div class="text-sm mt-2 leading-relaxed text-slate-200">${esc(f.description || '')}</div>
           ${f.suggestion ? `
           <div class="mt-2">
@@ -442,22 +454,7 @@ function renderFinding(ai, fi, f, agentName) {
         ${f.file && f.line ? `<button class="text-xs px-2 py-1 rounded border border-slate-600/50 bg-slate-800/50 text-slate-400 hover:text-slate-200 hover:border-slate-500 transition-colors" data-action="show-code" data-file="${esc(f.file)}" data-line="${f.line}" onclick="event.stopPropagation(); toggleSnippet(this)">Show code</button>` : ''}
         ${isDismissed ? renderDismissedBadge(d) : renderDismissButton(f.id)}
       </div>
-  </div>`;
-}
-
-function renderAgentStatusMessage(agent) {
-  if (agent.status !== 'skipped') return '';
-  if (agent.agent_name === 'architecture' && agent.status_reason === 'no architecture context found') {
-    return 'Architecture skipped - no architecture context found';
-  }
-  const label = AGENT_LABELS[agent.agent_name] || agent.agent_name || 'Agent';
-  return `${esc(label)} skipped${agent.status_reason ? ' - ' + esc(agent.status_reason) : ''}`;
-}
-
-function renderQuoteStrip(quote) {
-  const text = (quote || '').trim();
-  if (!text) return '';
-  return `<div class="mt-1.5 rounded border border-emerald-400/15 bg-emerald-400/[0.06] px-2 py-1 font-mono text-xs leading-snug text-emerald-100 overflow-x-auto whitespace-pre-wrap" data-quote-strip>+ ${esc(text)}</div>`;
+    </div>`;
 }
 
 function renderDismissButton(findingId) {

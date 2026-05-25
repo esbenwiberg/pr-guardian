@@ -108,6 +108,8 @@
   .decided-tag.dismissed { background: rgba(100,116,139,0.18); color: var(--muted); }
 
   .concern-prose { font-size: 14.5px; line-height: 1.65; color: #d6dde8; }
+  .quote-strip { margin: 8px 0 10px; border: 1px solid var(--border); border-radius: 5px; background: rgba(2,6,23,0.48); padding: 5px 8px; color: var(--green); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .agent-status-note { margin: -10px 0 26px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel-2); padding: 9px 11px; color: var(--muted); font-size: 13px; }
   .concern-prose p { margin: 0 0 8px; }
   .concern-prose p:last-child { margin-bottom: 0; }
   .concern-prose code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; color: var(--text); }
@@ -133,7 +135,6 @@
 
   .fix-hint { margin-top: 8px; padding: 11px 13px; border-radius: 6px; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.2); font-size: 13px; line-height: 1.6; color: #d6dde8; }
   .fix-hint strong { color: var(--green); display: block; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
-  .quote-strip { margin-top: 8px; padding: 4px 8px; border: 1px solid rgba(52,211,153,0.16); border-radius: 6px; background: rgba(52,211,153,0.06); color: #d1fae5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.35; overflow-x: auto; white-space: pre-wrap; }
 
   /* Per-concern action buttons */
   .concern-actions { display: flex; gap: 6px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
@@ -443,7 +444,7 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
         question: q,
         cwe: f.cwe ? [f.cwe] : [],
         reasoning: reasoning.map(escapeHtml),
-        quote: f.quote || "",
+        quote: f.quote ? escapeHtml(f.quote) : null,
         hunk,
         fix: f.suggestion ? escapeHtml(f.suggestion) : null,
       });
@@ -688,13 +689,8 @@ function renderHunk(h) {
   return `<div class="hunk"><div class="hunk-header">${escapeHtml(h.file)} &nbsp; ${escapeHtml(h.header)}</div><pre>${rows}</pre></div>`;
 }
 
-function renderQuoteStrip(quote) {
-  const text = (quote || "").trim();
-  if (!text) return "";
-  return `<div class="quote-strip" data-quote-strip>+ ${escapeHtml(text)}</div>`;
-}
-
 function renderBriefing() {
+  const statusMessages = renderAgentStatusMessages(reviewData.agent_results || []);
   document.getElementById("step").innerHTML = `
     <div class="eyebrow">Step 1 of ${steps.length} · Briefing</div>
     <h1 class="step-title">${escapeHtml(window.PR_TITLE)}</h1>
@@ -705,6 +701,7 @@ function renderBriefing() {
       <span><strong>${stats.total} findings</strong> · ${stats.surfaced} surfaced · ${stats.suppressed} suppressed</span>
       <span>risk tier <strong>${stats.risk}</strong></span>
     </div>
+    ${statusMessages}
 
     <div class="wwh">
       <div class="wwh-block">
@@ -752,6 +749,7 @@ function renderCapability(capId) {
                     : "";
     const cwePills = (d.cwe || []).map(c => `<span class="pill cwe">${c}</span>`).join("");
     const reasoning = d.reasoning.map(p => `<p>${p}</p>`).join("");
+    const quoteHtml = d.quote ? `<div class="quote-strip" data-quote-strip>${d.quote}</div>` : "";
     const cls = ["concern", `sev-${d.severity}`];
     if (s !== "pending") cls.push(`decided-${s === 'fix' ? 'fix' : s}`);
     return `<div class="${cls.join(' ')}" data-idx="${i}">
@@ -761,8 +759,8 @@ function renderCapability(capId) {
         ${cwePills}
         ${decidedTag}
       </div>
-      ${renderQuoteStrip(d.quote)}
       <div class="concern-prose">${reasoning}</div>
+      ${quoteHtml}
       <div id="hunk-${i}" style="display:none">${d.hunk ? renderHunk(d.hunk) : ''}</div>
       ${d.fix ? `<details class="expander">
         <summary>Recommended fix</summary>
@@ -806,6 +804,13 @@ function renderCapability(capId) {
       render();
     });
   });
+}
+
+function renderAgentStatusMessages(agents) {
+  return agents
+    .filter(a => a.agent_name === 'architecture' && a.status === 'skipped')
+    .map(a => `<div class="agent-status-note" data-agent-status="architecture-skipped">Architecture skipped - ${escapeHtml(a.status_reason || 'no architecture context found')}</div>`)
+    .join('');
 }
 
 // Maps the wizard's per-concern action to the dismissal API:
