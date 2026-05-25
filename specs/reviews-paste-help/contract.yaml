@@ -1,0 +1,39 @@
+contract_version: 1
+title: "Add paste-bar help to Reviews"
+depends_on: []
+scenarios:
+  - id: paste-help-opens-with-examples
+    given:
+      - "the /reviews queue page is open in the harness-served app"
+    when:
+      - "the user clicks the paste-bar help control beside the PR/repo input"
+    then:
+      - "a compact help popover opens without navigating away"
+      - "the popover shows examples for a GitHub PR URL, a GitHub repository scan, and an Azure DevOps repository scan"
+      - "the browser proof saves closed and open screenshots under .autopod/evidence/fact-reviews-paste-help/"
+  - id: paste-help-preserves-scan-preview
+    given:
+      - "the paste-bar help control exists on /reviews"
+    when:
+      - "the user opens the help popover and then types https://github.com/octocat/spoon into the paste bar"
+    then:
+      - "the existing scan options row remains visible"
+      - "the existing scan preview still says Will scan GitHub repo: octocat/spoon"
+      - "the help popover does not submit the trigger form or interfere with scan option controls"
+required_facts:
+  - id: fact-reviews-paste-help-browser
+    proves:
+      - paste-help-opens-with-examples
+      - paste-help-preserves-scan-preview
+    kind: browser-test
+    artifact:
+      path: tests/browser/reviews_paste_help.spec.mjs
+      change: create
+    command: node tests/browser/reviews_paste_help.spec.mjs
+human_review:
+  - id: review-paste-help-usability
+    covers:
+      - paste-help-opens-with-examples
+      - paste-help-preserves-scan-preview
+    criterion: "In the running /reviews UI, the paste-bar help popover is readable, unobtrusive, and useful without making the trigger bar feel crowded."
+    reason: "The automated browser fact can prove visibility and screenshots, but final readability and visual balance are product judgement."
