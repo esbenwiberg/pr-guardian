@@ -372,13 +372,19 @@ async def discover_architecture_anchors(
             adr_content = await _try_fetch(adapter, repo, adr_file, ref)
             if not adr_content:
                 continue
-            is_accepted = bool(_ADR_ACCEPTED_RE.search(adr_content))
+            # Skip non-accepted ADRs entirely. Rejected/Superseded ADRs document
+            # decisions explicitly NOT taken; including them as authoritative
+            # anchors would let the LLM flag findings against architectural
+            # directions the team chose to abandon.
+            if not _ADR_ACCEPTED_RE.search(adr_content):
+                log.debug("arch_anchor_skipped_non_accepted_adr", path=adr_file)
+                continue
             anchors.append(
                 ArchitectureAnchor(
                     path=adr_file,
                     rank=3,
-                    weight=0.9 if is_accepted else 0.5,
-                    anchor_class="rule" if is_accepted else "convention",
+                    weight=0.9,
+                    anchor_class="rule",
                     content=adr_content,
                     scope_glob=adr_scope,
                 )
@@ -424,6 +430,14 @@ async def discover_architecture_anchors(
                             content=content,
                             scope_glob=path_pattern,
                         )
+                    )
+                else:
+                    # path_scopes values must be fetchable files, not directories.
+                    # Warn so config typos don't silently lose intended anchors.
+                    log.warning(
+                        "arch_anchor_path_scope_unfetchable",
+                        path=anchor_path,
+                        scope=path_pattern,
                     )
 
     # --- Finalize: compute per-path anchors and overall mode ---

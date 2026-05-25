@@ -88,6 +88,8 @@ AGENT_REGISTRY = {
     "security_privacy": SecurityPrivacyAgent,
     "performance": PerformanceAgent,
     "intent": IntentAgent,
+    # Scheduled by triage: in ALL_AGENTS for HIGH tiers and in
+    # ChangeProfile.implied_agents when crosses_architecture_boundary fires.
     "architecture": ArchitectureAgent,
     "architecture_intent": ArchitectureIntentAgent,  # legacy; not scheduled by triage
     "code_quality_observability": CodeQualityObservabilityAgent,

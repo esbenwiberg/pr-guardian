@@ -226,6 +226,66 @@ class TestAnchorModes:
         assert result.mode == "full_verifier"
 
     @pytest.mark.asyncio
+    async def test_anchor_modes_rejected_adr_is_not_anchor(self):
+        """Rejected/Superseded ADRs must not contribute anchors — they document
+        decisions the team explicitly chose NOT to follow."""
+        files = {
+            "docs/adr/0001-rejected.md": (
+                "# ADR-001 Use Microservices\n\nStatus: Rejected\n\n"
+                "All services must be deployed independently."
+            ),
+        }
+
+        class AdrAdapter(FetchRouter):
+            async def list_repo_files(self, repo, ref="HEAD", path=""):
+                if path == "docs/adr":
+                    return ["docs/adr/0001-rejected.md"]
+                return []
+
+        result = await discover_architecture_anchors(
+            changed_paths=["src/service.py"],
+            config=_config(),
+            adapter=AdrAdapter(files),
+            repo="org/repo",
+        )
+        # Rejected ADR alone → no anchors → skip
+        assert result.mode == "skip"
+        assert result.status_reason == "no architecture context found"
+
+    @pytest.mark.asyncio
+    async def test_anchor_modes_superseded_adr_is_not_anchor(self):
+        """Superseded ADRs are excluded; only the surviving decision should anchor."""
+        files = {
+            "docs/adr/0001-old.md": (
+                "# ADR-001 Use REST\n\nStatus: Superseded by ADR-002\n\n"
+                "Endpoints must be RESTful."
+            ),
+            "docs/adr/0002-new.md": (
+                "# ADR-002 Use GraphQL\n\nStatus: Accepted\n\n"
+                "All new APIs are GraphQL."
+            ),
+        }
+
+        class AdrAdapter(FetchRouter):
+            async def list_repo_files(self, repo, ref="HEAD", path=""):
+                if path == "docs/adr":
+                    return ["docs/adr/0001-old.md", "docs/adr/0002-new.md"]
+                return []
+
+        result = await discover_architecture_anchors(
+            changed_paths=["src/service.py"],
+            config=_config(),
+            adapter=AdrAdapter(files),
+            repo="org/repo",
+        )
+        # Only the accepted ADR contributes → still full_verifier, but only one anchor
+        assert result.mode == "full_verifier"
+        anchors = result.anchors_by_path["src/service.py"]
+        adr_paths = {a.path for a in anchors}
+        assert "docs/adr/0002-new.md" in adr_paths
+        assert "docs/adr/0001-old.md" not in adr_paths
+
+    @pytest.mark.asyncio
     async def test_anchor_modes_dep_cruiser_is_full_verifier(self):
         """dependency-cruiser config with forbidden rules → rank 2 → full_verifier."""
         adapter = FetchRouter({

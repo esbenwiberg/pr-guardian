@@ -114,6 +114,20 @@ architecture: ArchitectureConfig = ...     # mode_override + path_scopes
 
 ## Deviations from brief
 
-None. All constraints and test expectations were implemented as specified.
-`architecture_intent` was not present in this codebase branch (already removed
-by prior pods), so no migration was needed.
+None on the agent contract or anchor data shapes. Notes for downstream pods:
+
+- `classifier.py` was already updated by an upstream pod (added `"architecture"`
+  to `ALL_AGENTS`); `change_profile.py` already emits `"architecture"` in
+  `implied_agents` when `crosses_architecture_boundary` fires. This pod did not
+  re-touch those files. Reachability is locked in by
+  `tests/test_triage.py::test_architecture_in_ALL_AGENTS` and
+  `tests/test_change_profile.py::test_architecture_boundary_implies_architecture_agent_not_old_name`.
+- `architecture_intent` (the legacy agent) is still registered in
+  `AGENT_REGISTRY` with a comment that it is not scheduled by triage. It is
+  preserved as dead-but-live code for the duration of the series and is the
+  next consumer's call whether to delete.
+- Non-accepted ADRs (Rejected/Superseded) are **excluded** from anchor
+  discovery entirely so the LLM never sees architectural directions the team
+  abandoned. Only `Status: Accepted` ADRs contribute as rank-3 anchors.
+- `architecture.path_scopes` values must be fetchable file paths; directory
+  paths fall through with a `arch_anchor_path_scope_unfetchable` warning log.

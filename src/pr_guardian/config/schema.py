@@ -80,8 +80,10 @@ class AgentsConfig(BaseModel):
 class ArchitectureConfig(BaseModel):
     """Architecture agent mode override and explicit path-scope configuration."""
     mode_override: Literal["auto", "full_verifier", "narrow_local_pattern", "skip"] = "auto"
-    # Maps changed-file glob patterns to explicit anchor file paths for monorepo scoping.
-    # e.g. {"apps/api/**": ["docs/adr/", "apps/api/ARCHITECTURE.md"]}
+    # Maps changed-file glob patterns to explicit anchor FILE paths for monorepo
+    # scoping. Each value must be a fetchable file, not a directory; directory
+    # paths silently fall through with no warning.
+    # e.g. {"apps/api/**": ["apps/api/ARCHITECTURE.md", "docs/adr/0042-api.md"]}
     path_scopes: dict[str, list[str]] = Field(default_factory=dict)
 
 
