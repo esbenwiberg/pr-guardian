@@ -253,6 +253,7 @@ class TestIntentMediumHighScopeOpacity:
         ctx = _make_context(pr=pr, changed_files=[f"src/f{i}.py" for i in range(10)], lines_changed=300)
         agent = IntentAgent(GuardianConfig())
         result = await agent.review(ctx)
+        assert len(result.findings) == 1
         assert result.findings[0].severity == Severity.MEDIUM
 
     @pytest.mark.asyncio
@@ -262,6 +263,7 @@ class TestIntentMediumHighScopeOpacity:
         ctx = _make_context(pr=pr, changed_files=[f"src/f{i}.py" for i in range(5)], lines_changed=0)
         agent = IntentAgent(GuardianConfig())
         result = await agent.review(ctx)
+        assert len(result.findings) == 1
         assert result.findings[0].certainty == Certainty.SUSPECTED
 
     @pytest.mark.asyncio
@@ -271,6 +273,7 @@ class TestIntentMediumHighScopeOpacity:
         ctx = _make_context(pr=pr, changed_files=[f"src/f{i}.py" for i in range(5)])
         agent = IntentAgent(GuardianConfig())
         result = await agent.review(ctx)
+        assert len(result.findings) == 1
         assert result.findings[0].line is None
 
     @pytest.mark.asyncio
@@ -328,6 +331,7 @@ class TestIntentMediumHighScopeOpacity:
         ctx = _make_context(pr=pr, changed_files=[f"src/f{i}.py" for i in range(5)])
         agent = IntentAgent(GuardianConfig())
         result = await agent.review(ctx)
+        assert len(result.findings) == 1
         assert result.findings[0].category == "scope-opacity"
 
     @pytest.mark.asyncio
@@ -350,6 +354,7 @@ class TestIntentMediumHighScopeOpacity:
         ctx = _make_context(pr=pr, changed_files=[f"src/f{i}.py" for i in range(5)])
         agent = IntentAgent(GuardianConfig())
         result = await agent.review(ctx)
+        assert len(result.findings) == 1
         assert result.findings[0].quote == SCOPE_OPACITY_QUOTE
 
     @pytest.mark.asyncio
