@@ -245,17 +245,21 @@ async def discover_architecture_anchors(
 
     ref = head_sha or "HEAD"
 
-    # --- Stage 0a: hard mode_override ---
-    if mode_override != "auto":
+    # --- Stage 0a: hard skip override (no discovery needed) ---
+    # full_verifier / narrow_local_pattern overrides still run discovery so the
+    # LLM receives real anchor content; only "skip" bypasses I/O entirely.
+    if mode_override == "skip":
         anchors_by_path: dict[str, list[ArchitectureAnchor]] = {
             p: [] for p in changed_paths
         }
-        reason = f"mode forced by config: {mode_override}" if mode_override == "skip" else None
         return ArchitectureAnchorSet(
-            mode=mode_override,  # type: ignore[arg-type]
+            mode="skip",
             anchors_by_path=anchors_by_path,
-            status_reason=reason,
+            status_reason="mode forced by config: skip",
         )
+
+    # Capture any non-auto, non-skip override so finalization can apply it.
+    forced_mode: str | None = mode_override if mode_override != "auto" else None
 
     # --- Stage 0b: explicit architecture_docs (rank 1, weight 0.9) ---
     # When architecture_docs is set it wins over auto-discovery: we still respect
@@ -426,23 +430,36 @@ async def discover_architecture_anchors(
     anchors_by_path = _build_anchors_by_path(anchors, changed_paths)
 
     if not anchors:
+        # No anchors found via discovery.  If the caller forced a mode, honour it
+        # (they may be relying on their own external context); otherwise skip.
+        if forced_mode:
+            return ArchitectureAnchorSet(
+                mode=forced_mode,  # type: ignore[arg-type]
+                anchors_by_path=anchors_by_path,
+            )
         return ArchitectureAnchorSet(
             mode="skip",
             anchors_by_path=anchors_by_path,
             status_reason="no architecture context found",
         )
 
-    # Overall mode = strongest mode across all paths that have anchors
+    # Overall mode = strongest mode across all paths that have anchors.
     path_modes = [_compute_mode(path_anchors) for path_anchors in anchors_by_path.values()]
     non_skip_modes = [m for m in path_modes if m != "skip"]
     if not non_skip_modes:
+        if forced_mode:
+            return ArchitectureAnchorSet(
+                mode=forced_mode,  # type: ignore[arg-type]
+                anchors_by_path=anchors_by_path,
+            )
         return ArchitectureAnchorSet(
             mode="skip",
             anchors_by_path=anchors_by_path,
             status_reason="no architecture context found",
         )
 
-    overall_mode = max(non_skip_modes, key=lambda m: _MODE_RANK[m])
+    # Apply forced mode if set, otherwise use the computed mode.
+    overall_mode = forced_mode or max(non_skip_modes, key=lambda m: _MODE_RANK[m])
 
     log.info(
         "arch_anchors_discovered",
@@ -450,4 +467,7 @@ async def discover_architecture_anchors(
         mode=overall_mode,
         paths_covered=sum(1 for path_anchors in anchors_by_path.values() if path_anchors),
     )
-    return ArchitectureAnchorSet(mode=overall_mode, anchors_by_path=anchors_by_path)
+    return ArchitectureAnchorSet(
+        mode=overall_mode,  # type: ignore[arg-type]
+        anchors_by_path=anchors_by_path,
+    )
