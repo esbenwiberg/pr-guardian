@@ -147,12 +147,21 @@ class TestAnchorHeuristic:
 
     @pytest.mark.asyncio
     async def test_anchor_heuristic_79_chars_not_useful(self):
-        """Text below the 80-char threshold is not a useful anchor."""
-        # Construct exactly 79 non-whitespace chars combined with title
-        short_body = "x" * 70  # title "T" + space + 70 = 72 non-ws chars total
+        """Text exactly one char below the 80-char threshold is not useful."""
+        # Combined "T " + body → after whitespace strip = 1 + 78 = 79 non-ws chars
+        short_body = "x" * 78
         ctx = await load_intent_anchors(title="T", body=short_body)
         assert ctx.has_useful_anchor is False
         assert ctx.anchor_kind == "missing"
+
+    @pytest.mark.asyncio
+    async def test_anchor_heuristic_80_chars_is_useful(self):
+        """Text exactly at the 80-char threshold is useful."""
+        # Combined "T " + body → after whitespace strip = 1 + 79 = 80 non-ws chars
+        body = "x" * 79
+        ctx = await load_intent_anchors(title="T", body=body)
+        assert ctx.has_useful_anchor is True
+        assert ctx.anchor_kind == "title_body"
 
     @pytest.mark.asyncio
     async def test_anchor_heuristic_empty_body_is_missing(self):
