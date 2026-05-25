@@ -155,7 +155,6 @@ class TestIntentScheduling:
 
     def test_intent_scheduled_for_medium(self):
         """Intent agent is included in the agent set for medium-risk PRs."""
-        from pr_guardian.models.context import BlastRadius
         ctx = _make_context(
             change_profile=ChangeProfile(
                 file_roles={"src/main.py": {FileRole.PRODUCTION}},
