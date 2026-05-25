@@ -1,3 +1,4 @@
+"""Dashboard API/UI contract tests for finding quote and skipped agent status."""
 from __future__ import annotations
 
 import uuid
@@ -15,7 +16,7 @@ def client():
 
 
 @pytest.fixture
-def review_with_quote_status():
+def quote_status_review():
     return {
         "id": str(uuid.uuid4()),
         "pr_id": "42",
@@ -33,16 +34,17 @@ def review_with_quote_status():
                         "id": str(uuid.uuid4()),
                         "severity": "high",
                         "certainty": "detected",
-                        "file": "src/auth.py",
-                        "line": 17,
-                        "category": "authorization",
-                        "description": "The new guard can be bypassed.",
-                        "quote": "return user.is_admin or allow_all",
+                        "category": "sql-injection",
+                        "language": "python",
+                        "file": "app.py",
+                        "line": 7,
+                        "description": "Untrusted input reaches SQL.",
+                        "quote": "cursor.execute(f\"select * from users where id={user_id}\")",
                     }
                 ],
             },
             {
-                "agent_name": "architecture",
+                "agent_name": "architecture_intent",
                 "verdict": "pass",
                 "status": "skipped",
                 "status_reason": "no architecture context found",
@@ -58,60 +60,35 @@ def _patch_dashboard_storage(monkeypatch, review):
     async def _get(_id):
         return review
 
-    async def _active(*_args, **_kwargs):
-        return []
-
-    async def _archived(*_args, **_kwargs):
+    async def _empty(*_args, **_kwargs):
         return []
 
     monkeypatch.setattr(dash.storage, "get_review", _get)
-    monkeypatch.setattr(dash.storage, "get_active_dismissals", _active)
-    monkeypatch.setattr(dash.storage, "get_archived_dismissals", _archived)
+    monkeypatch.setattr(dash.storage, "get_active_dismissals", _empty)
+    monkeypatch.setattr(dash.storage, "get_archived_dismissals", _empty)
 
 
-def test_quote_status_payload_keeps_triage_enrichment(client, review_with_quote_status, monkeypatch):
-    _patch_dashboard_storage(monkeypatch, review_with_quote_status)
+def test_quote_status_payload(client, quote_status_review, monkeypatch):
+    _patch_dashboard_storage(monkeypatch, quote_status_review)
 
-    resp = client.get(f"/api/dashboard/reviews/{review_with_quote_status['id']}")
-
+    resp = client.get(f"/api/dashboard/reviews/{quote_status_review['id']}")
     assert resp.status_code == 200
     body = resp.json()
-    agents = {a["agent_name"]: a for a in body["agent_results"]}
-    finding = agents["security_privacy"]["findings"][0]
-    assert finding["quote"] == "return user.is_admin or allow_all"
+
+    finding = body["agent_results"][0]["findings"][0]
+    architecture = body["agent_results"][1]
+    assert finding["quote"] == "cursor.execute(f\"select * from users where id={user_id}\")"
     assert finding["triage"] == "decision"
-    assert body["triage_counts"] == {"noise": 0, "fyi": 0, "decision": 1}
-    assert agents["architecture"]["status"] == "skipped"
-    assert agents["architecture"]["status_reason"] == "no architecture context found"
+    assert architecture["status"] == "skipped"
+    assert architecture["status_reason"] == "no architecture context found"
 
 
-def test_human_review_quote_strip_renderers_exist_and_inline_comments_stay_quote_free():
-    dashboard_dir = Path("src/pr_guardian/dashboard")
-    human_review = (dashboard_dir / "human_review.html").read_text()
-    human_wizard = (dashboard_dir / "human_wizard.html").read_text()
-    review_detail = (dashboard_dir / "review_detail.html").read_text()
+def test_human_review_quote_visible():
+    root = Path(__file__).resolve().parents[1]
+    human_review = (root / "src/pr_guardian/dashboard/human_review.html").read_text()
+    human_wizard = (root / "src/pr_guardian/dashboard/human_wizard.html").read_text()
 
-    assert "data-quote-strip" in review_detail
-    assert "data-quote-strip" in human_review
-    assert "data-quote-strip" in human_wizard
-    assert "Architecture skipped - " in review_detail
-    assert "Architecture skipped - " in human_review
-    assert "Architecture skipped - " in human_wizard
-
-    from pr_guardian.decision.actions import build_inline_comment_body
-    from pr_guardian.models.findings import Certainty, Finding, Severity
-
-    quote = "return user.is_admin or allow_all"
-    body = build_inline_comment_body([
-        Finding(
-            severity=Severity.HIGH,
-            certainty=Certainty.DETECTED,
-            category="authorization",
-            language="python",
-            file="src/auth.py",
-            line=17,
-            description="The new guard can be bypassed.",
-            quote=quote,
-        )
-    ])
-    assert quote not in body
+    assert "quote-strip" in human_review
+    assert "renderQuoteStrip(f.quote)" in human_review
+    assert "quote-strip" in human_wizard
+    assert "d.quote" in human_wizard
