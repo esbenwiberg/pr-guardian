@@ -496,9 +496,11 @@ class TestLocalPattern:
     @pytest.mark.asyncio
     async def test_local_pattern_agent_name_is_architecture(self):
         """AgentResult.agent_name is 'architecture' in all modes."""
-        agent = ArchitectureAgent(_config(), adapter=AgentsMdAdapter())
-        # Use a pass-through LLM mock to avoid needing a real LLM
-        agent._llm = MockLLMClient(_llm_response(verdict="pass", findings=[]))
+        agent = ArchitectureAgent(
+            _config(),
+            llm_client=MockLLMClient(_llm_response(verdict="pass", findings=[])),
+            adapter=AgentsMdAdapter(),
+        )
         context = _make_context(patch=_PATCH_WITH_QUOTE)
         result = await agent.review(context)
         assert result.agent_name == "architecture"

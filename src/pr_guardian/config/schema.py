@@ -82,7 +82,7 @@ class ArchitectureConfig(BaseModel):
     mode_override: Literal["auto", "full_verifier", "narrow_local_pattern", "skip"] = "auto"
     # Maps changed-file glob patterns to explicit anchor FILE paths for monorepo
     # scoping. Each value must be a fetchable file, not a directory; directory
-    # paths silently fall through with no warning.
+    # paths cannot be fetched and emit an arch_anchor_path_scope_unfetchable warning.
     # e.g. {"apps/api/**": ["apps/api/ARCHITECTURE.md", "docs/adr/0042-api.md"]}
     path_scopes: dict[str, list[str]] = Field(default_factory=dict)
 

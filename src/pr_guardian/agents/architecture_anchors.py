@@ -289,8 +289,10 @@ async def discover_architecture_anchors(
                     anchors_by_path=anchors_by_path,
                     status_reason="no architecture context found",
                 )
+            # architecture_docs wins for content but mode_override still applies.
+            effective_mode = forced_mode or "full_verifier"
             return ArchitectureAnchorSet(
-                mode="full_verifier",
+                mode=effective_mode,  # type: ignore[arg-type]
                 anchors_by_path=anchors_by_path,
             )
 

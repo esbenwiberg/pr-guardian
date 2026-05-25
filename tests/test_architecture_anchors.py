@@ -314,6 +314,24 @@ class TestAnchorModes:
         assert result.status_reason == "no architecture context found"
 
     @pytest.mark.asyncio
+    async def test_anchor_modes_architecture_docs_respects_mode_override_narrow(self):
+        """mode_override=narrow_local_pattern must win even when architecture_docs loads content."""
+        adapter = FetchRouter({"docs/arch.md": "# Architecture\nAll services must use CQRS."})
+        cfg = _config(
+            mode_override="narrow_local_pattern",
+            architecture_docs=["docs/arch.md"],
+        )
+        result = await discover_architecture_anchors(
+            changed_paths=["src/service.py"],
+            config=cfg,
+            adapter=adapter,
+            repo="org/repo",
+        )
+        # architecture_docs wins for anchor content; mode_override wins for mode
+        assert result.mode == "narrow_local_pattern"
+        assert any(a.path == "docs/arch.md" for a in result.anchors_by_path["src/service.py"])
+
+    @pytest.mark.asyncio
     async def test_anchor_modes_mode_override_skip(self):
         """mode_override=skip bypasses discovery entirely."""
         # Adapter would return ARCHITECTURE.md but the override wins.
