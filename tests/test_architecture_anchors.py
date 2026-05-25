@@ -314,6 +314,23 @@ class TestAnchorModes:
         assert result.status_reason == "no architecture context found"
 
     @pytest.mark.asyncio
+    async def test_anchor_modes_unfetchable_architecture_docs_logs_warning(self, capsys):
+        """architecture_docs that fail to fetch must emit a warning, mirroring path_scopes."""
+        adapter = FetchRouter({})  # no files → every fetch fails
+        cfg = _config(architecture_docs=["docs/missing.md"])
+        result = await discover_architecture_anchors(
+            changed_paths=["src/service.py"],
+            config=cfg,
+            adapter=adapter,
+            repo="org/repo",
+        )
+        captured = capsys.readouterr()
+        # No anchors loaded, but the failure was logged (not silently swallowed).
+        assert "arch_anchor_doc_unfetchable" in (captured.out + captured.err)
+        # Falls through to Stage 1; with no marker files this is still skip.
+        assert result.mode == "skip"
+
+    @pytest.mark.asyncio
     async def test_anchor_modes_architecture_docs_respects_mode_override_narrow(self):
         """mode_override=narrow_local_pattern must win even when architecture_docs loads content."""
         adapter = FetchRouter({"docs/arch.md": "# Architecture\nAll services must use CQRS."})

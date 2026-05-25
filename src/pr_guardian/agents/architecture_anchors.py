@@ -280,6 +280,15 @@ async def discover_architecture_anchors(
                         scope_glob=_infer_scope_glob(doc_path),
                     )
                 )
+            else:
+                # Explicit architecture_docs that fail to load are a config bug
+                # (wrong path, wrong branch, typo). Warn so users can diagnose
+                # silent fallback to auto-discovery.
+                log.warning(
+                    "arch_anchor_doc_unfetchable",
+                    path=doc_path,
+                    ref=ref,
+                )
         if anchors:
             anchors_by_path = _build_anchors_by_path(anchors, changed_paths)
             # If no changed file falls within any anchor's scope → skip.
