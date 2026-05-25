@@ -1,7 +1,12 @@
 # ADR-002: Sticky-trigger semantic split (break-cleanly)
 
 ## Status
-Proposed; amended by ADR-005
+Accepted — 2026-05-25. Implemented in `DecisionResult.sticky_triggers`,
+`DecisionResult.finding_reasons`, dashboard payloads, and storage compatibility
+for legacy `override_reasons` rows.
+
+ADR-005 is a proposed future amendment; it is not part of the live trigger
+contract until accepted and implemented.
 
 ## Context
 `check_overrides()` in `decision/engine.py` currently produces two flat string
@@ -42,9 +47,10 @@ the new fields. No transitional union field. The only existing consumer
 
 The sticky-trigger `kind` set is closed:
 `new_dep | path_risk | hotspot | trust_tier | repo_risk | high_diff`.
-ADR-005 amends the set with `config_policy` and adds structured
-`StickyTrigger.details` for cross-boundary trigger explanations. Adding any
-further kind requires another ADR amendment, not a silent enum extension.
+ADR-005 proposes adding `config_policy` and structured
+`StickyTrigger.details`; those are not accepted live contract fields yet.
+Adding any further kind requires another ADR amendment, not a silent enum
+extension.
 
 ## Consequences
 
@@ -58,5 +64,5 @@ wonder about.
 internal-only payload — risk acceptable per user decision.
 
 **Committed to:** the closed kind set is a contract. Future structural reasons
-must either map to an existing kind or trigger an ADR update. As of ADR-005,
-the closed set includes `config_policy`.
+must either map to an existing kind or trigger an ADR update. If ADR-005 is
+accepted, the closed set will expand to include `config_policy`.

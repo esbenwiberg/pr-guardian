@@ -53,6 +53,7 @@ pr_guardian = ["config/*.yml", "dashboard/*.html", "dashboard/static/*.css", "da
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 99

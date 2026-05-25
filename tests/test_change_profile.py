@@ -5,7 +5,7 @@ from pr_guardian.models.pr import Diff, DiffFile
 
 
 class TestChangeProfile:
-    def test_docs_only(self):
+    def test_docs_only_change_skips_agents_and_has_no_production_changes(self):
         diff = Diff(files=[DiffFile(path="README.md", status="modified")])
         profile = build_change_profile(
             ["README.md"],
@@ -14,9 +14,9 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert profile.has_docs_only
-        assert profile.skip_agents
-        assert not profile.has_production_changes
+        assert profile.has_docs_only is True
+        assert profile.skip_agents is True
+        assert profile.has_production_changes is False
 
     def test_production_code(self):
         diff = Diff(files=[DiffFile(path="src/handler.py", status="modified")])
@@ -27,9 +27,9 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert profile.has_production_changes
-        assert not profile.has_docs_only
-        assert not profile.skip_agents
+        assert profile.has_production_changes is True
+        assert profile.has_docs_only is False
+        assert profile.skip_agents is False
 
     def test_security_surface_triggers_agent(self):
         surface = SecuritySurface()
@@ -42,7 +42,7 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert profile.touches_security_surface
+        assert profile.touches_security_surface is True
         assert "security_privacy" in profile.implied_agents
 
     def test_api_boundary_triggers_agents(self):
@@ -56,7 +56,7 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert profile.touches_api_boundary
+        assert profile.touches_api_boundary is True
         assert "security_privacy" in profile.implied_agents
         assert "performance" in profile.implied_agents
 
@@ -69,8 +69,8 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert profile.has_generated_only
-        assert profile.skip_agents
+        assert profile.has_generated_only is True
+        assert profile.skip_agents is True
 
     def test_adds_api_endpoints_uses_path_segments(self):
         """Substring 'handler' in filename should NOT trigger adds_api_endpoints."""
@@ -82,7 +82,7 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert not profile.adds_api_endpoints
+        assert profile.adds_api_endpoints is False
 
     def test_adds_api_endpoints_true_for_api_dir(self):
         """File added inside an 'api' directory segment should trigger."""
@@ -94,7 +94,7 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert profile.adds_api_endpoints
+        assert profile.adds_api_endpoints is True
 
     def test_architecture_boundary_two_modules_not_flagged(self):
         """Touching 2 top-level modules should NOT flag as crossing boundaries."""
@@ -111,7 +111,7 @@ class TestChangeProfile:
             BlastRadius(),
             FileRolesConfig(),
         )
-        assert not profile.crosses_architecture_boundary
+        assert profile.crosses_architecture_boundary is False
 
     def test_architecture_boundary_three_modules_flagged(self):
         """Touching 3+ top-level modules SHOULD flag as crossing boundaries."""
@@ -122,10 +122,11 @@ class TestChangeProfile:
                 DiffFile(path="src/auth/login.py", status="modified"),
             ]
         )
-        build_change_profile(
+        profile = build_change_profile(
             ["src/components/Button.tsx", "src/utils/sort.ts", "src/auth/login.py"],
             diff,
             SecuritySurface(),
             BlastRadius(),
             FileRolesConfig(),
         )
+        assert profile.crosses_architecture_boundary is True

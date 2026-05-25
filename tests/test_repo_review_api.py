@@ -23,6 +23,11 @@ def _mock_adapter():
     return adapter
 
 
+def _close_background_task(coro):
+    coro.close()
+    return MagicMock()
+
+
 class TestManualRepoReviewValidation:
     """Input validation must return 400 before any async work starts."""
 
@@ -53,7 +58,10 @@ class TestManualRepoReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=mock_adapter,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ) as mock_task,
         ):
             resp = client.post(
                 "/api/review/repo",
@@ -76,7 +84,10 @@ class TestManualRepoReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=mock_adapter,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ) as mock_task,
         ):
             resp = client.post(
                 "/api/review/repo",
@@ -96,7 +107,10 @@ class TestManualRepoReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=_mock_adapter(),
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
         ):
             resp = client.post(
                 "/api/review/repo",
@@ -116,7 +130,10 @@ class TestManualRepoReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=_mock_adapter(),
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
         ):
             resp = client.post(
                 "/api/review/repo",
@@ -132,7 +149,10 @@ class TestManualRepoReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=_mock_adapter(),
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
         ):
             resp = client.post(
                 "/api/review/repo",

@@ -14,10 +14,13 @@ a human, hard-blocks the dangerous ones. Hosted service — not a CI step.
 | Typecheck | `mypy src` |
 | Dep audit | `pip-audit --strict` |
 | Refresh lockfile | `uv lock` |
+| Build package | `python -m build` |
 | Build dashboard CSS (one-shot) | `npm run build:css` |
 | Watch dashboard CSS | `npm run dev:css` |
+| Check dashboard JS syntax | `npm run check:js` |
+| Browser smoke: reviews scan preview | `npm run smoke:reviews-scan-preview` |
 | Start app locally | `bash scripts/agent-serve.sh` |
-| Seed demo data | `python scripts/dev_seed.py` (auto-runs when Postgres is up) |
+| Seed demo data | `python scripts/dev_seed.py` (requires a reachable DB) |
 | Apply DB migrations | `alembic upgrade head` |
 | New DB migration | `alembic revision -m "msg" --autogenerate` |
 | Health check | `GET /api/health` |
@@ -25,6 +28,8 @@ a human, hard-blocks the dangerous ones. Hosted service — not a CI step.
 
 Pre-commit hooks (gitleaks, ruff, large-file checks) live in
 `.pre-commit-config.yaml`. Install with `pre-commit install` once per clone.
+Install the pre-push hook too when preparing release or quality work:
+`pre-commit install --hook-type pre-push`.
 
 ## Layout
 
@@ -35,7 +40,7 @@ src/pr_guardian/
   discovery/      Diff parsing, language detection, repo config, security surface
   mechanical/     Deterministic gates: semgrep, gitleaks, dep checks, PII scanner
   triage/         Risk classifier — picks which agents run
-  agents/         The 6 AI specialist reviewers (see Architecture)
+  agents/         Six PR-review specialist agents (see Architecture)
   decision/       Weighted scoring + certainty validation → APR/REV/BLK verdict
   llm/            Provider wrappers (Anthropic, OpenAI), prompt rendering
   models/         Pydantic models for context, findings, output, config
@@ -52,9 +57,15 @@ specs/            Feature specs — read these before changing behavior
 plans/            One-shot rollout plans (often consumed after merge)
 docs/decisions/   Architecture Decision Records (ADRs)
 alembic/          DB migrations (numbered 001_… upward)
-tests/            Pytest suite, 500+ tests, asyncio_mode = auto
+tests/            Pytest suite, asyncio_mode = auto
 scripts/          Dev/ops helpers — agent-serve.sh, deploy-app.sh, dev_seed.py
 infra/            Deployment manifests (compose, etc.)
+.autopod/         Autopod handoff/runtime metadata; do not treat as product code
+assets/           Reference images and design assets
+prototypes/       Exploratory UI/code spikes, excluded from mypy
+Dockerfile*       Runtime images for app and agent deployment
+tailwind.config.js Dashboard CSS build config
+REVIEW_INTERFACE_DESIGN.md Human-review interface design notes
 ```
 
 ## How a review actually flows
@@ -87,14 +98,27 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
 ## Key runtime notes
 
 - App listens on `$PORT` (default 8000). Use `bash scripts/agent-serve.sh`
-  for the seeded local loop.
+  for the local loop; it attempts to start local Postgres when `pg_isready`
+  is available and otherwise falls back to no-DB mode.
+- Local dashboard URL is `http://localhost:8000/dashboard` when the app is
+  running on the default port.
 - **Postgres is optional.** Without it the app boots in degraded "no-DB" mode
-  and many features become read-only.
+  and many features become read-only. For an explicit persistent loop, start
+  Postgres separately or use Docker Compose, set the database URL, run
+  `alembic upgrade head`, then run `python scripts/dev_seed.py` for seeded
+  dashboard data.
 - `GUARDIAN_DEV_ADMIN=1` bypasses admin auth — dev only.
 - At least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` must be set for agent
   calls. Mechanical gates work without either.
 - `GITHUB_TOKEN` + `GITHUB_WEBHOOK_SECRET` enable platform mode; ADO is the
   alternative (`ADO_PAT`, `ADO_ORG_URL`).
+- Node is used only for Tailwind CSS and browser smoke scripts. Run
+  `npm install` if `node_modules/` is absent, then `npm run build:css` for a
+  one-shot dashboard CSS rebuild.
+- Browser smoke for the reviews scan preview is
+  `node tests/browser/reviews_scan_preview.spec.mjs`.
+- Run Repofit through `scripts/repofit-check.sh`; it activates `.venv` so the
+  executed checks see the same tools as local development.
 
 ## Where to read first
 

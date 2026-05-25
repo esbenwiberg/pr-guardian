@@ -1,5 +1,15 @@
 # Agent redesign
 
+## Status
+
+Proposed. This is not the live review-agent contract as of 2026-05-25. The
+current production-shaped agent set still uses `architecture_intent`; ADR-006
+documents the proposed future split into `intent` and `architecture`.
+
+Current executable coverage for the live agent contract starts in
+`tests/test_agents_contracts.py`. The planned tests named in this spec remain
+future acceptance checks for the proposed split.
+
 ## Problem
 
 Guardian's review agents currently blend two different jobs into

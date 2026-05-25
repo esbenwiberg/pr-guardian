@@ -22,6 +22,11 @@ def _mock_adapter():
     return adapter
 
 
+def _close_background_task(coro):
+    coro.close()
+    return MagicMock()
+
+
 class TestPRReviewValidation:
     """Input validation returns errors before any async work."""
 
@@ -69,7 +74,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ) as mock_task,
         ):
             resp = client.post(
                 "/api/review",
@@ -102,7 +110,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=mock_adapter,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
             patch(
                 "pr_guardian.persistence.storage.create_review_record",
                 new_callable=AsyncMock,
@@ -127,7 +138,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=mock_adapter,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
             patch(
                 "pr_guardian.persistence.storage.create_review_record",
                 new_callable=AsyncMock,
@@ -155,7 +169,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
         ):
             resp = client.post(
                 "/api/review",
@@ -180,7 +197,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task"),
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ),
         ):
             resp = client.post(
                 "/api/review",
@@ -202,7 +222,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ) as mock_task,
         ):
             client.post(
                 "/api/review",
@@ -225,7 +248,10 @@ class TestPRReviewQueueing:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("pr_guardian.api.review.asyncio.create_task") as mock_task,
+            patch(
+                "pr_guardian.api.review.asyncio.create_task",
+                side_effect=_close_background_task,
+            ) as mock_task,
         ):
             resp = client.post(
                 "/api/review",

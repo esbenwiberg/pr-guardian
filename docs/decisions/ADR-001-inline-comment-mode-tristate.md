@@ -1,7 +1,8 @@
 # ADR-001: Replace `post_comment` bool with `comment_mode` tri-state
 
 ## Status
-Accepted
+Accepted — 2026-05-25. Implemented in `ReviewRequest.comment_mode`,
+`ReviewRow.comment_mode`, and the inline-comment posting flow.
 
 ## Context
 `POST /api/review` previously accepted `post_comment: bool` to control whether a summary comment was posted to the PR after review. Adding inline comments as a third posting mode (per-finding inline comments + final summary) cannot be expressed as a boolean — it is a distinct, mutually exclusive mode alongside "no comment" and "summary only".

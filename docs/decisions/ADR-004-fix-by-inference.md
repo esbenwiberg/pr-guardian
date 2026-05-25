@@ -1,7 +1,8 @@
 # ADR-004: Fix-by-inference (strict, no rename) + synthetic signature for trigger verification
 
 ## Status
-Proposed
+Accepted — 2026-05-25. Implemented in `infer_fixes()` and
+`verify_sticky_trigger()` using strict signature comparison.
 
 ## Context
 With the lifecycle state machine in place (ADR-003), we need a rule for *who

@@ -7,6 +7,7 @@ package-lock.json linguist-generated=true
 # not files an agent should ever load end-to-end.
 prototypes/* linguist-documentation=true linguist-generated=true
 assets/*.png binary linguist-documentation=true linguist-generated=true
+.autopod/screenshots/** binary linguist-documentation=true linguist-generated=true
 
 # Long-form planning docs — reference-only, not the source code an agent edits.
 # linguist-generated so repofit's cost/size probes don't count them as
@@ -14,6 +15,7 @@ assets/*.png binary linguist-documentation=true linguist-generated=true
 docs/plan/** linguist-documentation=true linguist-generated=true
 investigations/** linguist-documentation=true linguist-generated=true
 plans/** linguist-documentation=true linguist-generated=true
+specs/**/handovers/** linguist-documentation=true linguist-generated=true
 
 # Generated dashboard CSS
 src/pr_guardian/dashboard/static/styles.css linguist-generated=true

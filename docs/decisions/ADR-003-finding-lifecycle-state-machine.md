@@ -1,7 +1,8 @@
 # ADR-003: Finding lifecycle state machine
 
 ## Status
-Proposed
+Accepted — 2026-05-25. Implemented in `FindingState` and the
+`mark_fixed` / `mark_regressed` / `mark_verified` storage helpers.
 
 ## Context
 The `finding_dismissals` table currently tracks a single bit of state per

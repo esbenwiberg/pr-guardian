@@ -73,6 +73,28 @@ Each agent returns a **verdict + findings + certainty level** (`detected` / `sus
 pip install -e ".[dev]"
 ```
 
+## Running locally
+
+For the fastest development loop, run the app directly. The helper starts
+Uvicorn in the foreground, attempts to start local Postgres when `pg_isready`
+is available, seeds demo data when a DB is reachable, and otherwise boots in
+degraded no-DB mode.
+
+```bash
+pip install -e ".[dev]"
+bash scripts/agent-serve.sh
+curl http://localhost:8000/api/health
+```
+
+Dashboard pages are served from `http://localhost:8000/dashboard`.
+
+For a persistent local stack with Postgres:
+
+```bash
+cp infra/docker-compose/.env.example infra/docker-compose/.env
+docker compose -f infra/docker-compose/docker-compose.yml up
+```
+
 ### Environment Variables
 
 ```bash
@@ -119,6 +141,8 @@ python -m pytest -q            # full suite (~3s, ~500 tests)
 python -m pytest tests/test_orchestrator.py -k webhook   # a slice
 ruff check . && ruff format --check .   # lint + format
 mypy src                       # type check
+npm run check:js               # dashboard/browser JS syntax
+npm run smoke:reviews-scan-preview      # browser smoke for scan preview form
 bash scripts/repofit-check.sh --include executed   # agent-fitness audit
 ```
 

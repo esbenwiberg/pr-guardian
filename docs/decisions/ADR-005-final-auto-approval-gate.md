@@ -1,7 +1,8 @@
 # ADR-005: Final auto-approval gate and config policy trigger
 
 ## Status
-Proposed
+Proposed — 2026-05-25. Not implemented. The current accepted sticky-trigger
+contract remains ADR-002's kind set without `config_policy` or `details`.
 
 ## Context
 

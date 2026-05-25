@@ -179,7 +179,7 @@ async def test_list_exclusion_rules_returns_dicts():
     scalars_result.all.return_value = [row]
     session.scalars = AsyncMock(return_value=scalars_result)
 
-    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+    with patch("pr_guardian.persistence.exclusions.async_session", _session_cm(session)):
         result = await list_exclusion_rules()
 
     assert len(result) == 1
@@ -188,7 +188,7 @@ async def test_list_exclusion_rules_returns_dicts():
 
 
 async def test_list_exclusion_rules_db_failure_returns_empty():
-    with patch("pr_guardian.persistence.storage.async_session", _failing_session()):
+    with patch("pr_guardian.persistence.exclusions.async_session", _failing_session()):
         result = await list_exclusion_rules()
     assert result == []
 
@@ -209,7 +209,7 @@ async def test_add_exclusion_rule_persists_fields():
 
     session.refresh = AsyncMock(side_effect=_refresh)
 
-    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+    with patch("pr_guardian.persistence.exclusions.async_session", _session_cm(session)):
         result = await add_exclusion_rule(
             platform="github",
             org_pattern="acme",
@@ -231,7 +231,7 @@ async def test_remove_exclusion_rule_returns_true_on_success():
     session.execute = AsyncMock(return_value=exec_result)
     session.commit = AsyncMock()
 
-    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+    with patch("pr_guardian.persistence.exclusions.async_session", _session_cm(session)):
         ok = await remove_exclusion_rule(str(uuid.uuid4()))
 
     assert ok is True
@@ -250,7 +250,7 @@ async def test_remove_exclusion_rule_returns_false_when_missing():
     session.execute = AsyncMock(return_value=exec_result)
     session.commit = AsyncMock()
 
-    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+    with patch("pr_guardian.persistence.exclusions.async_session", _session_cm(session)):
         ok = await remove_exclusion_rule(str(uuid.uuid4()))
 
     assert ok is False

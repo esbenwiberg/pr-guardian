@@ -1,7 +1,9 @@
 # ADR-006: Split verifier agent identity with legacy re-review support
 
 ## Status
-Proposed
+Proposed — 2026-05-25. Not implemented. Fresh reviews still use the
+`architecture_intent` agent identity; `intent` and `architecture` do not yet
+exist as live review agents.
 
 ## Context
 PR Guardian currently uses one `architecture_intent` agent for two verifier jobs:

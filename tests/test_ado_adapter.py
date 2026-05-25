@@ -59,7 +59,7 @@ def _adapter(*responses: MagicMock) -> ADOAdapter:
 
 
 @pytest.mark.asyncio
-async def test_both_succeed():
+async def test_fetch_pr_body_and_commit_subjects_when_ado_endpoints_succeed():
     pr_json = {"description": "ADO PR description"}
     commits_json = {
         "value": [
@@ -147,7 +147,7 @@ async def test_commits_non200_body_still_returned():
 
 
 @pytest.mark.asyncio
-async def test_both_non200_returns_empty():
+async def test_fetch_pr_body_and_commits_returns_empty_when_both_ado_endpoints_fail():
     body, commits = await _adapter(_resp({}, 503), _resp({}, 503)).fetch_pr_body_and_commits(_pr())
     assert body == ""
     assert commits == []

@@ -24,11 +24,15 @@ place verdicts are minted; everything else produces findings.
 | Agents | `agents/` | 6 LLM specialists, parallel, each returns findings + certainty |
 | Decision | `decision/` | Weighted scoring + certainty validation → `APR` / `REV` / `BLK` |
 | Output | `api/`, `platform/` | Post comments / inline annotations / approvals back to the PR |
+| Human review | `wizard/`, `dashboard/` | Group findings into reviewer-sized capabilities and render the review workflow |
 
 The orchestrator in `core/orchestrator.py` wires these together. It is the
 single place that knows the pipeline order.
 
 ## The agents
+
+There are six PR-review specialist agents in the live pipeline. Two additional
+validator prompt families exist for secondary checks.
 
 | Agent | What it owns |
 |---|---|
@@ -77,10 +81,41 @@ statically checked — see `[tool.importlinter]` in `pyproject.toml`.
 
 ## Storage shape
 
-`persistence/storage.py` is the SQLAlchemy async layer. Reviews, findings,
-dismissals, lifecycle, dashboards, scans, PATs, exclusion rules each have a
-table. See `alembic/versions/` — migration numbers tell the history of how the
-schema grew. Read the last 3 migrations before touching the schema.
+`persistence/storage.py` is the primary SQLAlchemy async service layer. It owns
+review rows, findings, dismissals, finding lifecycle, scans, PATs, admins, API
+keys, and synced PR dashboard rows.
+
+Focused helpers live beside it when a concern has enough surface to stand on
+its own:
+
+- `persistence/exclusions.py` owns repo exclusions, wildcard exclusion rules,
+  and PR-dashboard filter-option queries.
+- `persistence/crypto.py` owns encryption helpers for stored credentials.
+- `persistence/database.py` owns engine/session setup and in-memory fallback.
+
+See `alembic/versions/` for schema history. Migration numbers tell how the
+schema grew; read the last 3 migrations before touching the schema.
+
+Storage change rules:
+
+- Keep external callers on the existing async function contracts in
+  `persistence/storage.py` unless a migration or API change explicitly requires
+  a new shape.
+- Put cohesive subdomains in sibling modules once `storage.py` would otherwise
+  become a mixed concern; re-export from `storage.py` when existing callers rely
+  on those names.
+- Use SQLAlchemy models from `persistence/models.py` as the row boundary and
+  convert rows to plain dictionaries only at the storage/API edge.
+- Do not import `api/`, `dashboard/`, `platform/`, or `llm/` from persistence.
+  Storage should expose state, not trigger side effects.
+
+## Human Review Wizard
+
+`wizard/capability_clusterer.py` converts a review's files and findings into
+capability-sized chapters for the human review UI. It is pure grouping logic
+over review data: it may call an LLM when available, but it must preserve every
+file even when the model omits or mis-groups one. The dashboard consumes those
+capabilities; core review and decision logic do not depend on wizard output.
 
 ## Frontend
 

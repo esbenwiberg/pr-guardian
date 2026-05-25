@@ -31,11 +31,12 @@ Breaking changes get a `!` (`feat!: …`) and a `BREAKING CHANGE:` footer.
 
 ```bash
 pip install -e ".[dev]"
-pre-commit install              # secret + lint hooks (pre-commit, pre-push)
+pre-commit install              # secret + lint hooks (pre-commit)
+pre-commit install --hook-type pre-push
 pre-commit install --hook-type commit-msg   # Conventional Commits gate
-python -m pytest                # 500+ tests, ~1.5s
+python -m pytest                # full pytest suite
 ruff check . && ruff format .   # lint + format
-mypy src                        # typecheck (currently soft)
+mypy src                        # typecheck
 pip-audit --strict              # dep CVE scan
 ```
 

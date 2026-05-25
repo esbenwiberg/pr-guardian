@@ -5,7 +5,9 @@
   "description": "Frontend build for PR Guardian dashboard (Tool Design System + Tailwind CSS)",
   "scripts": {
     "build:css": "tailwindcss -c tailwind.config.js -i src/pr_guardian/dashboard/src/input.css -o src/pr_guardian/dashboard/static/styles.css --minify",
-    "dev:css": "tailwindcss -c tailwind.config.js -i src/pr_guardian/dashboard/src/input.css -o src/pr_guardian/dashboard/static/styles.css --watch"
+    "dev:css": "tailwindcss -c tailwind.config.js -i src/pr_guardian/dashboard/src/input.css -o src/pr_guardian/dashboard/static/styles.css --watch",
+    "check:js": "for f in src/pr_guardian/dashboard/static/*.js tests/browser/*.mjs; do node --check \"$f\"; done",
+    "smoke:reviews-scan-preview": "node tests/browser/reviews_scan_preview.spec.mjs"
   },
   "devDependencies": {
     "tailwindcss": "^3.4.17"
