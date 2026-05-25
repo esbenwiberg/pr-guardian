@@ -496,8 +496,14 @@ function buildOrientScreen() {
 
   // AI summary
   const summaries = (d.agent_results || []).map(a => a.summary).filter(Boolean);
+  const statusMessages = (d.agent_results || []).map(renderAgentStatusMessage).filter(Boolean);
   if (summaries.length) {
-    document.getElementById('orient-summary').textContent = summaries[0];
+    document.getElementById('orient-summary').innerHTML = esc(summaries[0]);
+    document.getElementById('orient-summary-wrap').style.display = '';
+  }
+  if (statusMessages.length) {
+    const summaryEl = document.getElementById('orient-summary');
+    summaryEl.innerHTML += `${summaries.length ? '<div class="mt-3 pt-3 border-t border-slate-700/40"></div>' : ''}${statusMessages.map(m => `<div>${m}</div>`).join('')}`;
     document.getElementById('orient-summary-wrap').style.display = '';
   }
 
@@ -768,10 +774,26 @@ function renderFindingCallout(f, isDismissed) {
       ${loc ? `<span class="font-mono text-slate-500 text-xs">${esc(loc)}</span>` : ''}
       ${dismissBtn}
     </div>
+    ${renderQuoteStrip(f.quote)}
     <div class="mt-1 text-slate-200 leading-relaxed">${esc(f.description || '')}</div>
     ${suggestionHtml}
     ${isDismissed && f.dismissal ? `<div class="mt-1.5 text-xs text-amber-600">Dismissed: ${esc(f.dismissal.status || '')}${f.dismissal.comment ? ' — '+esc(f.dismissal.comment) : ''}</div>` : ''}
   </div>`;
+}
+
+function renderAgentStatusMessage(agent) {
+  if (agent.status !== 'skipped') return '';
+  if (agent.agent_name === 'architecture' && agent.status_reason === 'no architecture context found') {
+    return 'Architecture skipped - no architecture context found';
+  }
+  const label = agent.agent_name || 'Agent';
+  return `${esc(label)} skipped${agent.status_reason ? ' - ' + esc(agent.status_reason) : ''}`;
+}
+
+function renderQuoteStrip(quote) {
+  const text = (quote || '').trim();
+  if (!text) return '';
+  return `<div class="mt-1.5 rounded border border-emerald-400/15 bg-emerald-400/[0.06] px-2 py-1 font-mono text-xs leading-snug text-emerald-100 overflow-x-auto whitespace-pre-wrap" data-quote-strip>+ ${esc(text)}</div>`;
 }
 
 // ── Chapter interactions ───────────────────────────────────────────────

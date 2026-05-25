@@ -133,6 +133,7 @@
 
   .fix-hint { margin-top: 8px; padding: 11px 13px; border-radius: 6px; background: rgba(16,185,129,0.04); border: 1px solid rgba(16,185,129,0.2); font-size: 13px; line-height: 1.6; color: #d6dde8; }
   .fix-hint strong { color: var(--green); display: block; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 4px; font-weight: 700; }
+  .quote-strip { margin-top: 8px; padding: 4px 8px; border: 1px solid rgba(52,211,153,0.16); border-radius: 6px; background: rgba(52,211,153,0.06); color: #d1fae5; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.35; overflow-x: auto; white-space: pre-wrap; }
 
   /* Per-concern action buttons */
   .concern-actions { display: flex; gap: 6px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }
@@ -442,6 +443,7 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
         question: q,
         cwe: f.cwe ? [f.cwe] : [],
         reasoning: reasoning.map(escapeHtml),
+        quote: f.quote || "",
         hunk,
         fix: f.suggestion ? escapeHtml(f.suggestion) : null,
       });
@@ -686,6 +688,12 @@ function renderHunk(h) {
   return `<div class="hunk"><div class="hunk-header">${escapeHtml(h.file)} &nbsp; ${escapeHtml(h.header)}</div><pre>${rows}</pre></div>`;
 }
 
+function renderQuoteStrip(quote) {
+  const text = (quote || "").trim();
+  if (!text) return "";
+  return `<div class="quote-strip" data-quote-strip>+ ${escapeHtml(text)}</div>`;
+}
+
 function renderBriefing() {
   document.getElementById("step").innerHTML = `
     <div class="eyebrow">Step 1 of ${steps.length} · Briefing</div>
@@ -753,6 +761,7 @@ function renderCapability(capId) {
         ${cwePills}
         ${decidedTag}
       </div>
+      ${renderQuoteStrip(d.quote)}
       <div class="concern-prose">${reasoning}</div>
       <div id="hunk-${i}" style="display:none">${d.hunk ? renderHunk(d.hunk) : ''}</div>
       ${d.fix ? `<details class="expander">
