@@ -314,19 +314,28 @@ class TestAnchorModes:
         assert result.status_reason == "no architecture context found"
 
     @pytest.mark.asyncio
-    async def test_anchor_modes_unfetchable_architecture_docs_logs_warning(self, capsys):
+    async def test_anchor_modes_unfetchable_architecture_docs_logs_warning(self):
         """architecture_docs that fail to fetch must emit a warning, mirroring path_scopes."""
+        import structlog.testing
+
         adapter = FetchRouter({})  # no files → every fetch fails
         cfg = _config(architecture_docs=["docs/missing.md"])
-        result = await discover_architecture_anchors(
-            changed_paths=["src/service.py"],
-            config=cfg,
-            adapter=adapter,
-            repo="org/repo",
-        )
-        captured = capsys.readouterr()
+        with structlog.testing.capture_logs() as logs:
+            result = await discover_architecture_anchors(
+                changed_paths=["src/service.py"],
+                config=cfg,
+                adapter=adapter,
+                repo="org/repo",
+            )
         # No anchors loaded, but the failure was logged (not silently swallowed).
-        assert "arch_anchor_doc_unfetchable" in (captured.out + captured.err)
+        warn_events = [
+            entry
+            for entry in logs
+            if entry.get("event") == "arch_anchor_doc_unfetchable"
+            and entry.get("log_level") == "warning"
+        ]
+        assert len(warn_events) == 1
+        assert warn_events[0]["path"] == "docs/missing.md"
         # Falls through to Stage 1; with no marker files this is still skip.
         assert result.mode == "skip"
 
