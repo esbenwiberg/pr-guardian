@@ -110,8 +110,6 @@ class AgentResultRow(Base):
     )
     agent_name: Mapped[str] = mapped_column(String(64), index=True)
     verdict: Mapped[str] = mapped_column(String(16))
-    status: Mapped[str] = mapped_column(String(16), default="ran")
-    status_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     languages_reviewed: Mapped[list] = mapped_column(JSONB, default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     verdict_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -139,7 +137,6 @@ class FindingRow(Base):
     file: Mapped[str] = mapped_column(Text)
     line: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str] = mapped_column(Text)
-    quote: Mapped[str] = mapped_column(Text, default="")
     suggestion: Mapped[str] = mapped_column(Text, default="")
     cwe: Mapped[str | None] = mapped_column(String(32), nullable=True)
 

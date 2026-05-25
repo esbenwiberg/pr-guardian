@@ -26,7 +26,6 @@
 .finding-callout.sev-medium   { border-color: rgba(250,204,21,0.3);  background: rgba(234,179,8,0.06); }
 .finding-callout.sev-low      { border-color: rgba(96,165,250,0.3);  background: rgba(59,130,246,0.06); }
 .finding-callout-label { font-weight: 700; margin-right: 6px; }
-.quote-strip { margin-top: 6px; border: 1px solid rgba(16,185,129,0.22); background: rgba(16,185,129,0.06); color: #a7f3d0; border-radius: 5px; padding: 5px 8px; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 11.5px; line-height: 1.45; overflow-x: auto; white-space: pre-wrap; }
 .fc-critical { color: #f87171; }
 .fc-high     { color: #fb923c; }
 .fc-medium   { color: #facc15; }
@@ -770,15 +769,9 @@ function renderFindingCallout(f, isDismissed) {
       ${dismissBtn}
     </div>
     <div class="mt-1 text-slate-200 leading-relaxed">${esc(f.description || '')}</div>
-    ${renderQuoteStrip(f.quote)}
     ${suggestionHtml}
     ${isDismissed && f.dismissal ? `<div class="mt-1.5 text-xs text-amber-600">Dismissed: ${esc(f.dismissal.status || '')}${f.dismissal.comment ? ' — '+esc(f.dismissal.comment) : ''}</div>` : ''}
   </div>`;
-}
-
-function renderQuoteStrip(quote) {
-  if (!quote) return '';
-  return `<div class="quote-strip">+ ${esc(quote)}</div>`;
 }
 
 // ── Chapter interactions ───────────────────────────────────────────────

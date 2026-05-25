@@ -111,7 +111,6 @@
   .concern-prose p { margin: 0 0 8px; }
   .concern-prose p:last-child { margin-bottom: 0; }
   .concern-prose code { background: rgba(148,163,184,0.10); padding: 1px 5px; border-radius: 3px; font-size: 12.5px; color: var(--text); }
-  .quote-strip { margin-top: 10px; border: 1px solid rgba(16,185,129,0.22); background: rgba(16,185,129,0.06); color: #a7f3d0; border-radius: 6px; padding: 6px 10px; font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 12px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; }
 
   details.expander { margin-top: 8px; }
   details.expander summary { cursor: pointer; font-size: 12.5px; color: var(--indigo); padding: 4px 0; display: inline-block; list-style: none; user-select: none; }
@@ -443,7 +442,6 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
         question: q,
         cwe: f.cwe ? [f.cwe] : [],
         reasoning: reasoning.map(escapeHtml),
-        quote: f.quote ? escapeHtml(f.quote) : null,
         hunk,
         fix: f.suggestion ? escapeHtml(f.suggestion) : null,
       });
@@ -756,7 +754,6 @@ function renderCapability(capId) {
         ${decidedTag}
       </div>
       <div class="concern-prose">${reasoning}</div>
-      ${d.quote ? `<div class="quote-strip">+ ${d.quote}</div>` : ''}
       <div id="hunk-${i}" style="display:none">${d.hunk ? renderHunk(d.hunk) : ''}</div>
       ${d.fix ? `<details class="expander">
         <summary>Recommended fix</summary>

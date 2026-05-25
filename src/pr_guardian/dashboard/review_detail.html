@@ -343,17 +343,12 @@ function render(d) {
       const verdictBg = agent.verdict === 'pass' ? '' : agent.verdict === 'warn' ? 'bg-orange-400/[0.02]' : agent.verdict === 'flag_human' ? 'bg-red-400/[0.03]' : '';
       const explanation = agent.verdict_explanation;
       const showExplanation = explanation && agent.verdict !== 'pass';
-      const skippedLabel = agent.agent_name === 'architecture_intent' ? 'Architecture' : label;
-      const skippedText = agent.status === 'skipped'
-        ? `${skippedLabel} skipped${agent.status_reason ? ' - ' + agent.status_reason : ''}`
-        : '';
       return `
         <div class="card mb-4 overflow-hidden border-l-[3px] ${verdictBorder} ${verdictBg}" data-agent-idx="${ai}">
           <div class="flex items-center gap-2.5 px-5 py-3.5 cursor-pointer select-none hover:bg-slate-700/40 transition-colors" onclick="toggleAgent(${ai})">
             <span class="text-xs text-slate-400 transition-transform duration-150" id="toggle-${ai}">\u25b6</span>
             <span class="font-semibold text-sm">${esc(label)}</span>
             <span class="sev-badge verdict-${agent.verdict}">${agent.verdict}</span>
-            ${agent.status === 'skipped' ? `<span class="text-xs font-medium text-slate-400">${esc(skippedText)}</span>` : ''}
             <span class="text-xs text-slate-400 ml-auto">${findings.length} finding${findings.length !== 1 ? 's' : ''}</span>
             ${hasFindings ? `<input type="checkbox" class="form-checkbox group-check" onclick="toggleGroupCheck(event, ${ai})" title="Select/deselect all in this group">` : ''}
           </div>
@@ -425,7 +420,6 @@ function renderFinding(ai, fi, f, agentName) {
             ${f.cwe ? `<span class="text-xs text-slate-500">${esc(f.cwe)}</span>` : ''}
           </div>
           ${loc ? `<div class="font-mono text-xs text-emerald-400 mt-1.5">${esc(loc)}</div>` : ''}
-          ${renderQuoteStrip(f.quote)}
           <div class="text-sm mt-2 leading-relaxed text-slate-200">${esc(f.description || '')}</div>
           ${f.suggestion ? `
           <div class="mt-2">
@@ -442,11 +436,6 @@ function renderFinding(ai, fi, f, agentName) {
         ${isDismissed ? renderDismissedBadge(d) : renderDismissButton(f.id)}
       </div>
     </div>`;
-}
-
-function renderQuoteStrip(quote) {
-  if (!quote) return '';
-  return `<div class="mt-2 rounded border border-emerald-400/20 bg-emerald-400/[0.06] px-3 py-1.5 font-mono text-xs leading-relaxed text-emerald-200 quote-strip">+ ${esc(quote)}</div>`;
 }
 
 function renderDismissButton(findingId) {

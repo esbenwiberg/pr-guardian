@@ -166,8 +166,6 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
                 review_id=review_id,
                 agent_name=ar.agent_name[:64],
                 verdict=ar.verdict.value[:16],
-                status=ar.status[:16],
-                status_reason=ar.status_reason,
                 languages_reviewed=ar.languages_reviewed,
                 error=ar.error,
                 verdict_explanation=ar.verdict_explanation,
@@ -185,7 +183,6 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
                     file=f.file,
                     line=f.line,
                     description=f.description,
-                    quote=f.quote,
                     suggestion=f.suggestion,
                     cwe=f.cwe[:32] if f.cwe else None,
                 ))
@@ -1276,8 +1273,6 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
             {
                 "agent_name": a.agent_name,
                 "verdict": a.verdict,
-                "status": a.status,
-                "status_reason": a.status_reason,
                 "languages_reviewed": a.languages_reviewed,
                 "error": a.error,
                 "verdict_explanation": a.verdict_explanation,
@@ -1291,7 +1286,6 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
                         "file": f.file,
                         "line": f.line,
                         "description": f.description,
-                        "quote": f.quote,
                         "suggestion": f.suggestion,
                         "cwe": f.cwe,
                     }
