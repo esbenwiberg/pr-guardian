@@ -11,6 +11,10 @@ log = structlog.get_logger()
 # Specs path reference: e.g. specs/auth/login.md or specs/feature-x.md
 _SPEC_REF = re.compile(r"\bspecs/[\w/.-]+\.md\b")
 
+# Cap on spec-file fetches per PR to bound I/O latency and rate-limit exposure
+# from bot-generated PRs that list many specs/... paths.
+_MAX_SPEC_FETCHES = 5
+
 # Generic keywords that, when present as the entirety of the text, indicate no
 # concrete scope claim was made.
 _GENERIC_ONLY = re.compile(
@@ -92,9 +96,11 @@ async def load_intent_anchors(
         )
 
     # --- Try fetchable specs/... references ---
+    # Cap to _MAX_SPEC_FETCHES distinct paths so a PR body listing many
+    # specs/... references cannot stall the agent or burn platform rate limit.
     spec_paths: list[str] = list(dict.fromkeys(
         _SPEC_REF.findall(f"{title} {body}")
-    ))
+    ))[:_MAX_SPEC_FETCHES]
 
     referenced_specs: dict[str, str] = {}
     if spec_paths and adapter and repo:
