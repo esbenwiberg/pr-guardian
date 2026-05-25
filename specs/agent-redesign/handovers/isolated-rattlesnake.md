@@ -103,11 +103,8 @@ Finding(
 
 - Added `from pr_guardian.agents.intent import IntentAgent`
 - `AGENT_REGISTRY["intent"] = IntentAgent`
-- Agent instantiation loop uses `inspect.signature(agent_cls.__init__)` to
-  detect agents that accept an `adapter` kwarg and passes it to them.
-  **Brief 04 (architecture) can rely on this convention**: declare
-  `adapter=None` in your agent's `__init__` and the orchestrator will inject
-  the platform adapter automatically — no orchestrator edits needed.
+- Agent instantiation loop: `if agent_name == "intent": agent = agent_cls(config, adapter=adapter)`.
+  Brief 04 (architecture) should extend this conditional when it lands.
 
 ## Files owned by this brief — do not modify without good reason
 
@@ -125,9 +122,6 @@ Finding(
 - `IntentAgent` accepts `adapter=None` gracefully — when no adapter is passed (e.g. in tests
   or when the orchestrator can't supply one), spec fetching is silently skipped and the check
   falls through to the 80-char heuristic.
-- `load_intent_anchors()` caps spec-file fetches at `_MAX_SPEC_FETCHES=5` per
-  PR so a body listing many `specs/...` paths cannot stall the agent or burn
-  platform rate limit.
 - `IntentVerificationConfig.enabled` already existed in the codebase as a legacy toggle; the
   new size_gate_* fields are additive. The old `work_item_source` and
   `require_linked_work_item` fields remain untouched (they're inert in v1 intent logic).

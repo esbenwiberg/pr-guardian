@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -365,13 +364,11 @@ async def _run_pipeline(
         for agent_name in triage_result.agent_set:
             agent_cls = AGENT_REGISTRY.get(agent_name)
             if agent_cls:
-                # Pass `adapter` only to agents whose constructor accepts it.
-                # This avoids a growing if/elif chain as more adapter-aware
-                # agents (e.g. architecture) are added.
-                kwargs: dict = {}
-                if "adapter" in inspect.signature(agent_cls.__init__).parameters:
-                    kwargs["adapter"] = adapter
-                agent = agent_cls(config, **kwargs)
+                # IntentAgent needs the platform adapter to fetch referenced spec files.
+                if agent_name == "intent":
+                    agent = agent_cls(config, adapter=adapter)
+                else:
+                    agent = agent_cls(config)
                 agent_tasks.append(
                     agent.review(context, dismissal_context=agent_dismissal_context.get(agent_name))
                 )

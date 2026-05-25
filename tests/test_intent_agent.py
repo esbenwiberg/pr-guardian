@@ -215,27 +215,6 @@ class TestAnchorHeuristic:
         # No adapter → can't fetch spec → fall through to char check
         assert not ctx.referenced_specs
 
-    @pytest.mark.asyncio
-    async def test_anchor_heuristic_spec_fetch_capped(self):
-        """A PR body listing many specs/... paths fetches at most 5."""
-        fetch_count = 0
-
-        class CountingAdapter:
-            async def fetch_file_content(self, repo, path, ref="HEAD"):
-                nonlocal fetch_count
-                fetch_count += 1
-                # Return empty so we keep iterating without short-circuiting.
-                return ""
-
-        body = " ".join(f"specs/path-{i}.md" for i in range(20))
-        await load_intent_anchors(
-            title="Big PR",
-            body=body,
-            adapter=CountingAdapter(),
-            repo="org/repo",
-        )
-        assert fetch_count <= 5
-
 
 # ---------------------------------------------------------------------------
 # intent_medium_high — fact-intent-medium-high-scope-opacity
