@@ -423,7 +423,8 @@ async def _decisions_from_persisted_dismissals(review: dict[str, Any]) -> dict[s
                 agent_name,
             )
             dismissal = dismissals_by_signature.get(signature)
-            decision = status_to_decision.get((dismissal or {}).get("status"))
+            status = dismissal.get("status") if dismissal else None
+            decision = status_to_decision.get(status) if isinstance(status, str) else None
             if decision:
                 decisions[finding_id] = decision
     return decisions
@@ -572,9 +573,7 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                 decisions[finding_id] = "fix"
 
     # Build verdict comment.
-    summary = _build_summary_comment(
-        decisions, fix_findings, body.comment_to_author, body.verdict
-    )
+    summary = _build_summary_comment(decisions, fix_findings, body.comment_to_author, body.verdict)
 
     platform_str = (review.get("platform") or "").lower()
     actions: list[str] = []
