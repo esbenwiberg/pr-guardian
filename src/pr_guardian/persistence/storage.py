@@ -1286,6 +1286,8 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "total_input_tokens": row.total_input_tokens,
         "total_output_tokens": row.total_output_tokens,
         "cost_usd": row.cost_usd,
+        "comment_mode": row.comment_mode,
+        "pat_name": row.pat_name,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,

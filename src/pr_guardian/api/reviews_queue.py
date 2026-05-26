@@ -12,6 +12,7 @@ import uuid as uuid_mod
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import httpx
 import structlog
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -411,6 +412,47 @@ def _build_summary_comment(
     return "\n\n".join(parts)
 
 
+def _format_platform_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        resp_body = (exc.response.text or "")[:500]
+        return (
+            f"{type(exc).__name__}: HTTP {exc.response.status_code} "
+            f"on {exc.request.url} — body={resp_body!r}"
+        )
+    return f"{type(exc).__name__}: {exc}"
+
+
+def _is_github_formal_review_422(exc: Exception) -> bool:
+    if not isinstance(exc, httpx.HTTPStatusError):
+        return False
+    if exc.response.status_code != 422:
+        return False
+    url = str(exc.request.url)
+    return "api.github.com/repos/" in url and "/pulls/" in url and url.endswith("/reviews")
+
+
+async def _post_github_comment_fallback(
+    adapter: Any,
+    pr: Any,
+    summary: str,
+    actions: list[str],
+    action_name: str,
+    exc: Exception,
+    review_id: str,
+) -> str:
+    formatted = _format_platform_error(exc)
+    actions.append(f"{action_name}_rejected")
+    log.warning(
+        "github_formal_review_fallback_to_comment",
+        review_id=review_id,
+        action=action_name,
+        error=formatted,
+    )
+    await adapter.post_comment(pr, summary)
+    actions.append("post_comment_fallback")
+    return formatted
+
+
 @router.post("/{review_id}/finalize")
 async def finalize_review(review_id: str, body: FinalizeRequest):
     """Post the reviewer's decisions, comment, and verdict back to the platform.
@@ -500,11 +542,14 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                 "stored — cannot construct platform URLs.",
             )
 
-        adapter = (
-            await create_github_adapter()
-            if platform_str == "github"
-            else create_adapter(platform_str)
-        )
+        try:
+            adapter = (
+                await create_github_adapter(review.get("pat_name"))
+                if platform_str == "github"
+                else create_adapter(platform_str)
+            )
+        except LookupError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
         try:
             # Inline comments — only for "fix" decisions, and only if mode requests them.
@@ -538,29 +583,65 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
 
             # Summary + verdict.
             if body.verdict == "approve":
-                await adapter.approve_pr(pr)
-                actions.append("approve_pr")
-                # Always post the summary unless the reviewer explicitly chose
-                # "none" — otherwise the PR has no record of who approved or
-                # which findings were addressed.
-                if body.comment_mode != "none":
-                    await adapter.post_comment(pr, summary)
-                    actions.append("post_comment")
+                try:
+                    await adapter.approve_pr(pr)
+                    actions.append("approve_pr")
+                    # Always post the summary unless the reviewer explicitly chose
+                    # "none" — otherwise the PR has no record of who approved or
+                    # which findings were addressed.
+                    if body.comment_mode != "none":
+                        await adapter.post_comment(pr, summary)
+                        actions.append("post_comment")
+                except Exception as exc:
+                    if (
+                        platform_str == "github"
+                        and body.comment_mode != "none"
+                        and _is_github_formal_review_422(exc)
+                    ):
+                        error = await _post_github_comment_fallback(
+                            adapter, pr, summary, actions, "approve_pr", exc, review_id
+                        )
+                    else:
+                        raise
             elif body.verdict == "request_changes":
-                await adapter.request_changes(pr, summary)
-                actions.append("request_changes")
+                try:
+                    await adapter.request_changes(pr, summary)
+                    actions.append("request_changes")
+                except Exception as exc:
+                    if (
+                        platform_str == "github"
+                        and body.comment_mode != "none"
+                        and _is_github_formal_review_422(exc)
+                    ):
+                        error = await _post_github_comment_fallback(
+                            adapter, pr, summary, actions, "request_changes", exc, review_id
+                        )
+                    else:
+                        raise
             elif body.verdict == "block":
                 # GitHub has no first-class block. Use request_changes + an
                 # advisory label hint in the comment body. ADO callers should
                 # extend with vote: -10 if/when that's wired through.
-                await adapter.request_changes(
-                    pr, summary + "\n\n_guardian:blocked — do not merge._"
-                )
-                actions.append("request_changes")
-                actions.append("block_advisory")
+                block_summary = summary + "\n\n_guardian:blocked — do not merge._"
+                try:
+                    await adapter.request_changes(pr, block_summary)
+                    actions.append("request_changes")
+                    actions.append("block_advisory")
+                except Exception as exc:
+                    if (
+                        platform_str == "github"
+                        and body.comment_mode != "none"
+                        and _is_github_formal_review_422(exc)
+                    ):
+                        error = await _post_github_comment_fallback(
+                            adapter, pr, block_summary, actions, "request_changes", exc, review_id
+                        )
+                        actions.append("block_advisory")
+                    else:
+                        raise
         except Exception as exc:  # noqa: BLE001
             posted = False
-            error = f"{type(exc).__name__}: {exc}"
+            error = _format_platform_error(exc)
             log.error("finalize_failed", review_id=review_id, error=error)
 
     # Always persist intent — even on platform failure.

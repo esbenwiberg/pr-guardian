@@ -148,15 +148,9 @@
 
   function pluralFix(n) { return n === 1 ? '1 fix' : `${n} fixes`; }
 
-  function buildSummary(decisions, findings) {
+  function buildSummary(decisions, findings, verdict, intro) {
     const counts = { accept: 0, fix: 0, dismiss: 0 };
     Object.values(decisions || {}).forEach(d => { if (d in counts) counts[d]++; });
-    const intros = [
-      'Solid refactor overall.',
-      'Reviewed — see notes below.',
-      'Looks good, with the items below to resolve.',
-    ];
-    const intro = intros[Math.floor(Math.random() * intros.length)];
     const lines = [];
     if (counts.fix) {
       lines.push(`${intro} ${pluralFix(counts.fix)} to address before merge:`);
@@ -165,6 +159,10 @@
         const title = (f.description || '(no description)').split('\n')[0].slice(0, 140);
         lines.push(`- ${title}` + (where ? ` (${where})` : ''));
       });
+    } else if (verdict === 'request_changes') {
+      lines.push(`${intro} Changes requested before merge.`);
+    } else if (verdict === 'block') {
+      lines.push(`${intro} This is blocked until the merge risk is resolved.`);
     } else {
       lines.push(`${intro} No blocking concerns from this review.`);
     }
@@ -193,7 +191,14 @@
       }
     }
 
-    const summary = buildSummary(decisions, fixFindings);
+    const intros = [
+      'Solid refactor overall.',
+      'Reviewed — see notes below.',
+      'Looks good, with the items below to resolve.',
+    ];
+    const intro = intros[Math.floor(Math.random() * intros.length)];
+    let verdict = 'approve';
+    let summary = buildSummary(decisions, fixFindings, verdict, intro);
 
     const overlay = document.createElement('div');
     overlay.id = 'prg-wrap-overlay';
@@ -247,8 +252,14 @@
     `;
     document.body.appendChild(overlay);
 
-    let verdict = 'approve';
     const verdictBtns = overlay.querySelectorAll('.prg-wv');
+    const commentEl = overlay.querySelector('#prg-wrap-comment');
+    let generatedSummary = summary;
+    let commentDirty = false;
+    commentEl.addEventListener('input', () => {
+      commentDirty = commentEl.value !== generatedSummary;
+    });
+
     function paintVerdict() {
       verdictBtns.forEach(b => {
         const isOn = b.dataset.v === verdict;
@@ -256,7 +267,17 @@
         b.style.outlineOffset = '1px';
       });
     }
-    verdictBtns.forEach(b => b.addEventListener('click', () => { verdict = b.dataset.v; paintVerdict(); }));
+    function setVerdict(nextVerdict) {
+      verdict = nextVerdict;
+      const nextSummary = buildSummary(decisions, fixFindings, verdict, intro);
+      if (!commentDirty || commentEl.value === generatedSummary) {
+        commentEl.value = nextSummary;
+        generatedSummary = nextSummary;
+        commentDirty = false;
+      }
+      paintVerdict();
+    }
+    verdictBtns.forEach(b => b.addEventListener('click', () => { setVerdict(b.dataset.v); }));
     paintVerdict();
 
     const close = () => { overlay.remove(); modalOpen = false; };
@@ -271,7 +292,7 @@
       btn.textContent = 'Posting…';
       errEl.style.display = 'none';
       const mode = (overlay.querySelector('input[name="prg-wrap-mode"]:checked') || {}).value || 'inline';
-      const comment = overlay.querySelector('#prg-wrap-comment').value;
+      const comment = commentEl.value;
       try {
         const r = await fetch(`/api/reviews/${encodeURIComponent(REVIEW_ID)}/finalize`, {
           method: 'POST',

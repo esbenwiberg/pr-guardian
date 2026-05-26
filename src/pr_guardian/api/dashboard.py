@@ -775,9 +775,14 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
             "cannot construct the reviewer-vote URL.",
         )
 
-    adapter = (
-        await create_github_adapter() if platform_str == "github" else create_adapter(platform_str)
-    )
+    try:
+        adapter = (
+            await create_github_adapter(review.get("pat_name"))
+            if platform_str == "github"
+            else create_adapter(platform_str)
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     decision_counts = _summarise_decisions(review)
     comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts)
 

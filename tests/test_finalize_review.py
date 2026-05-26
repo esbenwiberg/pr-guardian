@@ -10,6 +10,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -37,6 +38,23 @@ def _ado_review() -> dict:
     }
 
 
+def _github_review() -> dict:
+    return {
+        "id": str(uuid.uuid4()),
+        "pr_id": "42",
+        "repo": "org/repo",
+        "platform": "github",
+        "head_commit_sha": "abc123",
+        "pr_url": "https://github.com/org/repo/pull/42",
+        "source_branch": "feature",
+        "target_branch": "main",
+        "author": "dev",
+        "title": "My PR",
+        "agent_results": [],
+        "pat_name": "work-pat",
+    }
+
+
 def _make_adapter():
     a = AsyncMock()
     a.approve_pr = AsyncMock(return_value=None)
@@ -46,7 +64,7 @@ def _make_adapter():
     return a
 
 
-def _patch(monkeypatch, review, adapter):
+def _patch(monkeypatch, review, adapter, github_factory=None):
     from pr_guardian.api import reviews_queue as rq
     from pr_guardian.platform import factory as factory_mod
 
@@ -66,8 +84,22 @@ def _patch(monkeypatch, review, adapter):
     monkeypatch.setattr(rq.storage, "append_review_log_entry", _append)
     monkeypatch.setattr(rq.storage, "list_reviews", _list)
     monkeypatch.setattr(factory_mod, "create_adapter", lambda _p: adapter)
-    monkeypatch.setattr(factory_mod, "create_github_adapter", AsyncMock(return_value=adapter))
+    monkeypatch.setattr(
+        factory_mod,
+        "create_github_adapter",
+        github_factory or AsyncMock(return_value=adapter),
+    )
     return appended
+
+
+def _github_reviews_422() -> httpx.HTTPStatusError:
+    request = httpx.Request("POST", "https://api.github.com/repos/org/repo/pulls/42/reviews")
+    response = httpx.Response(
+        status_code=422,
+        request=request,
+        text='{"message":"Validation Failed","errors":["Can not review your own pull request"]}',
+    )
+    return httpx.HTTPStatusError("422 Unprocessable Entity", request=request, response=response)
 
 
 def test_ado_finalize_recovers_project_from_pr_url(client, monkeypatch):
@@ -153,3 +185,51 @@ def test_finalize_approve_with_comment_mode_none_skips_post_comment(client, monk
     assert resp.status_code == 200, resp.text
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_not_awaited()
+
+
+def test_github_finalize_uses_review_pat_name(client, monkeypatch):
+    review = _github_review()
+    adapter = _make_adapter()
+    github_factory = AsyncMock(return_value=adapter)
+    _patch(monkeypatch, review, adapter, github_factory=github_factory)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "summary",
+            "comment_to_author": "Needs work.",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    github_factory.assert_awaited_once_with("work-pat")
+    adapter.request_changes.assert_awaited_once()
+
+
+def test_github_request_changes_422_falls_back_to_comment(client, monkeypatch):
+    review = _github_review()
+    adapter = _make_adapter()
+    adapter.request_changes = AsyncMock(side_effect=_github_reviews_422())
+    appended = _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "summary",
+            "comment_to_author": "Please address this before merge.",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["posted"] is True
+    assert body["actions"] == ["request_changes_rejected", "post_comment_fallback"]
+    adapter.request_changes.assert_awaited_once()
+    adapter.post_comment.assert_awaited_once()
+    assert "Please address this before merge" in adapter.post_comment.await_args.args[1]
+    assert appended[0]["posted"] is True
+    assert "Can not review your own pull request" in appended[0]["error"]
