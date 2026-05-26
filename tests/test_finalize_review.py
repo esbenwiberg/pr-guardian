@@ -83,12 +83,12 @@ def _github_review_with_finding() -> dict:
     return review
 
 
-def _make_adapter():
+def _make_adapter(*, inline_ids=None):
     a = AsyncMock()
     a.approve_pr = AsyncMock(return_value=None)
     a.request_changes = AsyncMock(return_value=None)
     a.post_comment = AsyncMock(return_value=None)
-    a.post_inline_comments = AsyncMock(return_value=None)
+    a.post_inline_comments = AsyncMock(return_value=inline_ids)
     return a
 
 
@@ -347,3 +347,25 @@ def test_finalize_inline_request_changes_defaults_actionable_findings(client, mo
     assert "Fix-requested findings" in summary
     assert resp.json()["decisions"] == {finding["id"]: "fix"}
     assert appended[0]["decisions"] == {finding["id"]: "fix"}
+
+
+def test_finalize_inline_omits_finding_list_when_inline_comments_post(client, monkeypatch):
+    review = _github_review_with_finding()
+    adapter = _make_adapter(inline_ids=["comment-1"])
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "inline",
+            "comment_to_author": "Changes requested before merge. See inline comments.",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["actions"] == ["post_inline_comments", "request_changes"]
+    summary = adapter.request_changes.await_args.args[1]
+    assert "Fix-requested findings" not in summary
+    assert "Unsanitised input" not in summary

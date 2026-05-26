@@ -435,6 +435,8 @@ def _build_summary_comment(
     fix_findings: list[dict[str, Any]],
     comment_to_author: str,
     verdict: str,
+    *,
+    include_fix_findings: bool = True,
 ) -> str:
     """Compose the summary comment posted alongside the verdict."""
     headline = {
@@ -463,7 +465,7 @@ def _build_summary_comment(
         parts.append("---")
         parts.append("Per-concern decisions: " + " · ".join(bits) + ".")
 
-    if fix_findings:
+    if include_fix_findings and fix_findings:
         parts.append("**Fix-requested findings:**")
         for f in fix_findings:
             loc = f.get("file") or ""
@@ -572,14 +574,12 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
             if finding_id and finding_id not in decisions:
                 decisions[finding_id] = "fix"
 
-    # Build verdict comment.
-    summary = _build_summary_comment(decisions, fix_findings, body.comment_to_author, body.verdict)
-
     platform_str = (review.get("platform") or "").lower()
     actions: list[str] = []
     posted = True
     error: str | None = None
     platform_url = review.get("pr_url") or ""
+    include_fix_findings_in_summary = body.comment_mode != "inline"
 
     if platform_str:
         from pr_guardian.models.pr import Platform, PlatformPR
@@ -650,8 +650,20 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                         )
                     )
                 if inline_findings:
-                    await adapter.post_inline_comments(pr, inline_findings)
-                    actions.append("post_inline_comments")
+                    posted_inline_ids = await adapter.post_inline_comments(pr, inline_findings)
+                    if posted_inline_ids:
+                        actions.append("post_inline_comments")
+                    else:
+                        include_fix_findings_in_summary = True
+                        actions.append("post_inline_comments_skipped")
+
+            summary = _build_summary_comment(
+                decisions,
+                fix_findings,
+                body.comment_to_author,
+                body.verdict,
+                include_fix_findings=include_fix_findings_in_summary,
+            )
 
             # Summary + verdict.
             if body.verdict == "approve":

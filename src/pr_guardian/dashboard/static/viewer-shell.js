@@ -162,18 +162,22 @@
 
   function pluralFix(n) { return n === 1 ? '1 fix' : `${n} fixes`; }
 
-  function buildSummary(decisions, findings, verdict, intro) {
+  function buildSummary(decisions, findings, verdict, intro, mode) {
     const counts = { accept: 0, fix: 0, dismiss: 0 };
     Object.values(decisions || {}).forEach(d => { if (d in counts) counts[d]++; });
     const lines = [];
     const fixCount = counts.fix || ((verdict === 'request_changes' || verdict === 'block') ? findings.length : 0);
     if (fixCount) {
-      lines.push(`${intro} ${pluralFix(fixCount)} to address before merge:`);
-      findings.forEach(f => {
-        const where = (f.file ? (f.line ? `${f.file}:${f.line}` : f.file) : '');
-        const title = (f.description || '(no description)').split('\n')[0].slice(0, 140);
-        lines.push(`- ${title}` + (where ? ` (${where})` : ''));
-      });
+      if (mode === 'inline') {
+        lines.push(`${intro} ${pluralFix(fixCount)} to address before merge. See inline comments.`);
+      } else {
+        lines.push(`${intro} ${pluralFix(fixCount)} to address before merge:`);
+        findings.forEach(f => {
+          const where = (f.file ? (f.line ? `${f.file}:${f.line}` : f.file) : '');
+          const title = (f.description || '(no description)').split('\n')[0].slice(0, 140);
+          lines.push(`- ${title}` + (where ? ` (${where})` : ''));
+        });
+      }
     } else if (verdict === 'request_changes') {
       lines.push(`${intro} Changes requested before merge.`);
     } else if (verdict === 'block') {
@@ -236,7 +240,8 @@
       if (nextVerdict === 'request_changes' || nextVerdict === 'block') return fallbackFixFindings;
       return explicitFixFindings;
     }
-    let summary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro);
+    let mode = 'inline';
+    let summary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro, mode);
 
     const overlay = document.createElement('div');
     overlay.id = 'prg-wrap-overlay';
@@ -249,6 +254,13 @@
 
     const counts = { accept: 0, fix: 0, dismiss: 0 };
     Object.values(decisions).forEach(d => { if (d in counts) counts[d]++; });
+    function countsForVerdict(nextVerdict) {
+      return {
+        accept: counts.accept,
+        fix: counts.fix || ((nextVerdict === 'request_changes' || nextVerdict === 'block') ? fallbackFixFindings.length : 0),
+        dismiss: counts.dismiss,
+      };
+    }
 
     overlay.innerHTML = `
       <div style="background:rgb(15,23,42); border:1px solid rgb(51,65,85); border-radius:12px; padding:22px; width:min(640px, 92vw); max-height:90vh; overflow:auto; color:rgb(226,232,240);">
@@ -258,9 +270,9 @@
         </div>
 
         <div style="font-size:12px; color:rgb(148,163,184); margin-bottom:12px;">
-          ✓ ${counts.accept} accepted (silent) &nbsp;·&nbsp;
-          ✎ ${counts.fix} fix requested &nbsp;·&nbsp;
-          — ${counts.dismiss} dismissed
+          ✓ <span id="prg-count-accept">${counts.accept}</span> accepted (silent) &nbsp;·&nbsp;
+          ✎ <span id="prg-count-fix">${counts.fix}</span> fix requested &nbsp;·&nbsp;
+          — <span id="prg-count-dismiss">${counts.dismiss}</span> dismissed
         </div>
 
         <label style="display:block; font-size:12px; color:rgb(148,163,184); margin-bottom:4px;">Comment to author</label>
@@ -305,18 +317,41 @@
         b.style.outlineOffset = '1px';
       });
     }
+    function paintCounts() {
+      const nextCounts = countsForVerdict(verdict);
+      const acceptEl = overlay.querySelector('#prg-count-accept');
+      const fixEl = overlay.querySelector('#prg-count-fix');
+      const dismissEl = overlay.querySelector('#prg-count-dismiss');
+      if (acceptEl) acceptEl.textContent = String(nextCounts.accept);
+      if (fixEl) fixEl.textContent = String(nextCounts.fix);
+      if (dismissEl) dismissEl.textContent = String(nextCounts.dismiss);
+    }
     function setVerdict(nextVerdict) {
       verdict = nextVerdict;
-      const nextSummary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro);
+      const nextSummary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro, mode);
       if (!commentDirty || commentEl.value === generatedSummary) {
         commentEl.value = nextSummary;
         generatedSummary = nextSummary;
         commentDirty = false;
       }
       paintVerdict();
+      paintCounts();
     }
     verdictBtns.forEach(b => b.addEventListener('click', () => { setVerdict(b.dataset.v); }));
     paintVerdict();
+    paintCounts();
+
+    overlay.querySelectorAll('input[name="prg-wrap-mode"]').forEach(input => {
+      input.addEventListener('change', () => {
+        mode = input.value || 'inline';
+        const nextSummary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro, mode);
+        if (!commentDirty || commentEl.value === generatedSummary) {
+          commentEl.value = nextSummary;
+          generatedSummary = nextSummary;
+          commentDirty = false;
+        }
+      });
+    });
 
     const close = () => { overlay.remove(); modalOpen = false; };
     overlay.querySelector('#prg-wrap-close').addEventListener('click', close);
@@ -329,7 +364,7 @@
       btn.disabled = true;
       btn.textContent = 'Posting…';
       errEl.style.display = 'none';
-      const mode = (overlay.querySelector('input[name="prg-wrap-mode"]:checked') || {}).value || 'inline';
+      mode = (overlay.querySelector('input[name="prg-wrap-mode"]:checked') || {}).value || 'inline';
       const comment = commentEl.value;
       try {
         const r = await fetch(`/api/reviews/${encodeURIComponent(REVIEW_ID)}/finalize`, {
