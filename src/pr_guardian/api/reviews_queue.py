@@ -366,6 +366,44 @@ def _find_finding_by_id(review: dict[str, Any], finding_id: str) -> dict[str, An
     return None
 
 
+async def _decisions_from_persisted_dismissals(review: dict[str, Any]) -> dict[str, str]:
+    """Rebuild finish-review decisions from saved per-finding reviewer choices."""
+    decisions: dict[str, str] = {}
+    try:
+        dismissals = await storage.get_active_dismissals(
+            review.get("pr_id", ""),
+            review.get("repo", ""),
+            review.get("platform", ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("finalize_dismissal_lookup_failed", review_id=review.get("id"), error=str(exc))
+        return decisions
+
+    status_to_decision = {
+        "acknowledged": "accept",
+        "will_fix": "fix",
+        "false_positive": "dismiss",
+        "by_design": "dismiss",
+    }
+    dismissals_by_signature = {d.get("signature"): d for d in dismissals}
+    for agent in review.get("agent_results") or []:
+        agent_name = agent.get("agent_name", "")
+        for finding in agent.get("findings") or []:
+            finding_id = str(finding.get("id") or "")
+            if not finding_id:
+                continue
+            signature = storage.finding_signature(
+                finding.get("file", ""),
+                finding.get("category", ""),
+                agent_name,
+            )
+            dismissal = dismissals_by_signature.get(signature)
+            decision = status_to_decision.get((dismissal or {}).get("status"))
+            if decision:
+                decisions[finding_id] = decision
+    return decisions
+
+
 def _build_summary_comment(
     decisions: dict[str, str],
     fix_findings: list[dict[str, Any]],
@@ -490,9 +528,12 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
             "error": "Review not found — finalize recorded as demo only.",
         }
 
+    persisted_decisions = await _decisions_from_persisted_dismissals(review)
+    decisions = {**persisted_decisions, **body.decisions}
+
     # Translate decisions → inline comment set.
     fix_findings: list[dict[str, Any]] = []
-    for fid, dec in body.decisions.items():
+    for fid, dec in decisions.items():
         if dec == "fix":
             f = _find_finding_by_id(review, fid)
             if f is not None:
@@ -500,7 +541,7 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
 
     # Build verdict comment.
     summary = _build_summary_comment(
-        body.decisions, fix_findings, body.comment_to_author, body.verdict
+        decisions, fix_findings, body.comment_to_author, body.verdict
     )
 
     platform_str = (review.get("platform") or "").lower()
@@ -652,7 +693,7 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                 "kind": "human_finalize",
                 "verdict": body.verdict,
                 "comment_mode": body.comment_mode,
-                "decisions": body.decisions,
+                "decisions": decisions,
                 "comment_to_author": body.comment_to_author,
                 "fix_findings": [f.get("id") for f in fix_findings if f.get("id")],
                 "platform_actions": actions,
@@ -686,6 +727,7 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
         "posted": True,
         "verdict": body.verdict,
         "comment_mode": body.comment_mode,
+        "decisions": decisions,
         "actions": actions,
         "platform_url": platform_url,
         "next_id": next_id,

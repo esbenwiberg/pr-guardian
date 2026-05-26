@@ -437,19 +437,35 @@ class GitHubAdapter:
                 continue
             grouped.setdefault((f.file, f.line), []).append(f)
 
+        commit_id = pr.head_commit_sha
+        if not commit_id:
+            resp = await client.get(f"/repos/{pr.repo}/pulls/{pr.pr_id}")
+            resp.raise_for_status()
+            commit_id = resp.json().get("head", {}).get("sha", "")
+        if not commit_id:
+            log.warning("github_inline_comments_missing_head_sha", pr_id=pr.pr_id, repo=pr.repo)
+            return []
+
         ids: list[str] = []
         for (file, line), group in grouped.items():
             body = inline_comment_body(group)
             try:
                 resp = await client.post(
-                    f"/repos/{pr.repo}/pulls/{pr.pr_id}/reviews",
+                    f"/repos/{pr.repo}/pulls/{pr.pr_id}/comments",
                     json={
-                        "event": "COMMENT",
-                        "comments": [{"path": file, "line": line, "body": body}],
+                        "body": body,
+                        "commit_id": commit_id,
+                        "path": file,
+                        "line": line,
+                        "side": "RIGHT",
                     },
                 )
                 resp.raise_for_status()
-                for c in resp.json().get("comments", []):
+                data = resp.json()
+                comments = data.get("comments", [])
+                if "id" in data and not comments:
+                    ids.append(str(data["id"]))
+                for c in comments:
                     if "id" in c:
                         ids.append(str(c["id"]))
             except httpx.HTTPStatusError as exc:

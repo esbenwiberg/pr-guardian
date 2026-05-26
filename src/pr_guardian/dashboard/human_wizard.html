@@ -806,6 +806,18 @@ function renderCapability(capId) {
 //   clear    → DELETE the existing dismissal
 const ACTION_TO_STATUS = { accept: "acknowledged", fix: "will_fix", dismiss: "false_positive" };
 
+function syncFinishReviewDecision(findingId, act) {
+  if (!window.ReviewState || !findingId) return;
+  const current = window.ReviewState.get("decisions", {}) || {};
+  const next = { ...current };
+  if (act === "clear") {
+    delete next[findingId];
+  } else {
+    next[findingId] = act;
+  }
+  window.ReviewState.set("decisions", next);
+}
+
 async function applyDecision(idx, act) {
   const decision = decisions[idx];
   if (!decision || !decision.finding_id) {
@@ -818,6 +830,7 @@ async function applyDecision(idx, act) {
     }
     decision.dismissal_id = null;
     decisionState[idx] = "pending";
+    syncFinishReviewDecision(decision.finding_id, "clear");
     return;
   }
   const status = ACTION_TO_STATUS[act];
@@ -831,6 +844,7 @@ async function applyDecision(idx, act) {
   const body = await resp.json();
   decision.dismissal_id = body.id;
   decisionState[idx] = act;
+  syncFinishReviewDecision(decision.finding_id, act);
 }
 
 const _TRIGGER_ICONS = {

@@ -55,6 +55,34 @@ def _github_review() -> dict:
     }
 
 
+def _github_review_with_finding() -> dict:
+    review = _github_review()
+    review["agent_results"] = [
+        {
+            "agent_name": "security_privacy",
+            "verdict": "warn",
+            "languages_reviewed": ["python"],
+            "error": None,
+            "verdict_explanation": None,
+            "findings": [
+                {
+                    "id": str(uuid.uuid4()),
+                    "severity": "high",
+                    "certainty": "detected",
+                    "category": "SQL Injection",
+                    "language": "python",
+                    "file": "src/foo.py",
+                    "line": 10,
+                    "description": "Unsanitised input passed to query.",
+                    "suggestion": "Use parameterised queries.",
+                    "cwe": None,
+                }
+            ],
+        }
+    ]
+    return review
+
+
 def _make_adapter():
     a = AsyncMock()
     a.approve_pr = AsyncMock(return_value=None)
@@ -64,7 +92,7 @@ def _make_adapter():
     return a
 
 
-def _patch(monkeypatch, review, adapter, github_factory=None):
+def _patch(monkeypatch, review, adapter, github_factory=None, active_dismissals=None):
     from pr_guardian.api import reviews_queue as rq
     from pr_guardian.platform import factory as factory_mod
 
@@ -80,9 +108,13 @@ def _patch(monkeypatch, review, adapter, github_factory=None):
     async def _list(**_kw):
         return []
 
+    async def _get_active_dismissals(_pr_id, _repo, _platform):
+        return active_dismissals or []
+
     monkeypatch.setattr(rq.storage, "get_review", _get_review)
     monkeypatch.setattr(rq.storage, "append_review_log_entry", _append)
     monkeypatch.setattr(rq.storage, "list_reviews", _list)
+    monkeypatch.setattr(rq.storage, "get_active_dismissals", _get_active_dismissals)
     monkeypatch.setattr(factory_mod, "create_adapter", lambda _p: adapter)
     monkeypatch.setattr(
         factory_mod,
@@ -233,3 +265,55 @@ def test_github_request_changes_422_falls_back_to_comment(client, monkeypatch):
     assert "Please address this before merge" in adapter.post_comment.await_args.args[1]
     assert appended[0]["posted"] is True
     assert "Can not review your own pull request" in appended[0]["error"]
+
+
+def test_finalize_inline_recovers_persisted_fix_decisions(client, monkeypatch):
+    """The finish-review modal may send an empty decision map if the viewer
+    state was stale; persisted will_fix choices must still produce inline
+    comments and a useful summary."""
+    from pr_guardian.persistence.storage import finding_signature
+
+    review = _github_review_with_finding()
+    finding = review["agent_results"][0]["findings"][0]
+    signature = finding_signature(finding["file"], finding["category"], "security_privacy")
+    adapter = _make_adapter()
+    appended = _patch(
+        monkeypatch,
+        review,
+        adapter,
+        active_dismissals=[
+            {
+                "signature": signature,
+                "status": "will_fix",
+                "source_finding": {
+                    "file": finding["file"],
+                    "line": finding["line"],
+                    "category": finding["category"],
+                    "agent_name": "security_privacy",
+                },
+            }
+        ],
+    )
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "inline",
+            "comment_to_author": "Please fix the flagged issue.",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    adapter.post_inline_comments.assert_awaited_once()
+    inline_findings = adapter.post_inline_comments.await_args.args[1]
+    assert len(inline_findings) == 1
+    assert inline_findings[0].file == "src/foo.py"
+    assert inline_findings[0].line == 10
+    adapter.request_changes.assert_awaited_once()
+    summary = adapter.request_changes.await_args.args[1]
+    assert "Fix-requested findings" in summary
+    assert "Unsanitised input" in summary
+    assert resp.json()["decisions"] == {finding["id"]: "fix"}
+    assert appended[0]["decisions"] == {finding["id"]: "fix"}

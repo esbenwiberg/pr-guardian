@@ -83,7 +83,7 @@ async def test_github_post_inline_returns_ids():
     pr = _make_github_pr()
     findings = [_finding("src/foo.py", 10)]
 
-    review_resp = _mock_response(200, {"id": 1, "comments": [{"id": 999}]})
+    review_resp = _mock_response(201, {"id": 999})
     mock_client = MagicMock()
     mock_client.post = AsyncMock(return_value=review_resp)
 
@@ -92,9 +92,11 @@ async def test_github_post_inline_returns_ids():
 
     assert ids == ["999"]
     mock_client.post.assert_called_once()
-    call_kwargs = mock_client.post.call_args
-    assert call_kwargs[1]["json"]["event"] == "COMMENT"
-    assert call_kwargs[1]["json"]["comments"][0]["line"] == 10
+    call_args, call_kwargs = mock_client.post.call_args
+    assert call_args[0] == "/repos/org/repo/pulls/42/comments"
+    assert call_kwargs["json"]["commit_id"] == "abc123"
+    assert call_kwargs["json"]["line"] == 10
+    assert call_kwargs["json"]["side"] == "RIGHT"
 
 
 @pytest.mark.asyncio
@@ -106,7 +108,7 @@ async def test_github_post_inline_skips_422():
     f2 = _finding("src/bar.py", 20)
 
     resp_422 = _mock_response(422, {})
-    resp_ok = _mock_response(200, {"id": 2, "comments": [{"id": 777}]})
+    resp_ok = _mock_response(201, {"id": 777})
     mock_client = MagicMock()
     mock_client.post = AsyncMock(side_effect=[resp_422, resp_ok])
 

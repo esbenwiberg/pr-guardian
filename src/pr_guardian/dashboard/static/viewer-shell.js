@@ -146,6 +146,13 @@
     return window.ReviewState.get('decisions', {}) || {};
   }
 
+  function decisionFromDismissal(status) {
+    if (status === 'acknowledged') return 'accept';
+    if (status === 'will_fix') return 'fix';
+    if (status === 'false_positive' || status === 'by_design') return 'dismiss';
+    return '';
+  }
+
   function pluralFix(n) { return n === 1 ? '1 fix' : `${n} fixes`; }
 
   function buildSummary(decisions, findings, verdict, intro) {
@@ -173,7 +180,7 @@
   async function openWrapUp() {
     if (modalOpen) return;
     modalOpen = true;
-    const decisions = collectDecisions();
+    let decisions = collectDecisions();
 
     // Try to fetch review data for nicer summary; fall back gracefully.
     let review = null;
@@ -181,6 +188,20 @@
       const r = await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}`);
       if (r.ok) review = await r.json();
     } catch (e) {}
+
+    if (review && Array.isArray(review.agent_results)) {
+      const persisted = {};
+      for (const agent of review.agent_results) {
+        for (const f of (agent.findings || [])) {
+          const decision = decisionFromDismissal(f.dismissal && f.dismissal.status);
+          if (f.id && decision) persisted[f.id] = decision;
+        }
+      }
+      decisions = { ...persisted, ...decisions };
+      if (Object.keys(persisted).length && window.ReviewState) {
+        window.ReviewState.set('decisions', decisions);
+      }
+    }
 
     const fixFindings = [];
     if (review && Array.isArray(review.agent_results)) {
