@@ -153,14 +153,22 @@
     return '';
   }
 
+  function isActionableFinding(f) {
+    const severity = String(f && f.severity || '').toLowerCase();
+    const certainty = String(f && f.certainty || '').toLowerCase();
+    return severity === 'high' || severity === 'critical'
+      || (severity === 'medium' && certainty === 'detected');
+  }
+
   function pluralFix(n) { return n === 1 ? '1 fix' : `${n} fixes`; }
 
   function buildSummary(decisions, findings, verdict, intro) {
     const counts = { accept: 0, fix: 0, dismiss: 0 };
     Object.values(decisions || {}).forEach(d => { if (d in counts) counts[d]++; });
     const lines = [];
-    if (counts.fix) {
-      lines.push(`${intro} ${pluralFix(counts.fix)} to address before merge:`);
+    const fixCount = counts.fix || ((verdict === 'request_changes' || verdict === 'block') ? findings.length : 0);
+    if (fixCount) {
+      lines.push(`${intro} ${pluralFix(fixCount)} to address before merge:`);
       findings.forEach(f => {
         const where = (f.file ? (f.line ? `${f.file}:${f.line}` : f.file) : '');
         const title = (f.description || '(no description)').split('\n')[0].slice(0, 140);
@@ -203,11 +211,15 @@
       }
     }
 
-    const fixFindings = [];
+    const explicitFixFindings = [];
+    const fallbackFixFindings = [];
     if (review && Array.isArray(review.agent_results)) {
       for (const agent of review.agent_results) {
         for (const f of (agent.findings || [])) {
-          if (decisions[f.id] === 'fix') fixFindings.push(f);
+          if (decisions[f.id] === 'fix') explicitFixFindings.push(f);
+          else if (decisions[f.id] !== 'accept' && decisions[f.id] !== 'dismiss' && isActionableFinding(f)) {
+            fallbackFixFindings.push(f);
+          }
         }
       }
     }
@@ -219,7 +231,12 @@
     ];
     const intro = intros[Math.floor(Math.random() * intros.length)];
     let verdict = 'approve';
-    let summary = buildSummary(decisions, fixFindings, verdict, intro);
+    function fixFindingsForVerdict(nextVerdict) {
+      if (explicitFixFindings.length) return explicitFixFindings;
+      if (nextVerdict === 'request_changes' || nextVerdict === 'block') return fallbackFixFindings;
+      return explicitFixFindings;
+    }
+    let summary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro);
 
     const overlay = document.createElement('div');
     overlay.id = 'prg-wrap-overlay';
@@ -290,7 +307,7 @@
     }
     function setVerdict(nextVerdict) {
       verdict = nextVerdict;
-      const nextSummary = buildSummary(decisions, fixFindings, verdict, intro);
+      const nextSummary = buildSummary(decisions, fixFindingsForVerdict(verdict), verdict, intro);
       if (!commentDirty || commentEl.value === generatedSummary) {
         commentEl.value = nextSummary;
         generatedSummary = nextSummary;

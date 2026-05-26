@@ -317,3 +317,33 @@ def test_finalize_inline_recovers_persisted_fix_decisions(client, monkeypatch):
     assert "Unsanitised input" in summary
     assert resp.json()["decisions"] == {finding["id"]: "fix"}
     assert appended[0]["decisions"] == {finding["id"]: "fix"}
+
+
+def test_finalize_inline_request_changes_defaults_actionable_findings(client, monkeypatch):
+    """Request-changes inline mode should not require every finding to be
+    pre-marked as fix; unresolved actionable findings are the inline set."""
+    review = _github_review_with_finding()
+    finding = review["agent_results"][0]["findings"][0]
+    adapter = _make_adapter()
+    appended = _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "inline",
+            "comment_to_author": "Changes requested before merge.",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    adapter.post_inline_comments.assert_awaited_once()
+    inline_findings = adapter.post_inline_comments.await_args.args[1]
+    assert len(inline_findings) == 1
+    assert inline_findings[0].file == "src/foo.py"
+    summary = adapter.request_changes.await_args.args[1]
+    assert "1 fix requested" in summary
+    assert "Fix-requested findings" in summary
+    assert resp.json()["decisions"] == {finding["id"]: "fix"}
+    assert appended[0]["decisions"] == {finding["id"]: "fix"}

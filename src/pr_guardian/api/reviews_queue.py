@@ -366,6 +366,31 @@ def _find_finding_by_id(review: dict[str, Any], finding_id: str) -> dict[str, An
     return None
 
 
+def _is_actionable_finding(finding: dict[str, Any]) -> bool:
+    """Return whether an undecided finding should become a default fix request."""
+    severity = str(finding.get("severity") or "").lower()
+    certainty = str(finding.get("certainty") or "").lower()
+    if severity in {"high", "critical"}:
+        return True
+    return severity == "medium" and certainty == "detected"
+
+
+def _fallback_fix_findings(
+    review: dict[str, Any],
+    decisions: dict[str, str],
+) -> list[dict[str, Any]]:
+    """Use unresolved actionable findings when a changes-request verdict has no fixes."""
+    findings: list[dict[str, Any]] = []
+    for agent in review.get("agent_results") or []:
+        for finding in agent.get("findings") or []:
+            finding_id = str(finding.get("id") or "")
+            if decisions.get(finding_id) in {"accept", "dismiss"}:
+                continue
+            if _is_actionable_finding(finding):
+                findings.append(finding)
+    return findings
+
+
 async def _decisions_from_persisted_dismissals(review: dict[str, Any]) -> dict[str, str]:
     """Rebuild finish-review decisions from saved per-finding reviewer choices."""
     decisions: dict[str, str] = {}
@@ -538,6 +563,13 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
             f = _find_finding_by_id(review, fid)
             if f is not None:
                 fix_findings.append(f)
+
+    if body.verdict in {"request_changes", "block"} and not fix_findings:
+        fix_findings = _fallback_fix_findings(review, decisions)
+        for finding in fix_findings:
+            finding_id = str(finding.get("id") or "")
+            if finding_id and finding_id not in decisions:
+                decisions[finding_id] = "fix"
 
     # Build verdict comment.
     summary = _build_summary_comment(
