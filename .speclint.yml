@@ -1,0 +1,20 @@
+metadata:
+  sidecar: contract.yaml
+
+llm:
+  enabled: true
+  transport: cli
+
+rules:
+  no-weasel-words: "off"
+  no-weasel-words-llm: "off"
+  no-tbd: "off"
+  claims-have-hooks: "off"
+  claim-redundancy: "off"
+  heading-redundancy: "off"
+  refs-resolve: "off"
+  refs-coupling: "off"
+  refs-infer-coupling: "off"
+  spec-impl-drift: "off"
+  internal-contradiction: warn
+  testability-of-claims: warn
