@@ -423,7 +423,12 @@ def dismiss_cmd(finding_id, status, comment):
 @click.option(
     "--finding-ids", default=None, help="Comma-separated finding IDs (default: all findings)"
 )
-@click.option("--severity", default=None, help="Only dismiss findings with this severity or lower")
+@click.option(
+    "--severity",
+    default=None,
+    type=click.Choice(["low", "medium", "high", "critical"], case_sensitive=False),
+    help="Only dismiss findings with this severity or lower",
+)
 def batch_dismiss_cmd(review_id, status, comment, finding_ids, severity):
     """Batch dismiss findings from a review."""
     import uuid as uuid_mod
@@ -455,7 +460,7 @@ def batch_dismiss_cmd(review_id, status, comment, finding_ids, severity):
                     sys.exit(1)
 
         # Severity threshold
-        max_severity = SEVERITY_ORDER.get(severity, 999) if severity else 999
+        max_severity = SEVERITY_ORDER[severity] if severity else 999
 
         dismissed_count = 0
         skipped_count = 0
