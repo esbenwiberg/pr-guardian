@@ -1741,6 +1741,74 @@ async def get_synced_pr(pr_uuid: str) -> dict[str, Any] | None:
         return _synced_pr_to_dict(row)
 
 
+async def get_synced_pr_lookup(
+    pr_keys: list[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], dict[str, Any]]:
+    """Look up cached synced PR data for many (platform, repo, pr_id) tuples.
+
+    Used by the reviews queue to surface platform-side state (merged, approved,
+    draft) and to fall back on title/author for review rows where hydration
+    didn't run or failed. ADO repos can share a name across projects so we
+    collapse duplicates to whichever row sorts latest by synced_at, with
+    merged status winning ties because it can't regress.
+    """
+    if not pr_keys:
+        return {}
+
+    from sqlalchemy import tuple_
+
+    unique_keys = list({k for k in pr_keys if all(k)})
+    if not unique_keys:
+        return {}
+
+    async with async_session() as session:
+        q = select(
+            SyncedPRRow.platform,
+            SyncedPRRow.repo,
+            SyncedPRRow.pr_id,
+            SyncedPRRow.approval_status,
+            SyncedPRRow.title,
+            SyncedPRRow.author,
+            SyncedPRRow.author_display,
+            SyncedPRRow.synced_at,
+        ).where(
+            tuple_(SyncedPRRow.platform, SyncedPRRow.repo, SyncedPRRow.pr_id).in_(unique_keys)
+        )
+        rows = (await session.execute(q)).all()
+
+    out: dict[tuple[str, str, str], dict[str, Any]] = {}
+    out_synced: dict[tuple[str, str, str], datetime] = {}
+    for platform, repo, pr_id, status, title, author, author_display, synced in rows:
+        key = (platform, repo, pr_id)
+        prior = out.get(key)
+        # Prefer merged status over anything else (it's terminal); otherwise
+        # keep the most recently synced row.
+        prior_status = prior.get("approval_status") if prior else None
+        if prior_status == "merged":
+            continue
+        if (
+            status == "merged"
+            or prior is None
+            or (synced and synced > out_synced.get(key, datetime.min.replace(tzinfo=timezone.utc)))
+        ):
+            out[key] = {
+                "approval_status": status,
+                "title": title,
+                "author": author,
+                "author_display": author_display,
+            }
+            out_synced[key] = synced or datetime.min.replace(tzinfo=timezone.utc)
+    return out
+
+
+async def get_synced_pr_statuses(
+    pr_keys: list[tuple[str, str, str]],
+) -> dict[tuple[str, str, str], str]:
+    """Back-compat shim: returns only approval_status. Prefer get_synced_pr_lookup."""
+    lookup = await get_synced_pr_lookup(pr_keys)
+    return {k: v["approval_status"] for k, v in lookup.items()}
+
+
 async def list_synced_prs(
     *,
     view: str | None = None,

@@ -33,7 +33,10 @@
     <div id="banner" class="flex items-center gap-4 p-5 rounded-xl mb-6">
       <span class="text-3xl" id="banner-emoji"></span>
       <div class="flex-1">
-        <div class="text-lg font-bold" id="banner-label"></div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-lg font-bold" id="banner-label"></span>
+          <span id="pr-state-badge" style="display:none" class="text-xs font-semibold px-2 py-0.5 rounded border"></span>
+        </div>
         <div class="text-sm text-slate-400 mt-1" id="banner-meta"></div>
       </div>
       <a id="pr-link" class="btn btn-sm btn-secondary" target="_blank">View PR</a>
@@ -42,6 +45,26 @@
         <span class="text-xs text-slate-400" id="dismissal-count" style="display:none">0 findings dismissed</span>
         <button id="re-review-btn" class="btn btn-sm btn-primary" onclick="triggerReReview()" style="display:none" title="Re-evaluate existing findings against new code changes">Re-evaluate findings</button>
         <button id="full-review-btn" class="btn btn-sm btn-secondary" onclick="triggerFullReview()" style="display:none" title="Run a fresh full review (respects dismissed findings)">Re-run full review</button>
+      </div>
+    </div>
+
+    <!-- Sticky triggers (structural escalation reasons) — surfaced near banner so reviewers see WHY first -->
+    <div id="sticky-triggers-section" style="display:none" class="mb-4">
+      <div class="card border-l-[3px] border-l-orange-400/50 bg-orange-400/[0.03]">
+        <div class="px-5 py-3.5">
+          <div class="text-sm font-semibold text-orange-400 mb-2">Why this needs review — structural triggers</div>
+          <ul class="space-y-2 text-sm text-slate-300" id="sticky-triggers-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Finding reasons (finding-derived escalation reasons) — surfaced near banner -->
+    <div id="finding-reasons-section" style="display:none" class="mb-4">
+      <div class="card border-l-[3px] border-l-amber-400/50 bg-amber-400/[0.03]">
+        <div class="px-5 py-3.5">
+          <div class="text-sm font-semibold text-amber-400 mb-2">Why this needs review — finding signals</div>
+          <ul class="space-y-1.5 text-sm text-slate-300" id="finding-reasons-list"></ul>
+        </div>
       </div>
     </div>
 
@@ -67,26 +90,6 @@
     <div id="summary-section" style="display:none" class="mb-6">
       <div class="card card-compact">
         <div class="card-body text-sm leading-relaxed text-slate-400" id="summary-text"></div>
-      </div>
-    </div>
-
-    <!-- Sticky triggers (structural escalation reasons) -->
-    <div id="sticky-triggers-section" style="display:none" class="mb-4">
-      <div class="card border-l-[3px] border-l-orange-400/50 bg-orange-400/[0.03]">
-        <div class="px-5 py-3.5">
-          <div class="text-sm font-semibold text-orange-400 mb-2">Structural Triggers</div>
-          <ul class="space-y-2 text-sm text-slate-300" id="sticky-triggers-list"></ul>
-        </div>
-      </div>
-    </div>
-
-    <!-- Finding reasons (finding-derived escalation reasons) -->
-    <div id="finding-reasons-section" style="display:none" class="mb-6">
-      <div class="card border-l-[3px] border-l-amber-400/50 bg-amber-400/[0.03]">
-        <div class="px-5 py-3.5">
-          <div class="text-sm font-semibold text-amber-400 mb-2">Finding Reasons</div>
-          <ul class="space-y-1.5 text-sm text-slate-300" id="finding-reasons-list"></ul>
-        </div>
       </div>
     </div>
 
@@ -231,7 +234,29 @@ function render(d) {
   banner.className = 'flex items-center gap-4 p-5 rounded-xl mb-6 banner-' + (d.decision || '');
   document.getElementById('banner-emoji').textContent = DECISION_EMOJI[d.decision] || '\u2753';
   document.getElementById('banner-label').textContent = DECISION_LABEL[d.decision] || d.decision || 'Pending';
-  document.getElementById('banner-meta').textContent = `${d.repo} #${d.pr_id} — ${d.title || ''} by ${d.author || 'unknown'}`;
+  const metaParts = [`${d.repo} #${d.pr_id}`];
+  if (d.title) metaParts.push(d.title);
+  if (d.author) metaParts.push(`by ${d.author}`);
+  document.getElementById('banner-meta').textContent = metaParts.join(' — ');
+
+  // Show platform-side PR state (merged / approved / changes_requested / draft).
+  const stateBadge = document.getElementById('pr-state-badge');
+  const stateMap = {
+    merged: { label: '\u{1f7e3} merged', color: 'rgb(192 132 252)' },
+    approved: { label: '✅ approved', color: 'rgb(110 231 183)' },
+    changes_requested: { label: '\u{1f534} changes requested', color: 'rgb(248 113 113)' },
+    draft: { label: '✏ draft', color: 'rgb(148 163 184)' },
+  };
+  const stateInfo = stateMap[d.pr_status];
+  if (stateInfo) {
+    stateBadge.textContent = stateInfo.label;
+    stateBadge.style.color = stateInfo.color;
+    stateBadge.style.borderColor = stateInfo.color;
+    stateBadge.style.background = stateInfo.color.replace('rgb', 'rgba').replace(')', ' / 0.08)');
+    stateBadge.style.display = '';
+  } else {
+    stateBadge.style.display = 'none';
+  }
   if (d.pr_url) {
     document.getElementById('pr-link').href = d.pr_url;
     document.getElementById('pr-link').style.display = '';
@@ -253,7 +278,8 @@ function render(d) {
   const scoreEl = document.getElementById('v-score');
   scoreEl.textContent = d.combined_score != null ? `${d.combined_score.toFixed(1)} / 10` : '-';
   if (d.combined_score != null) {
-    const scoreColor = d.combined_score >= 5 ? '#f87171' : d.combined_score >= 3 ? '#fb923c' : d.combined_score >= 1 ? '#eab308' : '#34d399';
+    // Traffic light: green (<3) → yellow (3-5) → orange (5-7) → red (7+)
+    const scoreColor = d.combined_score >= 7 ? '#f87171' : d.combined_score >= 5 ? '#fb923c' : d.combined_score >= 3 ? '#eab308' : '#34d399';
     scoreEl.style.color = scoreColor;
   }
 

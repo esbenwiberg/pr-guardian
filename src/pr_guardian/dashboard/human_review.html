@@ -597,10 +597,8 @@ function startChapters() {
   renderAllChapters();
   updateProgress();
 
-  // Scroll to top, expand first chapter, mark active in map
+  // Scroll to top, leave all chapters collapsed, mark first active in map
   window.scrollTo(0, 0);
-  const first = document.getElementById(`ch-body-0`);
-  if (first) first.style.display = '';
   updateChapterMapActive(0);
 }
 

@@ -108,6 +108,27 @@ async def dashboard_review_detail(review_id: uuid.UUID):
     if not row:
         return {"error": "not found"}
 
+    # Backfill title/author/merge state from the synced_prs cache when the
+    # review row never got hydrated (e.g. older rows created before
+    # update_review_pr_metadata existed, or where hydration failed).
+    try:
+        if row.get("platform") and row.get("repo") and row.get("pr_id"):
+            lookup = await storage.get_synced_pr_lookup(
+                [(row["platform"], row["repo"], str(row["pr_id"]))]
+            )
+            cached = lookup.get(
+                (row["platform"], row["repo"], str(row["pr_id"])), {}
+            )
+            if cached:
+                if not (row.get("title") or "").strip() and cached.get("title"):
+                    row["title"] = cached["title"]
+                if not (row.get("author") or "").strip() and cached.get("author"):
+                    row["author"] = cached["author"]
+                row["pr_status"] = cached.get("approval_status")
+                row["merged"] = cached.get("approval_status") == "merged"
+    except Exception:
+        pass
+
     # Enrich findings with dismissal info
     try:
         dismissals = await storage.get_active_dismissals(

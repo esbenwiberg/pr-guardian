@@ -171,20 +171,34 @@ def _is_stale(row: dict[str, Any]) -> bool:
     return bool(row.get("stale"))
 
 
-def _shape_review(row: dict[str, Any]) -> dict[str, Any]:
+def _shape_review(
+    row: dict[str, Any],
+    pr_lookup: dict[tuple[str, str, str], dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     findings = _findings_breakdown(row.get("agent_results"))
     files_changed = row.get("files_changed") or 0
     pr_id = row.get("pr_id") or ""
-    title = (row.get("title") or "").strip()
+    platform = row.get("platform") or ""
+    repo = row.get("repo") or ""
+    cached: dict[str, Any] = {}
+    if pr_lookup and platform and repo and pr_id:
+        cached = pr_lookup.get((platform, repo, str(pr_id)), {}) or {}
+
+    # Fall back to the synced_prs cache when the review row hasn't been
+    # hydrated yet (e.g. older rows created before update_review_pr_metadata).
+    title = (row.get("title") or "").strip() or (cached.get("title") or "").strip()
     if not title:
         title = f"PR #{pr_id}" if pr_id else "untitled"
+    author = row.get("author") or cached.get("author") or ""
+
+    pr_status = cached.get("approval_status")
     return {
         "id": str(row.get("id") or pr_id),
         "subject_type": "scan" if row.get("scan_id") else "pr",
-        "platform": row.get("platform"),
+        "platform": platform,
         "title": title,
-        "repo": row.get("repo") or "",
-        "author": row.get("author"),
+        "repo": repo,
+        "author": author,
         "branch": row.get("source_branch"),
         "decision": row.get("decision") or "pending",
         "risk_tier": row.get("risk_tier") or "medium",
@@ -195,6 +209,10 @@ def _shape_review(row: dict[str, Any]) -> dict[str, Any]:
         "triggered_by": row.get("triggered_by"),
         "stale": _is_stale(row),
         "started_at": row.get("started_at"),
+        # Platform-side PR status (merged | approved | changes_requested | pending | draft).
+        # Sourced from the synced_prs cache; None when the PR isn't in the cache.
+        "pr_status": pr_status,
+        "merged": pr_status == "merged",
     }
 
 
@@ -214,7 +232,20 @@ async def reviews_queue(request: Request):
     if not reviews:
         return JSONResponse(content={"items": _DEMO_QUEUE, "source": "demo"})
 
-    items = [_shape_review(r) for r in reviews]
+    # Bulk-fetch the synced_prs cache so we can (a) show platform-side state
+    # (merged / approved / draft) and (b) backfill title/author for rows where
+    # the review record never got hydrated.
+    pr_keys = [
+        (r.get("platform") or "", r.get("repo") or "", str(r.get("pr_id") or ""))
+        for r in reviews
+        if r.get("platform") and r.get("repo") and r.get("pr_id") and not r.get("scan_id")
+    ]
+    try:
+        pr_lookup = await storage.get_synced_pr_lookup(pr_keys)
+    except Exception:
+        pr_lookup = {}
+
+    items = [_shape_review(r, pr_lookup) for r in reviews]
     items.sort(key=lambda r: (not r["stale"], r["started_at"] or ""), reverse=True)
     return {"items": items, "source": "db"}
 
