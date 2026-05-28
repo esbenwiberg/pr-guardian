@@ -36,7 +36,7 @@
         <div class="command-palette-box" style="pointer-events:auto">
           <div class="flex items-center border-b border-slate-700/50">
             <svg class="w-4 h-4 text-slate-500 ml-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
-            <input class="command-palette-input" placeholder="Search pages, reviews..." autocomplete="off" spellcheck="false">
+            <input class="command-palette-input" placeholder="Search pages, reviews, repos, authors..." autocomplete="off" spellcheck="false">
           </div>
           <div class="command-palette-results" data-results></div>
           <div class="flex items-center gap-4 px-4 py-2 border-t border-slate-700/50 text-2xs text-slate-500">
@@ -101,6 +101,28 @@
       });
     }
 
+    // Filter actions — repo / author matches set the reviews queue facets
+    // instead of opening a single review. Only when the user is searching.
+    if (q) {
+      const repos = uniqueMatches(recentReviews.map(r => r.repo), q);
+      const authors = uniqueMatches(recentReviews.map(r => r.author), q);
+      if (repos.length || authors.length) {
+        html += sectionLabel('Filter reviews');
+        repos.forEach(repo => {
+          items.push({ url: `/reviews?repo=${encodeURIComponent(repo)}` });
+          html += renderItem(items.length - 1,
+            `<span class="text-slate-500 text-2xs w-12 shrink-0">repo</span>
+             <span class="truncate">${esc(repo)}</span>`, '', '');
+        });
+        authors.forEach(author => {
+          items.push({ url: `/reviews?author=${encodeURIComponent(author)}` });
+          html += renderItem(items.length - 1,
+            `<span class="text-slate-500 text-2xs w-12 shrink-0">author</span>
+             <span class="truncate">${esc(author)}</span>`, '', '');
+        });
+      }
+    }
+
     // Reviews (show when query matches, or show recent 5 when no query)
     const reviews = q
       ? recentReviews.filter(r => {
@@ -161,6 +183,12 @@
   }
 
   // ---- Helpers ----
+
+  function uniqueMatches(values, q) {
+    return [...new Set(values.filter(Boolean))]
+      .filter(v => v.toLowerCase().includes(q))
+      .slice(0, 4);
+  }
 
   function esc(s) {
     if (!s) return '';
