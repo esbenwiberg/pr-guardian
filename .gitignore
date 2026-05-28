@@ -38,3 +38,10 @@ Thumbs.db
 .autopod/
 .repofit/cache/
 repofit-report.html
+.clawpatch/features/
+.clawpatch/findings/
+.clawpatch/locks/
+.clawpatch/patches/
+.clawpatch/reports/
+.clawpatch/runs/
+.clawpatch/project.json
