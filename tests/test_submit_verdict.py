@@ -61,7 +61,7 @@ def fake_review():
     }
 
 
-def _patch_endpoint_deps(monkeypatch, fake_review, mock_adapter):
+def _patch_endpoint_deps(monkeypatch, fake_review, mock_adapter, *, dismissals=None):
     from pr_guardian.api import dashboard as dash
 
     async def _get_review(_id):
@@ -73,8 +73,15 @@ def _patch_endpoint_deps(monkeypatch, fake_review, mock_adapter):
         appended.append(entry)
         return True
 
+    async def _active_dismissals(_pr_id, _repo, _platform):
+        # Tests drive dismissal state via the inline `dismissal` field on each
+        # finding in `fake_review`. Returning [] keeps the enrichment helper
+        # hermetic — it becomes a no-op and leaves those inline values intact.
+        return dismissals or []
+
     monkeypatch.setattr(dash.storage, "get_review", _get_review)
     monkeypatch.setattr(dash.storage, "append_review_log_entry", _append)
+    monkeypatch.setattr(dash.storage, "get_active_dismissals", _active_dismissals)
     monkeypatch.setattr(dash, "create_adapter", lambda _platform: mock_adapter)
     monkeypatch.setattr(dash, "create_github_adapter", AsyncMock(return_value=mock_adapter))
     return appended
@@ -85,6 +92,7 @@ def _make_mock_adapter():
     adapter.approve_pr = AsyncMock(return_value=None)
     adapter.request_changes = AsyncMock(return_value=None)
     adapter.post_comment = AsyncMock(return_value=None)
+    adapter.post_inline_comments = AsyncMock(return_value=["thread-1"])
     return adapter
 
 
@@ -102,10 +110,12 @@ def test_approve_always_posts_comment_for_audit_trail(client, fake_review, monke
     body = resp.json()
     assert body["posted"] is True
     assert body["verdict"] == "approve"
-    assert body["platform_actions"] == ["approve_pr", "post_comment"]
+    # Fixture carries one `will_fix` finding, so we expect an inline post too.
+    assert body["platform_actions"] == ["post_inline_comments", "approve_pr", "post_comment"]
 
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
+    adapter.post_inline_comments.assert_awaited_once()
     adapter.request_changes.assert_not_awaited()
     # Headline-only body still carries the standard "Reviewed and approved." line.
     posted_body = adapter.post_comment.await_args.args[1]
@@ -126,7 +136,11 @@ def test_approve_with_comment_also_posts_comment(client, fake_review, monkeypatc
         json={"verdict": "approve", "comment": "Looks good — small nit on naming."},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["platform_actions"] == ["approve_pr", "post_comment"]
+    assert resp.json()["platform_actions"] == [
+        "post_inline_comments",
+        "approve_pr",
+        "post_comment",
+    ]
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
     body = adapter.post_comment.await_args.args[1]
@@ -143,7 +157,11 @@ def test_approve_with_fixes_always_posts_comment(client, fake_review, monkeypatc
         json={"verdict": "approve_with_fixes", "comment": ""},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["platform_actions"] == ["approve_pr", "post_comment"]
+    assert resp.json()["platform_actions"] == [
+        "post_inline_comments",
+        "approve_pr",
+        "post_comment",
+    ]
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
 
@@ -157,11 +175,77 @@ def test_decline_calls_request_changes_with_comment(client, fake_review, monkeyp
         json={"verdict": "decline", "comment": "Auth flow needs rework."},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["platform_actions"] == ["request_changes"]
+    assert resp.json()["platform_actions"] == ["post_inline_comments", "request_changes"]
     adapter.request_changes.assert_awaited_once()
     body = adapter.request_changes.await_args.args[1]
     assert "Auth flow needs rework" in body
     adapter.approve_pr.assert_not_awaited()
+
+
+def test_decline_posts_inline_comments_for_each_will_fix_finding(client, monkeypatch):
+    """The wizard's Decline + N fixes must reach the PR as N inline comments.
+
+    Without this, only the summary headline lands on the PR and the reviewer's
+    per-concern fix requests vanish (the bug that prompted this test).
+    """
+    review = {
+        "id": str(uuid.uuid4()),
+        "pr_id": "13965",
+        "repo": "IntegrationHub",
+        "platform": "ado",
+        "head_commit_sha": "abc123",
+        "pr_url": "https://dev.azure.com/365projectum/MyProject/_git/IntegrationHub/pullrequest/13965",
+        "source_branch": "feature",
+        "target_branch": "main",
+        "author": "dev",
+        "title": "Dataverse mapping",
+        "agent_results": [
+            {
+                "agent_name": "security",
+                "findings": [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "severity": "high",
+                        "file": "a.py",
+                        "line": 10,
+                        "description": "fix 1",
+                        "dismissal": {"status": "will_fix"},
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "severity": "medium",
+                        "file": "b.py",
+                        "line": 22,
+                        "description": "fix 2",
+                        "dismissal": {"status": "will_fix"},
+                    },
+                    {
+                        "id": str(uuid.uuid4()),
+                        "severity": "high",
+                        "file": "c.py",
+                        "line": 33,
+                        "description": "fix 3",
+                        "dismissal": {"status": "will_fix"},
+                    },
+                ],
+            }
+        ],
+    }
+    adapter = _make_mock_adapter()
+    adapter.post_inline_comments = AsyncMock(return_value=["t1", "t2", "t3"])
+    _patch_endpoint_deps(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{review['id']}/submit-verdict",
+        json={"verdict": "decline", "comment": "Needs rework."},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["platform_actions"] == ["post_inline_comments", "request_changes"]
+
+    adapter.post_inline_comments.assert_awaited_once()
+    inline_arg = adapter.post_inline_comments.await_args.args[1]
+    assert len(inline_arg) == 3
+    assert {f.file for f in inline_arg} == {"a.py", "b.py", "c.py"}
 
 
 def test_invalid_verdict_returns_400(client, fake_review, monkeypatch):

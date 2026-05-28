@@ -688,6 +688,43 @@ class SubmitVerdictRequest(BaseModel):
     comment: str = ""
 
 
+async def _enrich_with_persisted_dismissals(review: dict) -> None:
+    """Attach each finding's active dismissal in-place.
+
+    `storage.get_review` does not hydrate dismissals (that's done by the
+    `/api/dashboard/reviews/{id}` GET handler on the fly). Without this
+    enrichment the wizard's verdict summary undercounts decisions and the
+    fix-requested findings never become inline PR comments.
+    """
+    try:
+        dismissals = await storage.get_active_dismissals(
+            review.get("pr_id", ""),
+            review.get("repo", ""),
+            review.get("platform", ""),
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning(
+            "submit_verdict_dismissal_lookup_failed",
+            review_id=str(review.get("id") or ""),
+            error=str(exc),
+        )
+        return
+    sig_map = {d["signature"]: d for d in dismissals if d.get("signature")}
+    if not sig_map:
+        return
+    for agent in review.get("agent_results") or []:
+        agent_name = agent.get("agent_name", "")
+        for f in agent.get("findings") or []:
+            sig = finding_signature(
+                f.get("file", ""),
+                f.get("category", ""),
+                agent_name,
+            )
+            match = sig_map.get(sig)
+            if match:
+                f["dismissal"] = match
+
+
 def _summarise_decisions(review_dict: dict) -> dict[str, int]:
     """Tally the per-finding dismissal statuses on this review's PR."""
     counts = {"acknowledged": 0, "will_fix": 0, "false_positive": 0, "by_design": 0}
@@ -697,6 +734,20 @@ def _summarise_decisions(review_dict: dict) -> dict[str, int]:
             if d and d.get("status") in counts:
                 counts[d["status"]] += 1
     return counts
+
+
+def _will_fix_findings(review_dict: dict) -> list[dict]:
+    """Return findings on this review the reviewer marked as fix-requested.
+
+    Requires `_enrich_with_persisted_dismissals` to have run first.
+    """
+    out: list[dict] = []
+    for agent in review_dict.get("agent_results") or []:
+        for f in agent.get("findings") or []:
+            d = f.get("dismissal")
+            if d and d.get("status") == "will_fix":
+                out.append(f)
+    return out
 
 
 def _build_verdict_body(
@@ -741,6 +792,10 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
     review = await storage.get_review(review_id)
     if not review:
         raise HTTPException(404, "Review not found")
+
+    # Hydrate each finding with its active dismissal so the per-decision tally
+    # and the will_fix → inline-comment lookup below see real data.
+    await _enrich_with_persisted_dismissals(review)
 
     platform_str = (review.get("platform") or "").lower()
     if platform_str not in {p.value for p in Platform}:
@@ -789,7 +844,43 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
     actions: list[str] = []
     posted = True
     error: str | None = None
+    fix_findings = _will_fix_findings(review)
     try:
+        # Inline comments for fix-requested findings come first. Without this
+        # the wizard's per-concern "Fix" decisions vanish — the PR only shows
+        # the summary headline. Posted regardless of verdict so the reviewer's
+        # explicit choices always reach the author.
+        if fix_findings:
+            from pr_guardian.models.findings import Certainty, Finding, Severity
+
+            inline_findings: list[Finding] = []
+            for f in fix_findings:
+                try:
+                    severity = Severity((f.get("severity") or "medium").lower())
+                except Exception:
+                    severity = Severity.MEDIUM
+                try:
+                    certainty = Certainty((f.get("certainty") or "suspected").lower())
+                except Exception:
+                    certainty = Certainty.SUSPECTED
+                inline_findings.append(
+                    Finding(
+                        severity=severity,
+                        certainty=certainty,
+                        category=f.get("category") or "other",
+                        language=f.get("language") or "unknown",
+                        file=f.get("file") or "",
+                        line=f.get("line"),
+                        description=f.get("description") or "",
+                        suggestion=f.get("suggestion") or "",
+                    )
+                )
+            if inline_findings:
+                posted_ids = await adapter.post_inline_comments(pr, inline_findings)
+                actions.append(
+                    "post_inline_comments" if posted_ids else "post_inline_comments_skipped"
+                )
+
         if body.verdict == "approve":
             await adapter.approve_pr(pr)
             actions.append("approve_pr")
