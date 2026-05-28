@@ -98,6 +98,15 @@ async def _run_review_background(
         from pr_guardian.persistence import storage
         from pr_guardian.persistence.storage import find_review_by_pr_url
 
+        if review_db_id is not None:
+            try:
+                await storage.update_review_pr_metadata(review_db_id, pr)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "review_metadata_persist_failed",
+                    review_id=str(review_db_id),
+                    error=str(exc),
+                )
         dismissals = await storage.get_active_dismissals(pr.pr_id, pr.repo, pr.platform.value)
         prev_review = await find_review_by_pr_url(pr.pr_url)
     except Exception:

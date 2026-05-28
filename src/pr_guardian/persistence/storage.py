@@ -93,6 +93,31 @@ async def update_review_stage(review_id: uuid.UUID, stage: str, detail: str = ""
             await session.commit()
 
 
+async def update_review_pr_metadata(review_id: uuid.UUID, pr: PlatformPR) -> None:
+    """Persist hydrated PR metadata (title, author, branches, head SHA) onto an existing review row.
+
+    Manual reviews create the row from a URL stub before hydration, so the
+    initial insert has empty title/author/branch fields. Call this once the
+    real PR has been fetched so the dashboard queue can show the real title
+    instead of falling back to the PR number.
+    """
+    async with async_session() as session:
+        row = await session.get(ReviewRow, review_id)
+        if not row:
+            return
+        if pr.title:
+            row.title = pr.title
+        if pr.author:
+            row.author = pr.author
+        if pr.source_branch:
+            row.source_branch = pr.source_branch
+        if pr.target_branch:
+            row.target_branch = pr.target_branch
+        if pr.head_commit_sha:
+            row.head_commit_sha = pr.head_commit_sha
+        await session.commit()
+
+
 async def append_review_log_entry(review_id: uuid.UUID, entry: dict[str, Any]) -> bool:
     """Append a structured event onto a review's pipeline_log. Returns True on success."""
     async with async_session() as session:

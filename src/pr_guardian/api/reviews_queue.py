@@ -174,11 +174,15 @@ def _is_stale(row: dict[str, Any]) -> bool:
 def _shape_review(row: dict[str, Any]) -> dict[str, Any]:
     findings = _findings_breakdown(row.get("agent_results"))
     files_changed = row.get("files_changed") or 0
+    pr_id = row.get("pr_id") or ""
+    title = (row.get("title") or "").strip()
+    if not title:
+        title = f"PR #{pr_id}" if pr_id else "untitled"
     return {
-        "id": str(row.get("id") or row.get("pr_id") or ""),
+        "id": str(row.get("id") or pr_id),
         "subject_type": "scan" if row.get("scan_id") else "pr",
         "platform": row.get("platform"),
-        "title": row.get("title") or row.get("pr_id") or "untitled",
+        "title": title,
         "repo": row.get("repo") or "",
         "author": row.get("author"),
         "branch": row.get("source_branch"),
