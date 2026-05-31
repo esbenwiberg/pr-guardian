@@ -128,7 +128,7 @@ async def test_profile_and_connection_archive_protection():
             connection = await create_connection(
                 "Org GitHub",
                 platform="github",
-                token="ghp_profile_archive_secret",
+                token="fixture-value-archive",
                 sync_enabled=True,
                 health_status="healthy",
             )
@@ -197,7 +197,7 @@ def test_existing_github_pats_migrate_to_connections():
     meta.create_all(engine)
 
     pat_id = str(uuid.uuid4())
-    encrypted = encrypt("ghp_migrated_secret")
+    encrypted = encrypt("fixture-value-migrated")
     with engine.begin() as conn:
         conn.execute(
             sa.text(
@@ -205,7 +205,7 @@ def test_existing_github_pats_migrate_to_connections():
                 INSERT INTO github_pats (
                     id, name, description, encrypted_token, token_prefix, is_default
                 )
-                VALUES (:id, 'legacy', 'Legacy PAT', :token, 'ghp_migr...', 1)
+                VALUES (:id, 'legacy', 'Legacy PAT', :token, 'fixture-...', 1)
                 """
             ),
             {"id": pat_id, "token": encrypted},
@@ -234,7 +234,7 @@ def test_existing_github_pats_migrate_to_connections():
         assert row["name"] == "legacy"
         assert row["platform"] == "github"
         assert row["encrypted_token"] == encrypted
-        assert row["token_prefix"] == "ghp_migr..."
+        assert row["token_prefix"] == "fixture-..."
         assert row["health_status"] == "unknown"
         assert bool(row["sync_enabled"]) is True
         assert not hasattr(models, "GithubPatRow")

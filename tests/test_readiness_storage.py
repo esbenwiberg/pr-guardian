@@ -289,7 +289,7 @@ async def test_profile_link_candidate_and_provenance_persistence():
             connection = await create_connection(
                 "GitHub Main",
                 platform="github",
-                token="ghp_readiness_secret",
+                token="fixture-value-readiness",
                 health_status="healthy",
                 sync_enabled=True,
             )
@@ -384,6 +384,6 @@ async def test_profile_link_candidate_and_provenance_persistence():
             assert "pat_name" not in stored_review
             assert stored_scan is not None
             assert stored_scan["profile_snapshot"]["name"] == "Standard Service"
-            assert stored_scan["connection_snapshot"]["token_prefix"] == "ghp_read..."
+            assert stored_scan["connection_snapshot"]["token_prefix"] == "fixture-..."
     finally:
         await engine.dispose()
