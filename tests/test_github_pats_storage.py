@@ -265,14 +265,14 @@ async def test_delete_github_pat_found_returns_true():
     row = _make_pat_row()
     session = AsyncMock()
     session.get = AsyncMock(return_value=row)
-    session.delete = AsyncMock()
+    session.scalar = AsyncMock(return_value=None)
     session.commit = AsyncMock()
 
     with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
         result = await delete_github_pat(row.id)
 
     assert result is True
-    session.delete.assert_awaited_once_with(row)
+    assert row.archived_at is not None
     session.commit.assert_awaited_once()
 
 
