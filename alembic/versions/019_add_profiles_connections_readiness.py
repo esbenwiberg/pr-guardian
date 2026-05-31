@@ -22,36 +22,22 @@ DEFAULT_PROFILE_ID = "00000000-0000-0000-0000-000000000001"
 
 def _table_exists(table: str) -> bool:
     conn = op.get_bind()
-    result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.tables "
-            "WHERE table_name = :table AND table_schema = current_schema()"
-        ),
-        {"table": table},
-    )
-    return result.scalar() is not None
+    return table in sa.inspect(conn).get_table_names()
 
 
 def _column_exists(table: str, column: str) -> bool:
     conn = op.get_bind()
-    result = conn.execute(
-        sa.text(
-            "SELECT 1 FROM information_schema.columns "
-            "WHERE table_name = :table AND column_name = :column "
-            "AND table_schema = current_schema()"
-        ),
-        {"table": table, "column": column},
-    )
-    return result.scalar() is not None
+    if not _table_exists(table):
+        return False
+    return column in {col["name"] for col in sa.inspect(conn).get_columns(table)}
 
 
 def _index_exists(index_name: str) -> bool:
     conn = op.get_bind()
-    result = conn.execute(
-        sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :idx"),
-        {"idx": index_name},
-    )
-    return result.scalar() is not None
+    for table in sa.inspect(conn).get_table_names():
+        if any(index["name"] == index_name for index in sa.inspect(conn).get_indexes(table)):
+            return True
+    return False
 
 
 def _add_column(table: str, column: sa.Column) -> None:
@@ -271,34 +257,50 @@ def _create_readiness_candidates() -> None:
 
 def _seed_default_profile() -> None:
     conn = op.get_bind()
-    conn.execute(
-        sa.text(
-            """
-            INSERT INTO profiles (
-                id, name, description, settings, is_system, is_default,
-                created_by, updated_by, created_at, updated_at
-            )
-            VALUES (
-                :id, 'Default / noop',
-                'System default profile for unlinked manual work.',
-                CAST(:settings AS jsonb), TRUE, TRUE, 'system', 'system', now(), now()
-            )
-            ON CONFLICT (id) DO NOTHING
-            """
-        ),
-        {
-            "id": DEFAULT_PROFILE_ID,
-            "settings": (
-                '{"guardian_clearance": false, "platform_approval_enabled": false, '
-                '"side_effects": {"comments": false, "labels": false, '
-                '"reviewers": false, "formal_approve": false, '
-                '"formal_request_changes": false, "scan_issues": false}, '
-                '"readiness": {"quiet_period_seconds": 10, "max_wait_minutes": 30, '
-                '"archmap_max_wait_minutes": 10, "ignored_statuses": [], '
-                '"ignored_checks": [], "archmap_expected": false}}'
-            ),
-        },
+    settings = (
+        '{"guardian_clearance": false, "platform_approval_enabled": false, '
+        '"side_effects": {"comments": false, "labels": false, '
+        '"reviewers": false, "formal_approve": false, '
+        '"formal_request_changes": false, "scan_issues": false}, '
+        '"readiness": {"quiet_period_seconds": 10, "max_wait_minutes": 30, '
+        '"archmap_max_wait_minutes": 10, "ignored_statuses": [], '
+        '"ignored_checks": [], "archmap_expected": false}}'
     )
+    if conn.dialect.name == "sqlite":
+        conn.execute(
+            sa.text(
+                """
+                INSERT OR IGNORE INTO profiles (
+                    id, name, description, settings, is_system, is_default,
+                    created_by, updated_by, created_at, updated_at
+                )
+                VALUES (
+                    :id, 'Default / noop',
+                    'System default profile for unlinked manual work.',
+                    :settings, 1, 1, 'system', 'system', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                """
+            ),
+            {"id": DEFAULT_PROFILE_ID, "settings": settings},
+        )
+    else:
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO profiles (
+                    id, name, description, settings, is_system, is_default,
+                    created_by, updated_by, created_at, updated_at
+                )
+                VALUES (
+                    :id, 'Default / noop',
+                    'System default profile for unlinked manual work.',
+                    CAST(:settings AS jsonb), TRUE, TRUE, 'system', 'system', now(), now()
+                )
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {"id": DEFAULT_PROFILE_ID, "settings": settings},
+        )
 
 
 def _migrate_github_pats_to_connections() -> None:
