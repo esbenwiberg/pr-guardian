@@ -11,6 +11,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -420,7 +421,13 @@ class RepoLinkRow(Base):
 
     __tablename__ = "repo_links"
     __table_args__ = (
-        UniqueConstraint("platform", "canonical_repo_key", name="uq_repo_links_canonical"),
+        Index(
+            "uq_repo_links_active_canonical",
+            "platform",
+            "canonical_repo_key",
+            unique=True,
+            postgresql_where=__import__("sqlalchemy").text("archived_at IS NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
