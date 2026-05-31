@@ -172,7 +172,9 @@ def _create_readiness_candidates() -> None:
         op.create_table(
             "readiness_candidates",
             sa.Column("id", UUID(as_uuid=True), primary_key=True),
-            sa.Column("repo_link_id", UUID(as_uuid=True), sa.ForeignKey("repo_links.id")),
+            sa.Column(
+                "repo_link_id", UUID(as_uuid=True), sa.ForeignKey("repo_links.id"), nullable=False
+            ),
             sa.Column(
                 "profile_id", UUID(as_uuid=True), sa.ForeignKey("profiles.id"), nullable=True
             ),
