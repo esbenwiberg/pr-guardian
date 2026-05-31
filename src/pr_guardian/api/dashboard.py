@@ -116,9 +116,7 @@ async def dashboard_review_detail(review_id: uuid.UUID):
             lookup = await storage.get_synced_pr_lookup(
                 [(row["platform"], row["repo"], str(row["pr_id"]))]
             )
-            cached = lookup.get(
-                (row["platform"], row["repo"], str(row["pr_id"])), {}
-            )
+            cached = lookup.get((row["platform"], row["repo"], str(row["pr_id"])), {})
             if cached:
                 if not (row.get("title") or "").strip() and cached.get("title"):
                     row["title"] = cached["title"]
