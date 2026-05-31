@@ -427,6 +427,7 @@ class RepoLinkRow(Base):
             "canonical_repo_key",
             unique=True,
             postgresql_where=__import__("sqlalchemy").text("archived_at IS NULL"),
+            sqlite_where=__import__("sqlalchemy").text("archived_at IS NULL"),
         ),
     )
 
@@ -536,7 +537,6 @@ class ReadinessCandidateRow(Base):
 
     transitions: Mapped[list[ReadinessCandidateTransitionRow]] = relationship(
         back_populates="candidate",
-        cascade="all, delete-orphan",
         lazy="selectin",
         order_by="ReadinessCandidateTransitionRow.created_at",
     )

@@ -118,6 +118,7 @@ def _create_connections() -> None:
         postgresql_where=sa.text(
             "platform = 'github' AND is_default = TRUE AND archived_at IS NULL"
         ),
+        sqlite_where=sa.text("platform = 'github' AND is_default = 1 AND archived_at IS NULL"),
     )
 
 
@@ -154,6 +155,7 @@ def _create_repo_links() -> None:
         ["platform", "canonical_repo_key"],
         unique=True,
         postgresql_where=sa.text("archived_at IS NULL"),
+        sqlite_where=sa.text("archived_at IS NULL"),
     )
 
 
