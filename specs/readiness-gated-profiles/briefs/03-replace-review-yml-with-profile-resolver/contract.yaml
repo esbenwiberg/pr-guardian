@@ -1,0 +1,60 @@
+contract_version: 1
+title: "Replace review.yml config loading with Profile resolution"
+depends_on:
+  - 01-add-profile-readiness-data
+scenarios:
+  - id: resolve-linked-and-unlinked-profile-policy
+    given:
+      - "a repo link points to a custom Profile"
+      - "the default/noop Profile exists"
+    when:
+      - "the resolver is called for the linked repo"
+      - "the resolver is called for an unlinked manual review"
+      - "the resolver is called for an unlinked scan"
+    then:
+      - "the linked repo resolves to the custom Profile"
+      - "the unlinked manual review resolves to default/noop Profile"
+      - "the unlinked scan resolves to default/noop Profile"
+      - "each result includes a serializable Profile snapshot"
+  - id: no-runtime-review-yml-loading
+    given:
+      - "a target repository contains review.yml"
+    when:
+      - "manual review, repo review, scan, and automatic candidate code paths resolve policy"
+    then:
+      - "no product path calls load_repo_config(repo_path)"
+      - "the review.yml contents do not change the resolved policy"
+      - "CLI docs no longer present review.yml as the product config path"
+  - id: active-profile-schema-only
+    given:
+      - "a Profile payload is serialized through the API schema"
+    when:
+      - "the payload is inspected"
+    then:
+      - "active product fields are present"
+      - "llm settings, runtime knobs, and dormant old fields are absent"
+required_facts:
+  - id: fact-linked-and-default-profile-resolution
+    proves:
+      - resolve-linked-and-unlinked-profile-policy
+    kind: integration-test
+    artifact:
+      path: tests/test_profile_config_resolver.py
+      change: create
+    command: python -m pytest tests/test_profile_config_resolver.py::test_linked_and_unlinked_runs_resolve_expected_profiles
+  - id: fact-review-yml-runtime-path-removed
+    proves:
+      - no-runtime-review-yml-loading
+    kind: integration-test
+    artifact:
+      path: tests/test_profile_config_resolver.py
+      change: create
+    command: python -m pytest tests/test_profile_config_resolver.py::test_review_yml_is_not_read_by_product_policy_paths
+  - id: fact-dormant-fields-pruned
+    proves:
+      - active-profile-schema-only
+    kind: integration-test
+    artifact:
+      path: tests/test_profile_config_resolver.py
+      change: create
+    command: python -m pytest tests/test_profile_config_resolver.py::test_profile_schema_excludes_llm_runtime_and_dormant_fields

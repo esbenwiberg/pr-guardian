@@ -1,0 +1,62 @@
+contract_version: 1
+title: "Build /profiles management UI"
+depends_on:
+  - 02-add-profile-management-api
+scenarios:
+  - id: profile-manager-creates-setup-in-ui
+    given:
+      - "the app is running with a signed-in Profile Manager"
+    when:
+      - "the user opens /profiles"
+      - "the user creates a Connection"
+      - "the user creates a Profile"
+      - "the user links an exact repository"
+    then:
+      - "the Connection shows health state"
+      - "the repo link row shows Profile, Connection, auto-review, and paused state"
+      - "the audit panel shows recent setup events"
+      - "screenshots are saved under .autopod/evidence/fact-profile-manager-creates-connection-profile-link/"
+  - id: nav-permission-visibility
+    given:
+      - "admin, Profile Manager, and ordinary signed-in identities"
+    when:
+      - "each loads the dashboard shell"
+    then:
+      - "admin sees Settings and Profiles"
+      - "Profile Manager sees Profiles but not Settings"
+      - "ordinary signed-in user sees neither Settings nor Profiles"
+  - id: structured-controls-and-secret-redaction
+    given:
+      - "a Connection and Profile are visible in /profiles"
+    when:
+      - "the user edits Profile policy and inspects the Connection row"
+    then:
+      - "Profile fields are edited through structured controls"
+      - "no YAML or JSON editor is present"
+      - "the Connection displays token prefix only"
+      - "raw token text is absent from the DOM"
+required_facts:
+  - id: fact-profile-manager-creates-connection-profile-link
+    proves:
+      - profile-manager-creates-setup-in-ui
+    kind: browser-test
+    artifact:
+      path: tests/browser/profiles_management.spec.mjs
+      change: create
+    command: node tests/browser/profiles_management.spec.mjs --grep profile-manager-creates-setup-in-ui
+  - id: fact-profile-nav-permissions
+    proves:
+      - nav-permission-visibility
+    kind: integration-test
+    artifact:
+      path: tests/test_profile_sidebar_auth.py
+      change: create
+    command: python -m pytest tests/test_profile_sidebar_auth.py::test_sidebar_shows_profiles_for_managers_and_settings_for_admins
+  - id: fact-profile-ui-redacts-secrets-and-uses-structured-controls
+    proves:
+      - structured-controls-and-secret-redaction
+    kind: browser-test
+    artifact:
+      path: tests/browser/profiles_management.spec.mjs
+      change: create
+    command: node tests/browser/profiles_management.spec.mjs --grep structured-controls-and-secret-redaction

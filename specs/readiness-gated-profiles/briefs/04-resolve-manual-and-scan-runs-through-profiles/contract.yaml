@@ -1,0 +1,79 @@
+contract_version: 1
+title: "Resolve manual reviews, repo reviews, and scans through Profiles"
+depends_on:
+  - 02-add-profile-management-api
+  - 03-replace-review-yml-with-profile-resolver
+scenarios:
+  - id: manual-review-uses-linked-profile-or-picker
+    given:
+      - "a signed-in user requests a manual PR review"
+    when:
+      - "the PR belongs to a linked repo"
+    then:
+      - "the review uses the repo link Profile and Connection"
+      - "the review row stores Profile and Connection snapshots"
+    and_when:
+      - "the PR is unlinked and no Connection can be inferred"
+    then_also:
+      - "the API returns an actionable picker requirement"
+  - id: scans-store-profile-and-connection-provenance
+    given:
+      - "a linked repo scan and an unlinked repo scan are requested"
+    when:
+      - "each scan is persisted"
+    then:
+      - "the linked scan stores the repo link Profile and Connection"
+      - "the unlinked scan stores the default/noop Profile and selected/inferred Connection"
+      - "both rows include snapshots sufficient for historical display"
+  - id: scan-side-effects-use-profile-switch
+    given:
+      - "a scan finds issue-worthy findings"
+    when:
+      - "the resolved Profile has scan issue creation disabled"
+    then:
+      - "no platform issue or work item is created"
+    and_when:
+      - "the resolved Profile enables scan issue creation"
+    then_also:
+      - "the platform issue/work-item creation path is called once with the scan snapshot context"
+  - id: repo-review-never-posts-platform-side-effects
+    given:
+      - "a repo review produces a decision that would normally post comments or approval"
+    when:
+      - "the review finalizes"
+    then:
+      - "no platform comment, label, approval, request-changes, or reviewer request is posted"
+      - "the review row is still visible as a review"
+required_facts:
+  - id: fact-manual-review-resolution
+    proves:
+      - manual-review-uses-linked-profile-or-picker
+    kind: integration-test
+    artifact:
+      path: tests/test_manual_profile_resolution.py
+      change: create
+    command: python -m pytest tests/test_manual_profile_resolution.py::test_manual_review_uses_linked_profile_or_requires_connection_picker
+  - id: fact-scan-stores-profile-connection-provenance
+    proves:
+      - scans-store-profile-and-connection-provenance
+    kind: integration-test
+    artifact:
+      path: tests/test_scan_profile_provenance.py
+      change: create
+    command: python -m pytest tests/test_scan_profile_provenance.py::test_linked_and_unlinked_scans_store_profile_and_connection_snapshots
+  - id: fact-scan-issue-side-effect-switch
+    proves:
+      - scan-side-effects-use-profile-switch
+    kind: integration-test
+    artifact:
+      path: tests/test_scan_profile_provenance.py
+      change: create
+    command: python -m pytest tests/test_scan_profile_provenance.py::test_scan_issue_creation_respects_profile_side_effect_switch
+  - id: fact-repo-review-suppresses-platform-side-effects
+    proves:
+      - repo-review-never-posts-platform-side-effects
+    kind: integration-test
+    artifact:
+      path: tests/test_manual_profile_resolution.py
+      change: create
+    command: python -m pytest tests/test_manual_profile_resolution.py::test_repo_review_uses_profile_but_suppresses_platform_side_effects

@@ -1,0 +1,58 @@
+contract_version: 1
+title: "Move broad PR browse sync to Connections and /pull-requests"
+depends_on:
+  - 02-add-profile-management-api
+scenarios:
+  - id: sync-iterates-healthy-enabled-connections
+    given:
+      - "one healthy sync-enabled GitHub Connection"
+      - "one healthy sync-disabled ADO Connection"
+      - "one unhealthy sync-enabled Connection"
+    when:
+      - "the broad PR sync loop runs"
+    then:
+      - "only the healthy sync-enabled Connection is used for broad sync"
+      - "synced rows store connection_id provenance"
+      - "sync-disabled Connections remain usable by repo links and manual runs"
+  - id: exclusions-only-affect-browse
+    given:
+      - "a repo is excluded from browse"
+      - "the same repo is explicitly linked for auto-review"
+    when:
+      - "broad PR listing and candidate lookup both run"
+    then:
+      - "the repo is hidden from /pull-requests browse results"
+      - "the repo link remains visible to readiness candidate lookup"
+  - id: non-opted-prs-live-in-pull-requests
+    given:
+      - "broad sync sees open PRs from unlinked repos"
+    when:
+      - "the dashboard APIs are queried"
+    then:
+      - "the unlinked PRs appear in /pull-requests data"
+      - "the unlinked PRs do not appear as readiness rows in /reviews"
+required_facts:
+  - id: fact-sync-uses-healthy-connections
+    proves:
+      - sync-iterates-healthy-enabled-connections
+    kind: integration-test
+    artifact:
+      path: tests/test_connection_sync.py
+      change: create
+    command: python -m pytest tests/test_connection_sync.py::test_pr_sync_uses_only_healthy_sync_enabled_connections
+  - id: fact-exclusions-browse-only
+    proves:
+      - exclusions-only-affect-browse
+    kind: integration-test
+    artifact:
+      path: tests/test_connection_sync.py
+      change: create
+    command: python -m pytest tests/test_connection_sync.py::test_exclusions_hide_browse_rows_but_not_linked_candidates
+  - id: fact-non-opted-prs-stay-in-pull-requests
+    proves:
+      - non-opted-prs-live-in-pull-requests
+    kind: browser-test
+    artifact:
+      path: tests/browser/pull_requests_page.spec.mjs
+      change: create
+    command: node tests/browser/pull_requests_page.spec.mjs
