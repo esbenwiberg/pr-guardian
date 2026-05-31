@@ -546,7 +546,7 @@ class ReadinessCandidateRow(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
-    transitions: Mapped[list[ReadinessCandidateTransitionRow]] = relationship(
+    transitions: Mapped[list["ReadinessCandidateTransitionRow"]] = relationship(
         back_populates="candidate",
         lazy="selectin",
         order_by="ReadinessCandidateTransitionRow.created_at",
