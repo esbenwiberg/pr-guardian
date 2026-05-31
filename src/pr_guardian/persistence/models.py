@@ -383,6 +383,17 @@ class ConnectionRow(Base):
 
     __tablename__ = "connections"
     __table_args__ = (
+        Index(
+            "uq_connections_single_default_github",
+            "is_default",
+            unique=True,
+            postgresql_where=__import__("sqlalchemy").text(
+                "platform = 'github' AND is_default = TRUE AND archived_at IS NULL"
+            ),
+            sqlite_where=__import__("sqlalchemy").text(
+                "platform = 'github' AND is_default = 1 AND archived_at IS NULL"
+            ),
+        ),
         CheckConstraint("platform in ('github', 'ado')", name="ck_connections_platform"),
         CheckConstraint(
             "health_status in ('unknown', 'healthy', 'unhealthy')",
