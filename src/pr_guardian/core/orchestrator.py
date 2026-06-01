@@ -1265,7 +1265,10 @@ async def _post_review_status(
         if inspect.isawaitable(result):
             await result
         return
-    result = adapter.set_status(pr, state, description, context="guardian/review")
+    try:
+        result = adapter.set_status(pr, state, description, context="guardian/review")
+    except TypeError:
+        result = adapter.set_status(pr, state, description)
     if inspect.isawaitable(result):
         await result
 
@@ -1353,7 +1356,10 @@ async def _post_results(
     inline_enabled = comments_enabled and comment_mode == "inline"
     summary_enabled = comments_enabled and comment_mode == "summary"
 
-    await _post_result_status(adapter, pr, result)
+    try:
+        await _post_result_status(adapter, pr, result)
+    except Exception as e:
+        log.warning("post_review_status_failed", pr_id=pr.pr_id, error=str(e))
 
     if inline_enabled:
         await _post_inline_and_summary(
