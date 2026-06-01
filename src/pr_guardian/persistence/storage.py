@@ -437,22 +437,33 @@ async def create_repo_link(
         repo_owner=repo_owner,
         repo_name=repo_name,
     )
-    row = RepoLinkRow(
-        platform=platform,
-        org_url=org_url,
-        project=project,
-        repo_owner=repo_owner,
-        repo_name=repo_name,
-        repo_url=repo_url,
-        canonical_repo_key=canonical,
-        profile_id=profile_id,
-        connection_id=connection_id,
-        auto_review_enabled=auto_review_enabled,
-        paused=paused,
-        created_by=actor,
-        updated_by=actor,
-    )
     async with async_session() as session:
+        profile = await session.get(ProfileRow, profile_id)
+        if profile is None:
+            raise LookupError(f"Profile not found: {profile_id}")
+        if profile.archived_at is not None:
+            raise ArchiveBlockedError("Cannot link a repository to an archived Profile")
+        connection = await session.get(ConnectionRow, connection_id)
+        if connection is None:
+            raise LookupError(f"Connection not found: {connection_id}")
+        if connection.archived_at is not None:
+            raise ArchiveBlockedError("Cannot link a repository to an archived Connection")
+
+        row = RepoLinkRow(
+            platform=platform,
+            org_url=org_url,
+            project=project,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            repo_url=repo_url,
+            canonical_repo_key=canonical,
+            profile_id=profile_id,
+            connection_id=connection_id,
+            auto_review_enabled=auto_review_enabled,
+            paused=paused,
+            created_by=actor,
+            updated_by=actor,
+        )
         session.add(row)
         await session.flush()
         session.add(
@@ -485,6 +496,17 @@ async def update_repo_link_state(
             row.auto_review_enabled = auto_review_enabled
         if paused is not None:
             row.paused = paused
+        if row.auto_review_enabled and not row.paused:
+            profile = await session.get(ProfileRow, row.profile_id)
+            connection = await session.get(ConnectionRow, row.connection_id)
+            if profile is None or profile.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Profile is archived or missing"
+                )
+            if connection is None or connection.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Connection is archived or missing"
+                )
         row.updated_by = actor
         row.updated_at = _now()
         session.add(

@@ -151,6 +151,13 @@ async def test_profile_and_connection_archive_protection():
 
             assert await archive_profile(uuid.UUID(profile["id"])) is True
             assert await archive_connection(uuid.UUID(connection["id"])) is True
+
+            with pytest.raises(ArchiveBlockedError, match="Cannot activate repo link"):
+                await update_repo_link_state(
+                    uuid.UUID(link["id"]),
+                    paused=False,
+                    auto_review_enabled=True,
+                )
     finally:
         await engine.dispose()
 
