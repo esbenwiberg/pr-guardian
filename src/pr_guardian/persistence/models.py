@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    JSON,
     CheckConstraint,
     DateTime,
     Float,
@@ -23,6 +24,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
+
+
+def _json_type():
+    return JSON().with_variant(JSONB, "postgresql")
 
 
 class ReviewRow(Base):
@@ -44,18 +49,18 @@ class ReviewRow(Base):
     risk_tier: Mapped[str] = mapped_column(String(16), default="")
     repo_risk_class: Mapped[str] = mapped_column(String(16), default="standard")
     trust_tier: Mapped[str] = mapped_column(String(32), default="")
-    trust_tier_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    trust_tier_details: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     combined_score: Mapped[float] = mapped_column(Float, default=0.0)
     decision: Mapped[str] = mapped_column(String(32), default="pending")
 
     mechanical_passed: Mapped[bool] = mapped_column(Boolean, default=True)
-    override_reasons: Mapped[dict | list] = mapped_column(JSONB, default=list)
+    override_reasons: Mapped[dict | list] = mapped_column(_json_type(), default=list)
     summary: Mapped[str] = mapped_column(Text, default="")
 
     # Pipeline stage tracking for live progress
     stage: Mapped[str] = mapped_column(String(32), default="queued")
     stage_detail: Mapped[str] = mapped_column(Text, default="")
-    pipeline_log: Mapped[list] = mapped_column(JSONB, default=list)
+    pipeline_log: Mapped[list] = mapped_column(_json_type(), default=list)
 
     total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -65,11 +70,11 @@ class ReviewRow(Base):
     profile_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
     )
-    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
     )
-    connection_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("repo_links.id"), nullable=True
     )
@@ -103,7 +108,7 @@ class MechanicalResultRow(Base):
     tool: Mapped[str] = mapped_column(String(64))
     passed: Mapped[bool] = mapped_column(Boolean)
     severity: Mapped[str] = mapped_column(String(16), default="info")
-    findings: Mapped[list] = mapped_column(JSONB, default=list)
+    findings: Mapped[list] = mapped_column(_json_type(), default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     review: Mapped[ReviewRow] = relationship(back_populates="mechanical_results")
@@ -118,7 +123,7 @@ class AgentResultRow(Base):
     )
     agent_name: Mapped[str] = mapped_column(String(64), index=True)
     verdict: Mapped[str] = mapped_column(String(16))
-    languages_reviewed: Mapped[list] = mapped_column(JSONB, default=list)
+    languages_reviewed: Mapped[list] = mapped_column(_json_type(), default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     verdict_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -196,7 +201,7 @@ class ScanRow(Base):
 
     stage: Mapped[str] = mapped_column(String(32), default="queued")
     stage_detail: Mapped[str] = mapped_column(Text, default="")
-    pipeline_log: Mapped[list] = mapped_column(JSONB, default=list)
+    pipeline_log: Mapped[list] = mapped_column(_json_type(), default=list)
 
     total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
@@ -205,11 +210,11 @@ class ScanRow(Base):
     profile_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
     )
-    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
     )
-    connection_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("repo_links.id"), nullable=True
     )
@@ -280,7 +285,7 @@ class ScanIssueRow(Base):
         UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), index=True
     )
     # JSON list of ScanFindingRow UUIDs covered by this issue
-    finding_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    finding_ids: Mapped[list] = mapped_column(_json_type(), default=list)
     issue_url: Mapped[str] = mapped_column(Text, default="")
     issue_number: Mapped[str] = mapped_column(String(32), default="")
     title: Mapped[str] = mapped_column(Text, default="")
@@ -310,7 +315,7 @@ class FindingDismissalRow(Base):
         String(24)
     )  # by_design | false_positive | acknowledged | will_fix
     comment: Mapped[str] = mapped_column(Text, default="")
-    source_finding: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source_finding: Mapped[dict] = mapped_column(_json_type(), default=dict)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -364,7 +369,7 @@ class ProfileRow(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     description: Mapped[str] = mapped_column(Text, default="")
-    settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    settings: Mapped[dict] = mapped_column(_json_type(), default=dict)
     is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -489,8 +494,8 @@ class ProfileAuditEventRow(Base):
     action: Mapped[str] = mapped_column(String(64))
     target_type: Mapped[str] = mapped_column(String(64))
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    before: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    after: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    before: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    after: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -536,9 +541,9 @@ class ReadinessCandidateRow(Base):
     head_sha: Mapped[str] = mapped_column(String(64), index=True)
     state: Mapped[str] = mapped_column(String(16), default="waiting")
     reason: Mapped[str] = mapped_column(String(128), default="")
-    readiness_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
-    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    connection_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    readiness_snapshot: Mapped[dict] = mapped_column(_json_type(), default=dict)
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -578,7 +583,7 @@ class ReadinessCandidateTransitionRow(Base):
     source: Mapped[str] = mapped_column(String(64), default="")
     actor: Mapped[str] = mapped_column(String(256), default="")
     reason: Mapped[str] = mapped_column(String(128), default="")
-    readiness_snapshot: Mapped[dict] = mapped_column(JSONB, default=dict)
+    readiness_snapshot: Mapped[dict] = mapped_column(_json_type(), default=dict)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -612,7 +617,7 @@ class ApiKeyRow(Base):
     name: Mapped[str] = mapped_column(String(128))
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     key_prefix: Mapped[str] = mapped_column(String(12))  # "prg_xxxx" for display
-    scopes: Mapped[list] = mapped_column(JSONB, default=lambda: ["read"])
+    scopes: Mapped[list] = mapped_column(_json_type(), default=lambda: ["read"])
     created_by: Mapped[str] = mapped_column(String(256))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -654,7 +659,7 @@ class SyncSourceRow(Base):
     connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
     )
-    connection_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -689,19 +694,19 @@ class SyncedPRRow(Base):
     has_conflicts: Mapped[bool] = mapped_column(Boolean, default=False)
     # approved | changes_requested | pending | draft | merged
     approval_status: Mapped[str] = mapped_column(String(32), default="pending")
-    reviewers: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
-    assignees: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
+    reviewers: Mapped[list] = mapped_column(_json_type(), default=list)  # list of usernames
+    assignees: Mapped[list] = mapped_column(_json_type(), default=list)  # list of usernames
     comment_count: Mapped[int] = mapped_column(Integer, default=0)
     # 'success' | 'failure' | 'pending' | 'unknown'
     ci_status: Mapped[str] = mapped_column(String(32), default="unknown")
     profile_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
     )
-    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
     )
-    connection_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("repo_links.id"), nullable=True
     )

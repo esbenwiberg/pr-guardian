@@ -69,7 +69,9 @@ class ArchiveBlockedError(RuntimeError):
 
 
 def _token_prefix(token: str) -> str:
-    return token[:8] + "..." if len(token) > 8 else token
+    if len(token) <= 8:
+        return "****"
+    return token[:8] + "..."
 
 
 def _now() -> datetime:
