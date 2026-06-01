@@ -162,8 +162,12 @@ async def run_review(
             except Exception as e:
                 log.warning("db_stage_update_failed", stage=stage, error=str(e))
 
-    # Set pending review status (skip for synthetic PRs like repo reviews)
-    if not skip_platform_side_effects:
+    side_effects_skipped = skip_platform_side_effects or await _is_stale_automatic_review(
+        adapter, pr, storage=storage, review_id=review_db_id
+    )
+
+    # Set pending review status (skip for synthetic PRs like repo reviews or stale automatic runs)
+    if not side_effects_skipped:
         try:
             await _post_review_status(adapter, pr, "pending", "Guardian review in progress")
         except Exception as e:
@@ -184,7 +188,7 @@ async def run_review(
             base_url=base_url,
             dismissals=dismissals,
             diff_override=diff_override,
-            skip_platform_side_effects=skip_platform_side_effects,
+            skip_platform_side_effects=side_effects_skipped,
             comment_mode=comment_mode,
             manual_comment_override=manual_comment_override,
         )
