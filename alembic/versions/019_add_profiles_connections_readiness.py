@@ -20,6 +20,10 @@ depends_on: Union[str, Sequence[str], None] = None
 DEFAULT_PROFILE_ID = "00000000-0000-0000-0000-000000000001"
 
 
+def _json_type() -> sa.JSON:
+    return sa.JSON().with_variant(JSONB, "postgresql")
+
+
 def _table_exists(table: str) -> bool:
     conn = op.get_bind()
     return table in sa.inspect(conn).get_table_names()
@@ -53,7 +57,7 @@ def _create_profiles() -> None:
         sa.Column("id", UUID(as_uuid=True), primary_key=True),
         sa.Column("name", sa.String(128), nullable=False),
         sa.Column("description", sa.Text, nullable=False, server_default=""),
-        sa.Column("settings", JSONB, nullable=False, server_default="{}"),
+        sa.Column("settings", _json_type(), nullable=False, server_default="{}"),
         sa.Column("is_system", sa.Boolean, nullable=False, server_default="false"),
         sa.Column("is_default", sa.Boolean, nullable=False, server_default="false"),
         sa.Column("archived_at", sa.DateTime(timezone=True), nullable=True),
@@ -161,8 +165,8 @@ def _create_profile_managers_and_audit() -> None:
             sa.Column("action", sa.String(64), nullable=False),
             sa.Column("target_type", sa.String(64), nullable=False),
             sa.Column("target_id", UUID(as_uuid=True), nullable=True),
-            sa.Column("before", JSONB, nullable=True),
-            sa.Column("after", JSONB, nullable=True),
+            sa.Column("before", _json_type(), nullable=True),
+            sa.Column("after", _json_type(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         )
 
@@ -193,9 +197,9 @@ def _create_readiness_candidates() -> None:
             sa.Column("head_sha", sa.String(64), nullable=False),
             sa.Column("state", sa.String(16), nullable=False, server_default="waiting"),
             sa.Column("reason", sa.String(128), nullable=False, server_default=""),
-            sa.Column("readiness_snapshot", JSONB, nullable=False, server_default="{}"),
-            sa.Column("profile_snapshot", JSONB, nullable=True),
-            sa.Column("connection_snapshot", JSONB, nullable=True),
+            sa.Column("readiness_snapshot", _json_type(), nullable=False, server_default="{}"),
+            sa.Column("profile_snapshot", _json_type(), nullable=True),
+            sa.Column("connection_snapshot", _json_type(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.CheckConstraint(
@@ -238,7 +242,7 @@ def _create_readiness_candidates() -> None:
             sa.Column("source", sa.String(64), nullable=False, server_default=""),
             sa.Column("actor", sa.String(256), nullable=False, server_default=""),
             sa.Column("reason", sa.String(128), nullable=False, server_default=""),
-            sa.Column("readiness_snapshot", JSONB, nullable=False, server_default="{}"),
+            sa.Column("readiness_snapshot", _json_type(), nullable=False, server_default="{}"),
             sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
             sa.CheckConstraint(
                 "from_state is null or from_state in "
@@ -372,14 +376,14 @@ def _add_provenance_columns() -> None:
     _add_column(
         "reviews", sa.Column("profile_id", uuid_fk, sa.ForeignKey("profiles.id"), nullable=True)
     )
-    _add_column("reviews", sa.Column("profile_snapshot", JSONB, nullable=True))
+    _add_column("reviews", sa.Column("profile_snapshot", _json_type(), nullable=True))
     _add_column(
         "reviews",
         sa.Column(
             "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
         ),
     )
-    _add_column("reviews", sa.Column("connection_snapshot", JSONB, nullable=True))
+    _add_column("reviews", sa.Column("connection_snapshot", _json_type(), nullable=True))
     _add_column(
         "reviews",
         sa.Column(
@@ -404,14 +408,14 @@ def _add_provenance_columns() -> None:
         "scans",
         sa.Column("profile_id", UUID(as_uuid=True), sa.ForeignKey("profiles.id"), nullable=True),
     )
-    _add_column("scans", sa.Column("profile_snapshot", JSONB, nullable=True))
+    _add_column("scans", sa.Column("profile_snapshot", _json_type(), nullable=True))
     _add_column(
         "scans",
         sa.Column(
             "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
         ),
     )
-    _add_column("scans", sa.Column("connection_snapshot", JSONB, nullable=True))
+    _add_column("scans", sa.Column("connection_snapshot", _json_type(), nullable=True))
     _add_column(
         "scans",
         sa.Column(
@@ -428,19 +432,19 @@ def _add_provenance_columns() -> None:
             "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
         ),
     )
-    _add_column("sync_sources", sa.Column("connection_snapshot", JSONB, nullable=True))
+    _add_column("sync_sources", sa.Column("connection_snapshot", _json_type(), nullable=True))
     _add_column(
         "synced_prs",
         sa.Column("profile_id", UUID(as_uuid=True), sa.ForeignKey("profiles.id"), nullable=True),
     )
-    _add_column("synced_prs", sa.Column("profile_snapshot", JSONB, nullable=True))
+    _add_column("synced_prs", sa.Column("profile_snapshot", _json_type(), nullable=True))
     _add_column(
         "synced_prs",
         sa.Column(
             "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
         ),
     )
-    _add_column("synced_prs", sa.Column("connection_snapshot", JSONB, nullable=True))
+    _add_column("synced_prs", sa.Column("connection_snapshot", _json_type(), nullable=True))
     _add_column(
         "synced_prs",
         sa.Column(
