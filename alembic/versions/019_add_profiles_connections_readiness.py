@@ -329,7 +329,13 @@ def _migrate_github_pats_to_connections() -> None:
                     created_at, updated_at
                 )
                 SELECT
-                    id, name, description, 'github', encrypted_token, token_prefix,
+                    id, name, description, 'github', encrypted_token,
+                    CASE
+                        WHEN token_prefix IS NULL OR token_prefix = '' THEN ''
+                        WHEN token_prefix = '****' OR token_prefix LIKE '%...' THEN token_prefix
+                        WHEN length(token_prefix) <= 8 THEN '****'
+                        ELSE substr(token_prefix, 1, 8) || '...'
+                    END,
                     'unknown', 1, is_default, 'migration', 'migration',
                     created_at, updated_at
                 FROM github_pats
@@ -346,7 +352,13 @@ def _migrate_github_pats_to_connections() -> None:
                     created_at, updated_at
                 )
                 SELECT
-                    id, name, description, 'github', encrypted_token, token_prefix,
+                    id, name, description, 'github', encrypted_token,
+                    CASE
+                        WHEN token_prefix IS NULL OR token_prefix = '' THEN ''
+                        WHEN token_prefix = '****' OR token_prefix LIKE '%...' THEN token_prefix
+                        WHEN length(token_prefix) <= 8 THEN '****'
+                        ELSE substr(token_prefix, 1, 8) || '...'
+                    END,
                     'unknown', TRUE, is_default, 'migration', 'migration',
                     created_at, updated_at
                 FROM github_pats

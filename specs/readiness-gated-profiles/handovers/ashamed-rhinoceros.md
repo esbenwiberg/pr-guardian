@@ -18,6 +18,9 @@
 - Rework note: `test_existing_github_pats_migrate_to_connections` now exercises the
   legacy cleanup path too, proving `github_pats` and `reviews.pat_name` are removed
   after connection snapshots preserve the historical PAT name.
+- Review fix note: repo-link creation rejects Profile/Connection platform mismatches,
+  and migrated or legacy short token prefixes are normalized to `****` before storage
+  DTOs expose them.
 
 ## Deviations
 
@@ -36,7 +39,8 @@
 - Candidate states are enforced by `READINESS_STATES` and DB checks:
   `waiting`, `blocked`, `reviewing`, `reviewed`, `superseded`, `error`.
 - Storage DTOs intentionally never expose `encrypted_token`; use `token_prefix`,
-  `health_status`, `health_message`, and snapshots.
+  `health_status`, `health_message`, and snapshots. `token_prefix` is display-only and
+  sanitized by storage even for legacy rows.
 - `SyncedPRRow` stores both Profile and Connection provenance
   (`profile_id/profile_snapshot/connection_id/connection_snapshot`) plus `repo_link_id`.
 - `archive_profile()` and `archive_connection()` raise `ArchiveBlockedError` while an

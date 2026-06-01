@@ -22,6 +22,7 @@ from pr_guardian.persistence.storage import (
     create_connection,
     create_profile,
     create_repo_link,
+    get_connection,
     update_repo_link_state,
 )
 
@@ -132,6 +133,32 @@ async def test_profile_and_connection_archive_protection():
                 sync_enabled=True,
                 health_status="healthy",
             )
+            ado_connection = await create_connection(
+                "Org ADO",
+                platform="ado",
+                token="ado-fixture-value",
+                org_url="https://dev.azure.com/example",
+            )
+            with pytest.raises(ValueError, match="platform must match"):
+                await create_repo_link(
+                    platform="github",
+                    repo_owner="octo",
+                    repo_name="wrong-credential",
+                    profile_id=uuid.UUID(profile["id"]),
+                    connection_id=uuid.UUID(ado_connection["id"]),
+                )
+
+            async with factory() as session:
+                stored_connection = await session.get(
+                    models.ConnectionRow, uuid.UUID(connection["id"])
+                )
+                assert stored_connection is not None
+                stored_connection.token_prefix = "short"
+                await session.commit()
+            exposed_connection = await get_connection(uuid.UUID(connection["id"]))
+            assert exposed_connection is not None
+            assert exposed_connection["token_prefix"] == "****"
+
             link = await create_repo_link(
                 platform="github",
                 repo_owner="octo",
@@ -204,6 +231,7 @@ def test_existing_github_pats_migrate_to_connections():
     meta.create_all(engine)
 
     pat_id = str(uuid.uuid4())
+    short_pat_id = str(uuid.uuid4())
     encrypted = encrypt("fixture-value-migrated")
     with engine.begin() as conn:
         conn.execute(
@@ -216,6 +244,17 @@ def test_existing_github_pats_migrate_to_connections():
                 """
             ),
             {"id": pat_id, "token": encrypted},
+        )
+        conn.execute(
+            sa.text(
+                """
+                INSERT INTO github_pats (
+                    id, name, description, encrypted_token, token_prefix, is_default
+                )
+                VALUES (:id, 'legacy-short', 'Legacy short PAT', :token, 'short', 0)
+                """
+            ),
+            {"id": short_pat_id, "token": encrypted},
         )
         conn.execute(
             sa.text("INSERT INTO reviews (id, pat_name) VALUES (:id, 'legacy')"),
@@ -237,6 +276,12 @@ def test_existing_github_pats_migrate_to_connections():
         assert row["token_prefix"] == "fixture-..."
         assert row["health_status"] == "unknown"
         assert bool(row["sync_enabled"]) is True
+        short_row = (
+            conn.execute(sa.text("SELECT * FROM connections WHERE id = :id"), {"id": short_pat_id})
+            .mappings()
+            .one()
+        )
+        assert short_row["token_prefix"] == "****"
         inspector = sa.inspect(conn)
         assert "github_pats" not in inspector.get_table_names()
         assert "pat_name" not in {col["name"] for col in inspector.get_columns("reviews")}

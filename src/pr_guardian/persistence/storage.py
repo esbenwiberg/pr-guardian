@@ -74,6 +74,17 @@ def _token_prefix(token: str) -> str:
     return token[:8] + "..."
 
 
+def _safe_token_prefix(prefix: str | None) -> str:
+    """Return a display-only token prefix that cannot contain a full short secret."""
+    if not prefix:
+        return ""
+    if prefix == "****" or prefix.endswith("..."):
+        return prefix
+    if len(prefix) <= 8:
+        return "****"
+    return prefix[:8] + "..."
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -144,7 +155,7 @@ def _connection_to_dict(row: ConnectionRow) -> dict[str, Any]:
         "description": row.description,
         "platform": row.platform,
         "org_url": row.org_url,
-        "token_prefix": row.token_prefix,
+        "token_prefix": _safe_token_prefix(row.token_prefix),
         "health_status": row.health_status,
         "health_message": row.health_message,
         "health_checked_at": row.health_checked_at.isoformat() if row.health_checked_at else None,
@@ -450,6 +461,11 @@ async def create_repo_link(
             raise LookupError(f"Connection not found: {connection_id}")
         if connection.archived_at is not None:
             raise ArchiveBlockedError("Cannot link a repository to an archived Connection")
+        if connection.platform.lower().strip() != platform.lower().strip():
+            raise ValueError(
+                "Repo link platform must match the selected Connection platform "
+                f"({platform!r} != {connection.platform!r})"
+            )
 
         row = RepoLinkRow(
             platform=platform,
