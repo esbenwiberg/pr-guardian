@@ -431,6 +431,11 @@ def _add_provenance_columns() -> None:
     _add_column("sync_sources", sa.Column("connection_snapshot", JSONB, nullable=True))
     _add_column(
         "synced_prs",
+        sa.Column("profile_id", UUID(as_uuid=True), sa.ForeignKey("profiles.id"), nullable=True),
+    )
+    _add_column("synced_prs", sa.Column("profile_snapshot", JSONB, nullable=True))
+    _add_column(
+        "synced_prs",
         sa.Column(
             "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
         ),

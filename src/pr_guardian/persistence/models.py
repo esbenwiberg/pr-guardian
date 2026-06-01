@@ -694,6 +694,10 @@ class SyncedPRRow(Base):
     comment_count: Mapped[int] = mapped_column(Integer, default=0)
     # 'success' | 'failure' | 'pending' | 'unknown'
     ci_status: Mapped[str] = mapped_column(String(32), default="unknown")
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
+    )
+    profile_snapshot: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     connection_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
     )
