@@ -116,9 +116,7 @@ async def test_stale_automatic_review_skips_platform_side_effects():
             assert started is not None
             review_id, _ = started
             adapter = AsyncMock()
-            adapter.fetch_pr_metadata = AsyncMock(
-                return_value=PlatformPRMetadata(head_sha="sha2")
-            )
+            adapter.fetch_pr_metadata = AsyncMock(return_value=PlatformPRMetadata(head_sha="sha2"))
 
             stale = await _is_stale_automatic_review(
                 adapter,
@@ -144,7 +142,9 @@ async def test_manual_bypass_and_manager_override_have_distinct_readiness_audit(
             override_candidate = await _linked_candidate(state="blocked", reason="checks_timeout")
             adapter = AsyncMock()
             adapter.set_readiness_status = AsyncMock()
-            monkeypatch.setattr(reviews_queue, "_adapter_from_candidate", AsyncMock(return_value=adapter))
+            monkeypatch.setattr(
+                reviews_queue, "_adapter_from_candidate", AsyncMock(return_value=adapter)
+            )
             monkeypatch.setattr(reviews_queue, "_run_candidate_review", AsyncMock())
 
             user = Identity(kind="user", email="reviewer@example.test")

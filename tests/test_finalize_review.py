@@ -124,9 +124,7 @@ def _patch(monkeypatch, review, adapter, github_factory=None, active_dismissals=
     return appended
 
 
-def test_api_keys_cannot_finalize_and_signed_in_user_uses_stored_connection(
-    client, monkeypatch
-):
+def test_api_keys_cannot_finalize_and_signed_in_user_uses_stored_connection(client, monkeypatch):
     review = _github_review()
     connection_id = uuid.uuid4()
     review["connection_id"] = str(connection_id)
