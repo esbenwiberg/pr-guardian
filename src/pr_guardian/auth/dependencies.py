@@ -39,7 +39,7 @@ async def require_signed_in(request: Request) -> Identity:
 async def require_human_signed_in(request: Request) -> Identity:
     """Require a signed-in human user. API keys cannot perform human actions."""
     identity = _get_identity(request)
-    if identity.kind == "anonymous" and not identity.is_admin:
+    if identity.kind == "anonymous":
         raise HTTPException(401, "Signed-in access required")
     if identity.kind == "api_key":
         raise HTTPException(403, "Human user required")

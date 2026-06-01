@@ -486,24 +486,27 @@ async def start_candidate_review_now(
         raise HTTPException(404, "Readiness candidate not found")
     adapter = await _adapter_from_candidate(candidate)
     pr = _candidate_pr(candidate)
-    review_id = await storage.create_review_record(pr, comment_mode=body.comment_mode)
-    await storage.set_review_provenance(
-        review_id,
-        profile_id=uuid_mod.UUID(candidate["profile_id"]) if candidate.get("profile_id") else None,
-        profile_snapshot=candidate.get("profile_snapshot"),
-        connection_id=uuid_mod.UUID(candidate["connection_id"])
-        if candidate.get("connection_id")
-        else None,
-        connection_snapshot=candidate.get("connection_snapshot"),
-        repo_link_id=uuid_mod.UUID(candidate["repo_link_id"])
-        if candidate.get("repo_link_id")
-        else None,
-        candidate_id=candidate_id,
+    actor = identity.email or identity.display_name
+    snapshot = {
+        **(candidate.get("readiness_snapshot") or {}),
+        "manual_bypass": {"actor": actor, "at": _now().isoformat()},
+    }
+    started = await storage.try_start_candidate_review(
+        candidate_id,
+        pr,
+        source="manual_bypass",
+        actor=actor,
+        reason="manual_bypass",
+        readiness_snapshot=snapshot,
+        comment_mode=body.comment_mode,
         review_source="manual_bypass",
     )
+    if started is None:
+        raise HTTPException(409, "Candidate was already claimed or is no longer active")
+    review_id, updated = started
     asyncio.create_task(
         _run_candidate_review(
-            candidate,
+            updated,
             review_id,
             adapter,
             comment_mode=body.comment_mode,
@@ -516,7 +519,7 @@ async def start_candidate_review_now(
         "candidate_id": str(candidate_id),
         "readiness_marked_success": False,
         "source": "manual_bypass",
-        "actor": identity.email or identity.display_name,
+        "actor": actor,
     }
 
 
@@ -552,7 +555,6 @@ async def override_candidate_readiness(
     }
     adapter = await _adapter_from_candidate(candidate)
     pr = _candidate_pr(candidate)
-    await adapter.set_readiness_status(pr, "success", f"Guardian readiness overridden: {reason}")
     started = await storage.try_start_candidate_review(
         candidate_id,
         pr,
@@ -565,6 +567,7 @@ async def override_candidate_readiness(
     if started is None:
         raise HTTPException(409, "Candidate was already claimed or is no longer active")
     review_id, updated = started
+    await adapter.set_readiness_status(pr, "success", f"Guardian readiness overridden: {reason}")
     await storage.record_profile_audit_event(
         actor=actor,
         action="readiness.override",

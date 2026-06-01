@@ -1393,12 +1393,12 @@ async def _apply_platform_actions(
     """Apply non-status platform actions based on decision and Profile switches."""
     if result.decision == Decision.AUTO_APPROVE:
         if config.platform_approval_enabled and config.side_effects.formal_approve:
-            fork = False
+            fork: bool | None = None
             try:
                 fork = (await adapter.fetch_pr_metadata(pr)).fork
             except Exception as exc:
                 log.warning("fork_metadata_lookup_failed", pr_id=pr.pr_id, error=str(exc))
-            if not fork:
+            if fork is False:
                 await adapter.approve_pr(pr)
         if (
             config.side_effects.reviewers

@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 def client():
     from pr_guardian.main import app
 
-    return TestClient(app)
+    return TestClient(app, headers={"X-MS-CLIENT-PRINCIPAL-NAME": "reviewer@example.test"})
 
 
 def _ado_review() -> dict:

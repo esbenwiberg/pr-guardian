@@ -156,11 +156,12 @@ async def test_manual_bypass_and_manager_override_have_distinct_readiness_audit(
 
             assert bypass["source"] == "manual_bypass"
             assert bypass["readiness_marked_success"] is False
-            unchanged = await storage.get_readiness_candidate_by_id(
+            claimed = await storage.get_readiness_candidate_by_id(
                 uuid.UUID(bypass_candidate["id"])
             )
-            assert unchanged is not None
-            assert unchanged["state"] == "blocked"
+            assert claimed is not None
+            assert claimed["state"] == "reviewing"
+            assert claimed["reason"] == "manual_bypass"
             review = await storage.get_review(uuid.UUID(bypass["review_id"]))
             assert review is not None
             assert review["review_source"] == "manual_bypass"
