@@ -518,6 +518,21 @@ async def list_connections(*, include_archived: bool = False) -> list[dict[str, 
         return [_connection_to_dict(row) for row in rows]
 
 
+async def list_broad_sync_connections() -> list[dict[str, Any]]:
+    """Return active Connections eligible for broad pull-request browse sync."""
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(ConnectionRow)
+                .where(ConnectionRow.archived_at.is_(None))
+                .where(ConnectionRow.sync_enabled.is_(True))
+                .where(ConnectionRow.health_status == "healthy")
+                .order_by(ConnectionRow.platform, ConnectionRow.name)
+            )
+        ).all()
+        return [_connection_to_dict(row) for row in rows]
+
+
 async def get_connection(connection_id: uuid.UUID) -> dict[str, Any] | None:
     async with async_session() as session:
         row = await session.get(ConnectionRow, connection_id)

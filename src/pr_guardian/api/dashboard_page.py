@@ -20,7 +20,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 router = APIRouter(tags=["dashboard"])
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
-_PR_DASHBOARD_HTML = _DASHBOARD_DIR / "pr_dashboard.html"
+_PULL_REQUESTS_HTML = _DASHBOARD_DIR / "pull_requests.html"
 _INSIGHTS_HTML = _DASHBOARD_DIR / "insights.html"
 _REVIEWS_QUEUE_HTML = _DASHBOARD_DIR / "reviews_queue.html"
 _LIVE_PROGRESS_HTML = _DASHBOARD_DIR / "live_progress.html"
@@ -33,7 +33,6 @@ _ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
 _HUMAN_WIZARD_HTML = _DASHBOARD_DIR / "human_wizard.html"
-_BROWSE_PR_HTML = _DASHBOARD_DIR / "browse_pr.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 
@@ -57,6 +56,12 @@ async def root():
 async def reviews_page():
     """Reviews queue — the new root."""
     return _REVIEWS_QUEUE_HTML.read_text()
+
+
+@router.get("/pull-requests", response_class=HTMLResponse)
+async def pull_requests_page():
+    """Browse-only open pull requests discovered from sync-enabled Connections."""
+    return _PULL_REQUESTS_HTML.read_text()
 
 
 @router.get("/reviews/{review_id}/live", response_class=HTMLResponse)
@@ -166,12 +171,12 @@ async def legacy_dashboard():
 
 @router.get("/pr-dashboard")
 async def legacy_pr_dashboard():
-    return RedirectResponse(url="/reviews", status_code=302)
+    return RedirectResponse(url="/pull-requests", status_code=302)
 
 
 @router.get("/browse-pr")
 async def legacy_browse_pr():
-    return RedirectResponse(url="/reviews", status_code=302)
+    return RedirectResponse(url="/pull-requests", status_code=302)
 
 
 @router.get("/scans")

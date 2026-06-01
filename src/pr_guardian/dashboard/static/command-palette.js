@@ -8,6 +8,7 @@
   const PAGES = [
     { name: 'Dashboard',     url: '/dashboard',       section: 'pages' },
     { name: 'Reviews',       url: '/reviews',         section: 'pages' },
+    { name: 'Pull Requests', url: '/pull-requests',   section: 'pages' },
     { name: 'Scans',         url: '/scans',           section: 'pages' },
     { name: 'Prompts',       url: '/prompts',         section: 'pages' },
     { name: 'How It Works',  url: '/how-it-works',    section: 'pages' },

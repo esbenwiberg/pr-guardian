@@ -23,6 +23,7 @@ from pr_guardian.persistence.models import (
     AdminRow,
     AgentResultRow,
     ApiKeyRow,
+    ConnectionRow,
     FindingDismissalRow,
     FindingRow,
     GlobalConfigRow,
@@ -59,6 +60,7 @@ async def _wipe() -> None:
             AdminRow,
             SyncedPRRow,
             SyncSourceRow,
+            ConnectionRow,
             UserIdentityRow,
         ):
             await s.execute(delete(model))
@@ -506,6 +508,7 @@ def _synced_pr(
     has_conflicts: bool = False,
     created_days_ago: int = 0,
     updated_hours_ago: int = 1,
+    connection: ConnectionRow | None = None,
 ) -> SyncedPRRow:
     if platform == "github":
         pr_url = f"https://github.com/{org}/{repo}/pull/{pr_id}"
@@ -529,13 +532,52 @@ def _synced_pr(
         approval_status=approval_status,
         reviewers=reviewers or [],
         comment_count=comment_count,
+        connection_id=connection.id if connection else None,
+        connection_snapshot=_connection_snapshot(connection) if connection else None,
         pr_created_at=_ago(days=created_days_ago),
         pr_updated_at=_ago(hours=updated_hours_ago),
         synced_at=NOW,
     )
 
 
+def _connection_snapshot(connection: ConnectionRow | None) -> dict | None:
+    if connection is None:
+        return None
+    return {
+        "id": str(connection.id),
+        "name": connection.name,
+        "platform": connection.platform,
+        "org_url": connection.org_url,
+        "token_prefix": connection.token_prefix,
+        "health_status": connection.health_status,
+        "sync_enabled": connection.sync_enabled,
+    }
+
+
 async def _seed_pr_dashboard() -> None:
+    github_connection = ConnectionRow(
+        id=uuid.uuid4(),
+        name="Demo GitHub Browse",
+        platform="github",
+        token_prefix="demo-gh...",
+        health_status="healthy",
+        health_message="seeded",
+        sync_enabled=True,
+        created_by="dev_seed",
+        updated_by="dev_seed",
+    )
+    ado_connection = ConnectionRow(
+        id=uuid.uuid4(),
+        name="Demo ADO Browse",
+        platform="ado",
+        org_url="https://dev.azure.com/contextand",
+        token_prefix="demo-ado...",
+        health_status="healthy",
+        health_message="seeded",
+        sync_enabled=True,
+        created_by="dev_seed",
+        updated_by="dev_seed",
+    )
     sources = [
         SyncSourceRow(
             id=uuid.uuid4(),
@@ -543,6 +585,8 @@ async def _seed_pr_dashboard() -> None:
             org="esbenwiberg",
             repo="pr-guardian",
             repo_url="https://github.com/esbenwiberg/pr-guardian",
+            connection_id=github_connection.id,
+            connection_snapshot=_connection_snapshot(github_connection),
             last_synced_at=_ago(minutes=3),
             is_active=True,
         ),
@@ -552,6 +596,8 @@ async def _seed_pr_dashboard() -> None:
             org="esbenwiberg",
             repo="orcha",
             repo_url="https://github.com/esbenwiberg/orcha",
+            connection_id=github_connection.id,
+            connection_snapshot=_connection_snapshot(github_connection),
             last_synced_at=_ago(minutes=3),
             is_active=True,
         ),
@@ -562,6 +608,8 @@ async def _seed_pr_dashboard() -> None:
             project="Platform",
             repo="infra-core",
             repo_url="https://dev.azure.com/contextand/Platform/_git/infra-core",
+            connection_id=ado_connection.id,
+            connection_snapshot=_connection_snapshot(ado_connection),
             last_synced_at=_ago(minutes=3),
             is_active=True,
         ),
@@ -582,6 +630,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=4,
             created_days_ago=2,
             updated_hours_ago=3,
+            connection=github_connection,
         ),
         _synced_pr(
             platform="github",
@@ -596,6 +645,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=0,
             created_days_ago=1,
             updated_hours_ago=10,
+            connection=github_connection,
         ),
         # Review queue — user is a reviewer
         _synced_pr(
@@ -611,6 +661,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=7,
             created_days_ago=3,
             updated_hours_ago=2,
+            connection=github_connection,
         ),
         _synced_pr(
             platform="github",
@@ -626,6 +677,7 @@ async def _seed_pr_dashboard() -> None:
             created_days_ago=4,
             updated_hours_ago=5,
             has_conflicts=True,
+            connection=github_connection,
         ),
         _synced_pr(
             platform="ado",
@@ -642,6 +694,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=3,
             created_days_ago=1,
             updated_hours_ago=4,
+            connection=ado_connection,
         ),
         # Stale PRs (>5 days old, low activity)
         _synced_pr(
@@ -658,6 +711,7 @@ async def _seed_pr_dashboard() -> None:
             created_days_ago=14,
             updated_hours_ago=72,
             is_draft=True,
+            connection=github_connection,
         ),
         _synced_pr(
             platform="github",
@@ -672,6 +726,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=2,
             created_days_ago=9,
             updated_hours_ago=48,
+            connection=github_connection,
         ),
         _synced_pr(
             platform="ado",
@@ -688,6 +743,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=5,
             created_days_ago=7,
             updated_hours_ago=30,
+            connection=ado_connection,
         ),
         # A couple more active PRs
         _synced_pr(
@@ -703,6 +759,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=8,
             created_days_ago=0,
             updated_hours_ago=1,
+            connection=github_connection,
         ),
         _synced_pr(
             platform="ado",
@@ -719,6 +776,7 @@ async def _seed_pr_dashboard() -> None:
             comment_count=0,
             created_days_ago=0,
             updated_hours_ago=0,
+            connection=ado_connection,
         ),
     ]
 
@@ -730,6 +788,7 @@ async def _seed_pr_dashboard() -> None:
     )
 
     async with async_session() as s:
+        s.add_all([github_connection, ado_connection])
         s.add_all(sources)
         s.add_all(prs)
         s.add(identity)
