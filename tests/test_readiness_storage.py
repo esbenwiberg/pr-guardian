@@ -390,6 +390,41 @@ async def test_profile_link_candidate_and_provenance_persistence():
             assert loaded["connection_id"] == connection["id"]
             assert loaded["state"] == "blocked"
 
+            ado_connection = await create_connection(
+                "ADO Main",
+                platform="ado",
+                token="fixture-value-ado-readiness",
+                org_url="https://dev.azure.com/example",
+                health_status="healthy",
+            )
+            ado_link = await create_repo_link(
+                platform="ado",
+                org_url="https://dev.azure.com/example",
+                project="Payments",
+                repo_name="billing",
+                repo_url="https://dev.azure.com/example/Payments/_git/billing",
+                profile_id=uuid.UUID(profile["id"]),
+                connection_id=uuid.UUID(ado_connection["id"]),
+                auto_review_enabled=True,
+            )
+            ado_candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(ado_link["id"]),
+                pr_id="99",
+                pr_url="https://dev.azure.com/example/Payments/_git/billing/pullrequest/99",
+                head_sha="def456",
+            )
+            loaded_ado = await get_readiness_candidate(
+                platform="ado",
+                org_url="https://dev.azure.com/example/",
+                project="Payments",
+                repo="billing",
+                pr_id="99",
+                head_sha="def456",
+            )
+            assert loaded_ado is not None
+            assert loaded_ado["id"] == ado_candidate["id"]
+            assert loaded_ado["canonical_repo_key"] == ado_link["canonical_repo_key"]
+
             transitions = await list_candidate_transitions(uuid.UUID(candidate["id"]))
             assert [t["id"] for t in transitions] == [transition["id"]]
             assert transitions[0]["source"] == "webhook"

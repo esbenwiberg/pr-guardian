@@ -608,19 +608,35 @@ async def get_readiness_candidate(
     repo: str,
     pr_id: str,
     head_sha: str,
+    org_url: str = "",
+    project: str = "",
 ) -> dict[str, Any] | None:
+    normalized_platform = platform.lower().strip()
     owner, _, name = repo.partition("/")
     if not name:
         owner, name = "", owner
-    canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+    base_query = (
+        select(ReadinessCandidateRow)
+        .where(func.lower(ReadinessCandidateRow.platform) == normalized_platform)
+        .where(ReadinessCandidateRow.pr_id == pr_id)
+        .where(ReadinessCandidateRow.head_sha == head_sha)
+    )
+    if normalized_platform == "github":
+        canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+        query = base_query.where(ReadinessCandidateRow.canonical_repo_key == canonical)
+    else:
+        repo_name = name or owner
+        repo_project = project or (owner if name else "")
+        query = base_query.where(func.lower(ReadinessCandidateRow.repo_name) == repo_name.lower())
+        if repo_project:
+            query = query.where(func.lower(ReadinessCandidateRow.project) == repo_project.lower())
+        if org_url:
+            query = query.where(
+                func.lower(func.rtrim(ReadinessCandidateRow.org_url, "/"))
+                == org_url.lower().rstrip("/")
+            )
     async with async_session() as session:
-        row = await session.scalar(
-            select(ReadinessCandidateRow)
-            .where(ReadinessCandidateRow.platform == platform)
-            .where(ReadinessCandidateRow.canonical_repo_key == canonical)
-            .where(ReadinessCandidateRow.pr_id == pr_id)
-            .where(ReadinessCandidateRow.head_sha == head_sha)
-        )
+        row = await session.scalar(query)
         return _candidate_to_dict(row) if row else None
 
 
