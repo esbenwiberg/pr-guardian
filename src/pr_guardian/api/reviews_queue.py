@@ -567,15 +567,37 @@ async def override_candidate_readiness(
     if started is None:
         raise HTTPException(409, "Candidate was already claimed or is no longer active")
     review_id, updated = started
-    await adapter.set_readiness_status(pr, "success", f"Guardian readiness overridden: {reason}")
-    await storage.record_profile_audit_event(
-        actor=actor,
-        action="readiness.override",
-        target_type="readiness_candidate",
-        target_id=candidate_id,
-        before=previous_snapshot,
-        after={"reason": reason, "review_id": str(review_id), "snapshot": override_snapshot},
-    )
+    status_posted = True
+    audit_recorded = True
+    try:
+        await adapter.set_readiness_status(
+            pr, "success", f"Guardian readiness overridden: {reason}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        status_posted = False
+        log.warning(
+            "readiness_override_status_failed",
+            candidate_id=str(candidate_id),
+            review_id=str(review_id),
+            error=str(exc),
+        )
+    try:
+        await storage.record_profile_audit_event(
+            actor=actor,
+            action="readiness.override",
+            target_type="readiness_candidate",
+            target_id=candidate_id,
+            before=previous_snapshot,
+            after={"reason": reason, "review_id": str(review_id), "snapshot": override_snapshot},
+        )
+    except Exception as exc:  # noqa: BLE001
+        audit_recorded = False
+        log.warning(
+            "readiness_override_audit_failed",
+            candidate_id=str(candidate_id),
+            review_id=str(review_id),
+            error=str(exc),
+        )
     asyncio.create_task(
         _run_candidate_review(
             updated,
@@ -592,6 +614,8 @@ async def override_candidate_readiness(
         "readiness_marked_success": True,
         "source": "override",
         "actor": actor,
+        "readiness_status_posted": status_posted,
+        "audit_recorded": audit_recorded,
     }
 
 

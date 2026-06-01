@@ -478,6 +478,7 @@ async def test_inline_mode_filters_below_threshold():
         comment_mode="inline",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     adapter.post_inline_comments.assert_called_once()
@@ -510,6 +511,7 @@ async def test_inline_mode_posts_summary_after_inline():
         comment_mode="inline",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     assert "inline" in call_order
@@ -534,6 +536,7 @@ async def test_summary_mode_never_calls_post_inline_comments():
         comment_mode="summary",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     adapter.post_inline_comments.assert_not_called()
@@ -568,6 +571,7 @@ async def test_inline_rereview_deletes_before_posting():
         review_id=_uuid.uuid4(),
         storage=storage,
         original_review_id=original_review_id,
+        manual_comment_override=True,
     )
 
     storage.load_inline_comment_ids.assert_called_once()
@@ -723,6 +727,7 @@ async def test_inline_mode_mech_findings_skips_none_line():
         comment_mode="inline",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     adapter.post_inline_comments.assert_not_called()
@@ -753,6 +758,7 @@ async def test_inline_mode_mech_findings_error_severity_passes_threshold():
         comment_mode="inline",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     adapter.post_inline_comments.assert_called_once()
@@ -787,6 +793,7 @@ async def test_inline_mode_mech_findings_info_severity_filtered_out():
         comment_mode="inline",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     adapter.post_inline_comments.assert_not_called()
@@ -822,6 +829,7 @@ async def test_inline_mode_mech_findings_warning_passes_medium_threshold():
         comment_mode="inline",
         review_id=_uuid.uuid4(),
         storage=storage,
+        manual_comment_override=True,
     )
 
     adapter.post_inline_comments.assert_called_once()

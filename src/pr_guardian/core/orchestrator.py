@@ -1344,7 +1344,7 @@ async def _post_results(
     review_id: uuid.UUID | None = None,
     storage=None,
     original_review_id: str | None = None,
-    manual_comment_override: bool = True,
+    manual_comment_override: bool = False,
 ) -> None:
     """Post review results back to the platform."""
     comment = build_summary_comment(result, base_url=base_url)
