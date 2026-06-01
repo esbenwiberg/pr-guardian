@@ -13,6 +13,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pr_guardian.models.output import ReviewResult
@@ -68,6 +69,10 @@ class ArchiveBlockedError(RuntimeError):
     """Raised when an archive operation would strand an active repo link."""
 
 
+class HealthGateError(RuntimeError):
+    """Raised when a management write requires a healthy Connection."""
+
+
 def _token_prefix(token: str) -> str:
     if len(token) <= 8:
         return "****"
@@ -83,6 +88,50 @@ def _safe_token_prefix(prefix: str | None) -> str:
     if len(prefix) <= 8:
         return "****"
     return prefix[:8] + "..."
+
+
+def _audit_diff(before: dict[str, Any] | None, after: dict[str, Any] | None) -> dict[str, Any]:
+    """Build a compact field-level diff from already-redacted DTOs."""
+    before = before or {}
+    after = after or {}
+    fields = sorted(set(before) | set(after))
+    return {
+        key: {"before": before.get(key), "after": after.get(key)}
+        for key in fields
+        if before.get(key) != after.get(key)
+    }
+
+
+def _audit_before_after(
+    before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    diff = _audit_diff(before, after)
+    return (
+        {"fields": {key: value["before"] for key, value in diff.items()}} if before else None,
+        {
+            "fields": {key: value["after"] for key, value in diff.items()},
+            "diff": diff,
+        },
+    )
+
+
+def _audit_event_to_dict(row: ProfileAuditEventRow) -> dict[str, Any]:
+    before = row.before
+    after = row.after
+    diff = after.get("diff") if isinstance(after, dict) else None
+    if not isinstance(diff, dict):
+        diff = _audit_diff(before, after)
+    return {
+        "id": str(row.id),
+        "actor": row.actor,
+        "action": row.action,
+        "target_type": row.target_type,
+        "target_id": str(row.target_id) if row.target_id else None,
+        "before": before,
+        "after": after,
+        "diff": diff,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
 
 
 def _now() -> datetime:
