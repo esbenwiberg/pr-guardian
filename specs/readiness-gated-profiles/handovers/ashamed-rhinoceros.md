@@ -32,6 +32,9 @@
 - `archive_profile()` and `archive_connection()` raise `ArchiveBlockedError` while an
   active repo link depends on the row. Pausing or disabling the repo link first permits
   archive.
+- `create_repo_link()` rejects archived Profile/Connection dependencies, and
+  `update_repo_link_state()` rejects reactivating a paused/disabled repo link while its
+  Profile or Connection is archived or missing.
 - `create_review_record(..., pat_name=...)` still accepts the legacy parameter but stores
   it only as `connection_snapshot={"legacy_pat_name": ...}` for historical readability.
 
