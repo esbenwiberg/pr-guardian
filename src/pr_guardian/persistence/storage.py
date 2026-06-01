@@ -1284,7 +1284,8 @@ async def delete_github_pat(pat_id: uuid.UUID) -> bool:
     """Compatibility wrapper: archive a GitHub Connection."""
     async with async_session() as session:
         row = await session.get(ConnectionRow, pat_id)
-        if not row:
+        platform = getattr(row, "platform", "github") if row else None
+        if not row or (isinstance(platform, str) and platform != "github"):
             return False
         active_link = await session.scalar(
             select(RepoLinkRow.id)

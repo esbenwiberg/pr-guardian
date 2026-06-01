@@ -38,6 +38,7 @@ def _make_pat_row(
     row.id = pat_id or uuid.uuid4()
     row.name = name
     row.description = description
+    row.platform = "github"
     row.encrypted_token = encrypt(token)
     row.token_prefix = token[:8] + "..." if len(token) > 8 else token
     row.is_default = is_default
@@ -274,6 +275,20 @@ async def test_delete_github_pat_found_returns_true():
     assert result is True
     assert row.archived_at is not None
     session.commit.assert_awaited_once()
+
+
+async def test_delete_github_pat_ignores_non_github_connection():
+    row = _make_pat_row()
+    row.platform = "ado"
+    session = AsyncMock()
+    session.get = AsyncMock(return_value=row)
+    session.commit = AsyncMock()
+
+    with patch("pr_guardian.persistence.storage.async_session", _session_cm(session)):
+        result = await delete_github_pat(row.id)
+
+    assert result is False
+    session.commit.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

@@ -289,3 +289,34 @@ def test_existing_github_pats_migrate_to_connections():
         assert "legacy" in review
         assert not hasattr(models, "GithubPatRow")
     engine.dispose()
+
+
+def test_sqlite_default_profile_seed_uses_uuid_storage_form():
+    engine = sa.create_engine("sqlite:///:memory:")
+    meta = sa.MetaData()
+    sa.Table(
+        "profiles",
+        meta,
+        sa.Column("id", sa.Text, primary_key=True),
+        sa.Column("name", sa.String(128), nullable=False),
+        sa.Column("description", sa.Text, nullable=False, server_default=""),
+        sa.Column("settings", sa.JSON, nullable=False, server_default="{}"),
+        sa.Column("is_system", sa.Boolean, nullable=False, server_default="false"),
+        sa.Column("is_default", sa.Boolean, nullable=False, server_default="false"),
+        sa.Column("archived_at", sa.DateTime(timezone=True)),
+        sa.Column("created_by", sa.String(256), nullable=False, server_default="system"),
+        sa.Column("updated_by", sa.String(256), nullable=False, server_default="system"),
+        sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    )
+    meta.create_all(engine)
+
+    with engine.begin() as conn:
+        ops = Operations(MigrationContext.configure(conn))
+        with patch.object(migration, "op", ops):
+            migration._seed_default_profile()
+
+        seeded_id = conn.execute(sa.text("SELECT id FROM profiles")).scalar_one()
+        assert seeded_id == migration.SQLITE_DEFAULT_PROFILE_ID
+        assert "-" not in seeded_id
+    engine.dispose()

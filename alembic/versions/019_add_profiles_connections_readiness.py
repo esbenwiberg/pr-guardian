@@ -18,6 +18,7 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 DEFAULT_PROFILE_ID = "00000000-0000-0000-0000-000000000001"
+SQLITE_DEFAULT_PROFILE_ID = DEFAULT_PROFILE_ID.replace("-", "")
 
 
 def _json_type() -> sa.JSON:
@@ -293,7 +294,7 @@ def _seed_default_profile() -> None:
                 )
                 """
             ),
-            {"id": DEFAULT_PROFILE_ID, "settings": settings},
+            {"id": SQLITE_DEFAULT_PROFILE_ID, "settings": settings},
         )
     else:
         conn.execute(
