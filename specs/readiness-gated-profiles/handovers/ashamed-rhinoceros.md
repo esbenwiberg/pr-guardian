@@ -13,11 +13,17 @@
   because API and UI replacement belongs to later briefs.
 - Added required storage tests in `tests/test_profiles_storage.py` and
   `tests/test_readiness_storage.py`.
+- Rework note: `test_existing_github_pats_migrate_to_connections` now exercises the
+  legacy cleanup path too, proving `github_pats` and `reviews.pat_name` are removed
+  after connection snapshots preserve the historical PAT name.
 
 ## Deviations
 
 - Touched `src/pr_guardian/api/dashboard.py` only because repo-wide `ruff format --check .`
   failed on a pre-existing wrap-only formatting issue. No dashboard behavior changed.
+- A prior auto-commit changed execute bits on `scripts/check-commit-msg.sh` and
+  `scripts/repofit-check.sh`; this rework restored the modes so the final diff has no
+  script changes.
 - Kept legacy `create_github_pat`, `list_github_pats`, `update_github_pat`,
   `delete_github_pat`, and `resolve_github_token` function names in storage, backed by
   `ConnectionRow`, so current routes keep importing until brief 02/05 removes old PAT APIs.
