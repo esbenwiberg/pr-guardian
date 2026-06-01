@@ -67,7 +67,9 @@ async def test_linked_and_unlinked_runs_resolve_expected_profiles():
             assert linked.config.thresholds.hard_block_score == 9
             assert linked.profile_snapshot is not None
             assert "llm" not in linked.profile_snapshot["settings"]
-            assert "human_review_min_score" not in linked.profile_snapshot["settings"]["thresholds"]
+            assert (
+                "human_review_min_score" not in linked.profile_snapshot["settings"]["thresholds"]
+            )
 
             unlinked = await resolve_profile_config(
                 platform="github",

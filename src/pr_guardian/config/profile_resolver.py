@@ -119,7 +119,9 @@ async def resolve_profile_config(
 
         link = None
         if platform and repo:
-            link = await _find_repo_link(storage, platform=platform, repo=repo, org_url=org_url, project=project)
+            link = await _find_repo_link(
+                storage, platform=platform, repo=repo, org_url=org_url, project=project
+            )
         if link:
             profile = await storage.get_profile(uuid.UUID(link["profile_id"]))
             connection = await storage.get_connection(uuid.UUID(link["connection_id"]))
@@ -186,8 +188,12 @@ async def resolve_profile_snapshot_config(
     return ResolvedProfileConfig(
         config=config,
         profile_id=_uuid_or_none(profile_snapshot.get("id") if profile_snapshot else None),
-        profile_snapshot=_sanitize_profile_snapshot(profile_snapshot) if profile_snapshot else None,
-        connection_id=_uuid_or_none(connection_snapshot.get("id") if connection_snapshot else None),
+        profile_snapshot=_sanitize_profile_snapshot(profile_snapshot)
+        if profile_snapshot
+        else None,
+        connection_id=_uuid_or_none(
+            connection_snapshot.get("id") if connection_snapshot else None
+        ),
         connection_snapshot=copy.deepcopy(connection_snapshot) if connection_snapshot else None,
         repo_link_id=None,
         source="snapshot",
@@ -242,9 +248,10 @@ def _sanitize_profile_snapshot(profile: dict[str, Any] | None) -> dict[str, Any]
 async def _find_repo_link(storage, *, platform: str, repo: str, org_url: str, project: str):
     wanted = _canonical_repo_key(platform, repo=repo, org_url=org_url, project=project)
     for link in await storage.list_repo_links():
-        if link.get("platform", "").lower() == platform.lower() and link.get(
-            "canonical_repo_key"
-        ) == wanted:
+        if (
+            link.get("platform", "").lower() == platform.lower()
+            and link.get("canonical_repo_key") == wanted
+        ):
             return link
     return None
 
@@ -261,7 +268,9 @@ async def _select_connection(
     if connection_id:
         return await storage.get_connection(connection_id)
     connections = [
-        c for c in await storage.list_connections() if c.get("platform", "").lower() == platform.lower()
+        c
+        for c in await storage.list_connections()
+        if c.get("platform", "").lower() == platform.lower()
     ]
     if connection_name:
         for connection in connections:
@@ -281,7 +290,9 @@ def _canonical_repo_key(platform: str, *, repo: str, org_url: str = "", project:
     if platform == "ado":
         parsed_project, name = _split_repo(repo)
         project = project or parsed_project
-        return f"ado:{org_url.lower().rstrip('/')}:{project.lower().strip()}/{name.lower().strip()}"
+        return (
+            f"ado:{org_url.lower().rstrip('/')}:{project.lower().strip()}/{name.lower().strip()}"
+        )
     owner, name = _split_repo(repo)
     return f"{platform}:{owner.lower()}/{name.lower()}"
 

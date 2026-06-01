@@ -28,7 +28,9 @@ def create_adapter(
 
     if platform == "ado":
         pat = token_override if token_override is not None else os.environ.get("ADO_PAT", "")
-        org_url = org_url_override if org_url_override is not None else os.environ.get("ADO_ORG_URL", "")
+        org_url = (
+            org_url_override if org_url_override is not None else os.environ.get("ADO_ORG_URL", "")
+        )
         return ADOAdapter(pat=pat, org_url=org_url)
 
     raise ValueError(f"Unknown platform: {platform}")
