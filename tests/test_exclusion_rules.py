@@ -515,9 +515,7 @@ class TestMultiPatSync:
 
         assert called_tokens == []
 
-    async def test_run_pr_sync_skips_connections_with_missing_or_broken_tokens(
-        self, monkeypatch
-    ):
+    async def test_run_pr_sync_skips_connections_with_missing_or_broken_tokens(self, monkeypatch):
         from pr_guardian.core import pr_sync
 
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
