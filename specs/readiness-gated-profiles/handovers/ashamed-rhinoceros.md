@@ -13,6 +13,8 @@
   because API and UI replacement belongs to later briefs.
 - Added required storage tests in `tests/test_profiles_storage.py` and
   `tests/test_readiness_storage.py`.
+- Rework cleanup restored executable permissions on `scripts/check-commit-msg.sh` and
+  `scripts/repofit-check.sh` after a prior auto-commit changed file modes.
 - Rework note: `test_existing_github_pats_migrate_to_connections` now exercises the
   legacy cleanup path too, proving `github_pats` and `reviews.pat_name` are removed
   after connection snapshots preserve the historical PAT name.
@@ -64,3 +66,11 @@
 - Existing API/dashboard code still talks in `pat_name` terms. Later briefs should replace
   those surfaces with Profile/Connection selection instead of relying on the compatibility
   shims long term.
+
+## Verification
+
+- `python -m pytest tests/test_readiness_storage.py::test_profile_link_candidate_and_provenance_persistence`
+- `python -m pytest tests/test_profiles_storage.py::test_profile_and_connection_archive_protection`
+- `python -m pytest tests/test_profiles_storage.py::test_existing_github_pats_migrate_to_connections`
+- `validate_locally` passed lint, build, and full `pytest` (537 tests).
+- The only added migration file is `alembic/versions/019_add_profiles_connections_readiness.py`.
