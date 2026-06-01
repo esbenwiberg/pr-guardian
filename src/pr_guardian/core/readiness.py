@@ -190,7 +190,7 @@ async def create_or_update_candidate_from_pr(
             platform=pr.platform.value,
             repo=pr.repo,
             pr_id=pr.pr_id,
-            states=("waiting", "blocked", "error"),
+            states=("waiting", "blocked", "error", "reviewing"),
         )
         for candidate in older:
             if candidate["head_sha"] != pr.head_commit_sha:
@@ -224,7 +224,7 @@ async def supersede_candidates_for_pr(
         platform=pr.platform.value,
         repo=pr.repo,
         pr_id=pr.pr_id,
-        states=("waiting", "blocked", "error"),
+        states=("waiting", "blocked", "error", "reviewing"),
     )
     for candidate in candidates:
         await storage.record_candidate_transition(

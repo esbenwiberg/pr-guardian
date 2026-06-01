@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from pr_guardian.api import reviews_queue
 from pr_guardian.auth.identity import Identity
+from pr_guardian.core.readiness import supersede_candidates_for_pr
 from pr_guardian.core.orchestrator import _is_stale_automatic_review
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
@@ -13,12 +14,12 @@ from pr_guardian.platform.protocol import PlatformPRMetadata
 from tests.test_readiness_storage import _make_session_factory
 
 
-def _pr(head_sha: str = "sha1") -> PlatformPR:
+def _pr(head_sha: str = "sha1", *, repo: str = "octo/service") -> PlatformPR:
     return PlatformPR(
         platform=Platform.GITHUB,
         pr_id="42",
-        repo="octo/service",
-        repo_url="https://github.com/octo/service/pull/42",
+        repo=repo,
+        repo_url=f"https://github.com/{repo}/pull/42",
         source_branch="feature",
         target_branch="main",
         author="alice",
@@ -130,6 +131,27 @@ async def test_stale_automatic_review_skips_platform_side_effects():
             assert updated is not None
             assert updated["state"] == "superseded"
             assert updated["reason"] == "new_commit"
+    finally:
+        await engine.dispose()
+
+
+async def test_reviewing_candidate_superseded_on_close_or_new_commit():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            candidate = await _linked_candidate(state="reviewing", reason="ready")
+
+            count = await supersede_candidates_for_pr(
+                _pr("sha1", repo=candidate["repo"]),
+                source="webhook",
+                reason="pr_closed",
+            )
+
+            assert count == 1
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["state"] == "superseded"
+            assert updated["reason"] == "pr_closed"
     finally:
         await engine.dispose()
 
