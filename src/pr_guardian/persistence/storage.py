@@ -1184,6 +1184,7 @@ async def try_start_candidate_review(
     readiness_snapshot: dict[str, Any] | None = None,
     comment_mode: str = "summary",
     review_source: str | None = None,
+    audit_event: dict[str, Any] | None = None,
 ) -> tuple[uuid.UUID, dict[str, Any]] | None:
     """Atomically move a ready candidate to reviewing and create its review row.
 
@@ -1246,6 +1247,17 @@ async def try_start_candidate_review(
             review_source=review_source or source,
         )
         session.add(review)
+        if audit_event is not None:
+            session.add(
+                ProfileAuditEventRow(
+                    actor=str(audit_event.get("actor") or actor),
+                    action=str(audit_event["action"]),
+                    target_type=str(audit_event["target_type"]),
+                    target_id=audit_event.get("target_id"),
+                    before=audit_event.get("before"),
+                    after=audit_event.get("after") or {},
+                )
+            )
         await session.commit()
         await session.refresh(review)
         await session.refresh(candidate)

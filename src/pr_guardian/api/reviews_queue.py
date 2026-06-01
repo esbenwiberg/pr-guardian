@@ -563,12 +563,19 @@ async def override_candidate_readiness(
         reason="manual_override",
         readiness_snapshot=override_snapshot,
         comment_mode=body.comment_mode,
+        audit_event={
+            "actor": actor,
+            "action": "readiness.override",
+            "target_type": "readiness_candidate",
+            "target_id": candidate_id,
+            "before": previous_snapshot,
+            "after": {"reason": reason, "snapshot": override_snapshot},
+        },
     )
     if started is None:
         raise HTTPException(409, "Candidate was already claimed or is no longer active")
     review_id, updated = started
     status_posted = True
-    audit_recorded = True
     try:
         # Readiness status is the only platform write in the override endpoint;
         # review result side effects remain gated inside the orchestrator.
@@ -579,23 +586,6 @@ async def override_candidate_readiness(
         status_posted = False
         log.warning(
             "readiness_override_status_failed",
-            candidate_id=str(candidate_id),
-            review_id=str(review_id),
-            error=str(exc),
-        )
-    try:
-        await storage.record_profile_audit_event(
-            actor=actor,
-            action="readiness.override",
-            target_type="readiness_candidate",
-            target_id=candidate_id,
-            before=previous_snapshot,
-            after={"reason": reason, "review_id": str(review_id), "snapshot": override_snapshot},
-        )
-    except Exception as exc:  # noqa: BLE001
-        audit_recorded = False
-        log.warning(
-            "readiness_override_audit_failed",
             candidate_id=str(candidate_id),
             review_id=str(review_id),
             error=str(exc),
@@ -617,7 +607,7 @@ async def override_candidate_readiness(
         "source": "override",
         "actor": actor,
         "readiness_status_posted": status_posted,
-        "audit_recorded": audit_recorded,
+        "audit_recorded": True,
     }
 
 
