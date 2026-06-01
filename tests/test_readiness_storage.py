@@ -20,10 +20,12 @@ from pr_guardian.persistence.storage import (
     get_readiness_candidate,
     get_review,
     get_scan,
+    list_synced_prs,
     list_candidate_transitions,
     record_candidate_transition,
     set_review_provenance,
     set_scan_provenance,
+    upsert_synced_pr,
 )
 
 
@@ -266,6 +268,61 @@ sa.Table(
     sa.Column("last_modified", sa.String(64)),
     sa.Column("effort_estimate", sa.String(16)),
 )
+sa.Table(
+    "synced_prs",
+    _meta,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("platform", sa.String(16), nullable=False),
+    sa.Column("pr_id", sa.String(64), nullable=False),
+    sa.Column("org", sa.String(256), nullable=False, server_default=""),
+    sa.Column("project", sa.String(256), nullable=False, server_default=""),
+    sa.Column("repo", sa.String(256), nullable=False),
+    sa.Column("title", sa.Text, server_default=""),
+    sa.Column("author", sa.String(256), server_default=""),
+    sa.Column("author_display", sa.String(256), server_default=""),
+    sa.Column("pr_url", sa.Text, server_default=""),
+    sa.Column("source_branch", sa.String(256), server_default=""),
+    sa.Column("target_branch", sa.String(256), server_default=""),
+    sa.Column("is_draft", sa.Boolean, server_default="false"),
+    sa.Column("has_conflicts", sa.Boolean, server_default="false"),
+    sa.Column("approval_status", sa.String(32), server_default="pending"),
+    sa.Column("reviewers", sa.JSON, server_default="[]"),
+    sa.Column("assignees", sa.JSON, server_default="[]"),
+    sa.Column("comment_count", sa.Integer, server_default="0"),
+    sa.Column("ci_status", sa.String(32), server_default="unknown"),
+    sa.Column("profile_id", sa.Text),
+    sa.Column("profile_snapshot", sa.JSON),
+    sa.Column("connection_id", sa.Text),
+    sa.Column("connection_snapshot", sa.JSON),
+    sa.Column("repo_link_id", sa.Text),
+    sa.Column("sync_source", sa.String(32), server_default="sync"),
+    sa.Column("pr_created_at", sa.DateTime(timezone=True)),
+    sa.Column("pr_updated_at", sa.DateTime(timezone=True)),
+    sa.Column("synced_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    sa.UniqueConstraint("platform", "pr_id", "repo", "project", name="uq_synced_pr"),
+)
+sa.Table(
+    "excluded_repos",
+    _meta,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("platform", sa.String(16)),
+    sa.Column("org", sa.String(256)),
+    sa.Column("project", sa.String(256), server_default=""),
+    sa.Column("repo", sa.String(256)),
+    sa.Column("excluded_by_email", sa.String(256), server_default=""),
+    sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+)
+sa.Table(
+    "exclusion_rules",
+    _meta,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("platform", sa.String(16), server_default=""),
+    sa.Column("org_pattern", sa.String(256), server_default=""),
+    sa.Column("project_pattern", sa.String(256), server_default=""),
+    sa.Column("repo_pattern", sa.String(256), server_default=""),
+    sa.Column("created_by_email", sa.String(256), server_default=""),
+    sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+)
 
 
 async def _make_session_factory():
@@ -385,5 +442,29 @@ async def test_profile_link_candidate_and_provenance_persistence():
             assert stored_scan is not None
             assert stored_scan["profile_snapshot"]["name"] == "Standard Service"
             assert stored_scan["connection_snapshot"]["token_prefix"] == "fixture-..."
+
+            await upsert_synced_pr(
+                {
+                    "platform": "github",
+                    "pr_id": "42",
+                    "org": "octo",
+                    "repo": "octo/service",
+                    "title": "Feature",
+                    "author": "alice",
+                    "pr_url": "https://github.com/octo/service/pull/42",
+                    "profile_id": uuid.UUID(profile["id"]),
+                    "profile_snapshot": profile_snapshot,
+                    "connection_id": uuid.UUID(connection["id"]),
+                    "connection_snapshot": connection_snapshot,
+                    "repo_link_id": uuid.UUID(link["id"]),
+                    "sync_source": "sync",
+                }
+            )
+            synced_prs, total = await list_synced_prs(platform="github", repo="octo/service")
+            assert total == 1
+            assert synced_prs[0]["profile_id"] == profile["id"]
+            assert synced_prs[0]["profile_snapshot"]["name"] == "Standard Service"
+            assert synced_prs[0]["connection_id"] == connection["id"]
+            assert synced_prs[0]["repo_link_id"] == link["id"]
     finally:
         await engine.dispose()

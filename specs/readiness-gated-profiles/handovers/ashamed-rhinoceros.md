@@ -29,6 +29,8 @@
   `waiting`, `blocked`, `reviewing`, `reviewed`, `superseded`, `error`.
 - Storage DTOs intentionally never expose `encrypted_token`; use `token_prefix`,
   `health_status`, `health_message`, and snapshots.
+- `SyncedPRRow` stores both Profile and Connection provenance
+  (`profile_id/profile_snapshot/connection_id/connection_snapshot`) plus `repo_link_id`.
 - `archive_profile()` and `archive_connection()` raise `ArchiveBlockedError` while an
   active repo link depends on the row. Pausing or disabling the repo link first permits
   archive.

@@ -2359,6 +2359,25 @@ async def upsert_synced_pr(data: dict[str, Any]) -> None:
     }
 
     async with async_session() as session:
+        bind = session.get_bind()
+        if bind.dialect.name != "postgresql":
+            existing = (
+                await session.scalars(
+                    select(SyncedPRRow)
+                    .where(SyncedPRRow.platform == values["platform"])
+                    .where(SyncedPRRow.pr_id == values["pr_id"])
+                    .where(SyncedPRRow.repo == values["repo"])
+                    .where(SyncedPRRow.project == values["project"])
+                )
+            ).first()
+            if existing:
+                for key, value in values.items():
+                    setattr(existing, key, value)
+            else:
+                session.add(SyncedPRRow(**values))
+            await session.commit()
+            return
+
         stmt = pg_insert(SyncedPRRow).values(id=uuid.uuid4(), **values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_synced_pr",
