@@ -222,16 +222,9 @@ def test_existing_github_pats_migrate_to_connections():
             {"id": str(uuid.uuid4())},
         )
         ops = Operations(MigrationContext.configure(conn))
-        with (
-            patch.object(migration, "op", ops),
-            patch.object(migration, "_table_exists", lambda table: table in meta.tables),
-            patch.object(
-                migration,
-                "_column_exists",
-                lambda table, column: column in meta.tables[table].c,
-            ),
-        ):
+        with patch.object(migration, "op", ops):
             migration._migrate_github_pats_to_connections()
+            migration._drop_legacy_github_pats()
 
         row = (
             conn.execute(sa.text("SELECT * FROM connections WHERE id = :id"), {"id": pat_id})
@@ -244,5 +237,10 @@ def test_existing_github_pats_migrate_to_connections():
         assert row["token_prefix"] == "fixture-..."
         assert row["health_status"] == "unknown"
         assert bool(row["sync_enabled"]) is True
+        inspector = sa.inspect(conn)
+        assert "github_pats" not in inspector.get_table_names()
+        assert "pat_name" not in {col["name"] for col in inspector.get_columns("reviews")}
+        review = conn.execute(sa.text("SELECT connection_snapshot FROM reviews")).scalar_one()
+        assert "legacy" in review
         assert not hasattr(models, "GithubPatRow")
     engine.dispose()
