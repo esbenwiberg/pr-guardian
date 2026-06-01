@@ -49,6 +49,12 @@ def _add_column(table: str, column: sa.Column) -> None:
         op.add_column(table, column)
 
 
+def _nullable_uuid_reference(column_name: str, target: str) -> sa.Column:
+    if op.get_bind().dialect.name == "sqlite":
+        return sa.Column(column_name, UUID(as_uuid=True), nullable=True)
+    return sa.Column(column_name, UUID(as_uuid=True), sa.ForeignKey(target), nullable=True)
+
+
 def _create_profiles() -> None:
     if _table_exists("profiles"):
         return
@@ -372,85 +378,33 @@ def _migrate_github_pats_to_connections() -> None:
 
 
 def _add_provenance_columns() -> None:
-    uuid_fk = UUID(as_uuid=True)
-    _add_column(
-        "reviews", sa.Column("profile_id", uuid_fk, sa.ForeignKey("profiles.id"), nullable=True)
-    )
+    _add_column("reviews", _nullable_uuid_reference("profile_id", "profiles.id"))
     _add_column("reviews", sa.Column("profile_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "reviews",
-        sa.Column(
-            "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
-        ),
-    )
+    _add_column("reviews", _nullable_uuid_reference("connection_id", "connections.id"))
     _add_column("reviews", sa.Column("connection_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "reviews",
-        sa.Column(
-            "repo_link_id", UUID(as_uuid=True), sa.ForeignKey("repo_links.id"), nullable=True
-        ),
-    )
-    _add_column(
-        "reviews",
-        sa.Column(
-            "candidate_id",
-            UUID(as_uuid=True),
-            sa.ForeignKey("readiness_candidates.id"),
-            nullable=True,
-        ),
-    )
+    _add_column("reviews", _nullable_uuid_reference("repo_link_id", "repo_links.id"))
+    _add_column("reviews", _nullable_uuid_reference("candidate_id", "readiness_candidates.id"))
     _add_column(
         "reviews",
         sa.Column("review_source", sa.String(32), nullable=False, server_default="manual"),
     )
 
-    _add_column(
-        "scans",
-        sa.Column("profile_id", UUID(as_uuid=True), sa.ForeignKey("profiles.id"), nullable=True),
-    )
+    _add_column("scans", _nullable_uuid_reference("profile_id", "profiles.id"))
     _add_column("scans", sa.Column("profile_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "scans",
-        sa.Column(
-            "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
-        ),
-    )
+    _add_column("scans", _nullable_uuid_reference("connection_id", "connections.id"))
     _add_column("scans", sa.Column("connection_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "scans",
-        sa.Column(
-            "repo_link_id", UUID(as_uuid=True), sa.ForeignKey("repo_links.id"), nullable=True
-        ),
-    )
+    _add_column("scans", _nullable_uuid_reference("repo_link_id", "repo_links.id"))
     _add_column(
         "scans", sa.Column("scan_source", sa.String(32), nullable=False, server_default="scan")
     )
 
-    _add_column(
-        "sync_sources",
-        sa.Column(
-            "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
-        ),
-    )
+    _add_column("sync_sources", _nullable_uuid_reference("connection_id", "connections.id"))
     _add_column("sync_sources", sa.Column("connection_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "synced_prs",
-        sa.Column("profile_id", UUID(as_uuid=True), sa.ForeignKey("profiles.id"), nullable=True),
-    )
+    _add_column("synced_prs", _nullable_uuid_reference("profile_id", "profiles.id"))
     _add_column("synced_prs", sa.Column("profile_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "synced_prs",
-        sa.Column(
-            "connection_id", UUID(as_uuid=True), sa.ForeignKey("connections.id"), nullable=True
-        ),
-    )
+    _add_column("synced_prs", _nullable_uuid_reference("connection_id", "connections.id"))
     _add_column("synced_prs", sa.Column("connection_snapshot", _json_type(), nullable=True))
-    _add_column(
-        "synced_prs",
-        sa.Column(
-            "repo_link_id", UUID(as_uuid=True), sa.ForeignKey("repo_links.id"), nullable=True
-        ),
-    )
+    _add_column("synced_prs", _nullable_uuid_reference("repo_link_id", "repo_links.id"))
     _add_column(
         "synced_prs",
         sa.Column("sync_source", sa.String(32), nullable=False, server_default="sync"),
