@@ -284,6 +284,8 @@ async def evaluate_candidate(
     )
     pr = pr or _candidate_pr(candidate)
     adapter = adapter or await _adapter_for_candidate(candidate)
+    assert pr is not None
+    assert adapter is not None
 
     decision = await evaluate_readiness(
         candidate,
