@@ -21,9 +21,11 @@
 - Changed AUTO_APPROVE platform copy to `Guardian cleared`, keeping formal
   platform approval separate from Guardian clearance.
 - Added manual candidate actions in `/api/reviews/candidates/{candidate_id}`:
-  `/start` queues a `manual_bypass` review without marking readiness success;
-  `/override` requires Profile Manager access, confirmation, and reason, writes
-  readiness success, records audit, and starts one review.
+  `/start` atomically claims the candidate with `reason=manual_bypass` and queues
+  a `manual_bypass` review without marking readiness success; `/override`
+  requires Profile Manager access, confirmation, and reason, atomically claims
+  the candidate, then writes readiness success, records audit, and starts one
+  review.
 - Hardened human finalization paths. `/api/reviews/{id}/finalize` and
   `/api/dashboard/reviews/{id}/submit-verdict` reject API keys, use the stored
   current Connection token when `connection_id` exists, fail on archived or
@@ -79,8 +81,9 @@
   `config.side_effects.formal_approve`, and must not run on forks.
 - Manual bypass must not mark readiness success. Override is the path that writes
   readiness success and audit.
-- The human-only dependency allows anonymous dev-admin mode for existing local
-  tests, but rejects `identity.kind == "api_key"` in product paths.
+- The human-only dependency is strict: anonymous callers and API keys are both
+  rejected. Tests that finalize or submit human verdicts now send a masked
+  signed-in user header.
 
 ## Verification
 
