@@ -14,7 +14,11 @@ from pr_guardian.agents.hotspot import HotspotAgent
 from pr_guardian.agents.performance import PerformanceAgent
 from pr_guardian.agents.security_privacy import SecurityPrivacyAgent
 from pr_guardian.agents.test_quality import TestQualityAgent
-from pr_guardian.config.loader import apply_global_settings, load_repo_config
+from pr_guardian.config.loader import apply_global_settings
+from pr_guardian.config.profile_resolver import (
+    resolve_default_profile_config,
+    resolve_profile_snapshot_config,
+)
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import (
@@ -238,8 +242,10 @@ async def _run_pipeline(
 
     # Stage 0: Discovery
     await _update_stage("discovery", "Parsing diff and building context")
-    config = service_config or load_repo_config(repo_path)
-    config = await apply_global_settings(config)
+    if service_config is None:
+        config = (await resolve_default_profile_config()).config
+    else:
+        config = await apply_global_settings(service_config)
 
     language_map = detect_languages(changed_files)
     security_surface = build_security_surface(config.security_surface, changed_files)
@@ -711,6 +717,16 @@ async def run_re_review(
                 pr,
                 comment_mode=original_review.get("comment_mode", "summary"),
             )
+            await storage.set_review_provenance(
+                review_db_id,
+                profile_id=_uuid_or_none(original_review.get("profile_id")),
+                profile_snapshot=original_review.get("profile_snapshot"),
+                connection_id=_uuid_or_none(original_review.get("connection_id")),
+                connection_snapshot=original_review.get("connection_snapshot"),
+                repo_link_id=_uuid_or_none(original_review.get("repo_link_id")),
+                candidate_id=_uuid_or_none(original_review.get("candidate_id")),
+                review_source="re_review",
+            )
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
 
@@ -747,7 +763,8 @@ async def run_re_review(
             except Exception:
                 pass
 
-    await adapter.set_status(pr, "pending", "PR Guardian re-review in progress")
+    if post_comment:
+        await adapter.set_status(pr, "pending", "PR Guardian re-review in progress")
 
     try:
         return await _run_re_review_pipeline(
@@ -792,8 +809,15 @@ async def _run_re_review_pipeline(
     """Inner re-review pipeline."""
     from pr_guardian.models.context import RiskTier
 
-    config = service_config or GuardianConfig()
-    config = await apply_global_settings(config)
+    if service_config is None:
+        config = (
+            await resolve_profile_snapshot_config(
+                original_review.get("profile_snapshot"),
+                original_review.get("connection_snapshot"),
+            )
+        ).config
+    else:
+        config = await apply_global_settings(service_config)
 
     # --- Step 1: Fetch incremental diff ---
     await _update_stage("discovery", "Fetching incremental diff since last review")
@@ -1156,6 +1180,14 @@ def _parse_risk_class(value: str | None) -> RepoRiskClass:
         "critical": RepoRiskClass.CRITICAL,
     }
     return mapping.get(value or "", RepoRiskClass.STANDARD)
+
+
+def _uuid_or_none(value) -> uuid.UUID | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))
 
 
 async def _save_result(storage, review_db_id, result, _emit) -> None:

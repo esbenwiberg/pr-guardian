@@ -26,10 +26,10 @@ pr-guardian serve [--host 0.0.0.0] [--port 8000]
 
 ### `validate`
 
-Validate a `review.yml` configuration file.
+Validate Guardian Profile policy defaults.
 
 ```bash
-pr-guardian validate [--config review.yml]
+pr-guardian validate
 ```
 
 ### `detect-languages`
@@ -47,7 +47,7 @@ git diff --name-only main | pr-guardian detect-languages
 Run triage classification without invoking AI agents. Useful for testing risk classification rules.
 
 ```bash
-pr-guardian dry-run [--config .] [--diff-target main] file1.py file2.ts
+pr-guardian dry-run [--repo-path .] [--diff-target main] file1.py file2.ts
 ```
 
 ---

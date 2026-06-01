@@ -9,6 +9,11 @@ import structlog
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
+from pr_guardian.config.profile_resolver import (
+    ProfileResolutionError,
+    ResolvedProfileConfig,
+    resolve_profile_config,
+)
 from pr_guardian.core.orchestrator import run_review
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
@@ -80,6 +85,7 @@ async def _run_review_background(
     platform_name: str,
     pat_name: str | None = None,
     review_db_id: uuid.UUID | None = None,
+    resolved_profile: ResolvedProfileConfig | None = None,
 ) -> None:
     """Hydrate the PR stub and run the full review pipeline in the background."""
     import traceback
@@ -116,6 +122,7 @@ async def _run_review_background(
         result = await run_review(
             pr,
             adapter,
+            service_config=resolved_profile.config if resolved_profile else None,
             comment_mode=comment_mode,
             base_url=base_url,
             dismissals=dismissals,
@@ -153,14 +160,25 @@ async def manual_review(req: ReviewRequest, request: Request):
     Returns immediately so the caller can track progress via the active reviews panel.
     """
     stub, platform_name = _parse_pr_url(req.pr_url)
+    try:
+        resolved_profile = await _resolve_review_profile(
+            stub,
+            platform_name,
+            connection_name=req.pat_name,
+            require_connection=True,
+        )
+    except ProfileResolutionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
     adapter: PlatformAdapter
-    if platform_name == "github":
-        try:
-            adapter = await create_github_adapter(req.pat_name)
-        except LookupError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-    else:
-        adapter = create_adapter(platform_name)
+    try:
+        adapter = await _create_adapter_for_resolution(
+            platform_name,
+            resolved_profile,
+            fallback_pat_name=req.pat_name,
+        )
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
     if req.dry_run:
         return ReviewResponse(
@@ -182,6 +200,11 @@ async def manual_review(req: ReviewRequest, request: Request):
             comment_mode=req.comment_mode,
             pat_name=req.pat_name,
         )
+        if review_db_id:
+            await storage.set_review_provenance(
+                review_db_id,
+                **resolved_profile.review_provenance(review_source="manual"),
+            )
     except Exception as e:
         log.warning("manual_review_db_create_failed", pr_id=stub.pr_id, error=str(e))
 
@@ -194,6 +217,7 @@ async def manual_review(req: ReviewRequest, request: Request):
             platform_name=platform_name,
             pat_name=req.pat_name,
             review_db_id=review_db_id,
+            resolved_profile=resolved_profile,
         )
     )
 
@@ -250,6 +274,51 @@ def _parse_pr_url(url: str) -> tuple[PlatformPR, str]:
     )
 
 
+async def _resolve_review_profile(
+    stub: PlatformPR,
+    platform_name: str,
+    *,
+    connection_name: str | None = None,
+    require_connection: bool = False,
+) -> ResolvedProfileConfig:
+    org_url = ""
+    project = ""
+    if platform_name == "ado":
+        project = stub.project or ""
+        org_url = f"https://dev.azure.com/{stub.org}" if stub.org else ""
+    return await resolve_profile_config(
+        platform=platform_name,
+        repo=stub.repo,
+        org_url=org_url,
+        project=project,
+        connection_name=connection_name,
+        require_connection=require_connection,
+    )
+
+
+async def _create_adapter_for_resolution(
+    platform_name: str,
+    resolved_profile: ResolvedProfileConfig,
+    *,
+    fallback_pat_name: str | None = None,
+) -> PlatformAdapter:
+    if resolved_profile.connection_id:
+        from pr_guardian.persistence import storage
+
+        token = await storage.get_connection_token(resolved_profile.connection_id)
+        org_url = ""
+        if resolved_profile.connection_snapshot:
+            org_url = resolved_profile.connection_snapshot.get("org_url") or ""
+        return create_adapter(
+            platform_name,
+            token_override=token,
+            org_url_override=org_url or None,
+        )
+    if platform_name == "github":
+        return await create_github_adapter(fallback_pat_name)
+    return create_adapter(platform_name)
+
+
 class RepoReviewRequest(BaseModel):
     repo: str
     platform: str = "github"
@@ -282,6 +351,7 @@ async def _run_repo_review_background(
     *,
     selection: SelectionMode = "all",
     pat_name: str | None = None,
+    resolved_profile: ResolvedProfileConfig | None = None,
 ) -> None:
     """Run a full repo review in the background.
 
@@ -306,6 +376,11 @@ async def _run_repo_review_background(
             review_db_id = await storage.create_review_record(
                 pr, comment_mode="none", pat_name=pat_name
             )
+            if resolved_profile:
+                await storage.set_review_provenance(
+                    review_db_id,
+                    **resolved_profile.review_provenance(review_source="repo_review"),
+                )
             await storage.update_review_stage(review_db_id, "queued", "Building repo diff")
             event_bus.publish(
                 ReviewEvent(
@@ -367,6 +442,7 @@ async def _run_repo_review_background(
         await run_review(
             pr,
             adapter,
+            service_config=resolved_profile.config if resolved_profile else None,
             existing_review_db_id=review_db_id,
             post_comment=False,
             dismissals=None,
@@ -414,16 +490,24 @@ async def manual_repo_review(req: RepoReviewRequest):
         )
 
     adapter: PlatformAdapter
-    if req.platform == "github":
-        try:
-            adapter = await create_github_adapter(req.pat_name)
-        except LookupError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-    else:
-        try:
-            adapter = create_adapter(req.platform)
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=str(e))
+    try:
+        resolved_profile = await resolve_profile_config(
+            platform=req.platform,
+            repo=repo,
+            connection_name=req.pat_name,
+            require_connection=True,
+        )
+        adapter = await _create_adapter_for_resolution(
+            req.platform,
+            resolved_profile,
+            fallback_pat_name=req.pat_name,
+        )
+    except ProfileResolutionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
     max_files = clamp_max_files(req.max_files)
 
@@ -446,6 +530,7 @@ async def manual_repo_review(req: RepoReviewRequest):
             max_files,
             selection=req.selection,
             pat_name=req.pat_name,
+            resolved_profile=resolved_profile,
         )
     )
 

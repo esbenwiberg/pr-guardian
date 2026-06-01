@@ -11,8 +11,12 @@ import structlog
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from pr_guardian.config.loader import apply_global_settings, load_service_defaults
-from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.config.profile_resolver import (
+    ProfileResolutionError,
+    ResolvedProfileConfig,
+    profile_allows_side_effect,
+    resolve_profile_config,
+)
 from pr_guardian.core.maintenance import run_maintenance_scan
 from pr_guardian.core.recent_changes import run_recent_changes_scan
 from pr_guardian.models.scan import ScanType
@@ -104,6 +108,23 @@ class ScanResponse(BaseModel):
     repo: str
 
 
+async def _create_adapter_for_resolution(
+    platform: str,
+    resolved_profile: ResolvedProfileConfig,
+):
+    if resolved_profile.connection_id:
+        token = await storage.get_connection_token(resolved_profile.connection_id)
+        org_url = ""
+        if resolved_profile.connection_snapshot:
+            org_url = resolved_profile.connection_snapshot.get("org_url") or ""
+        return create_adapter(
+            platform,
+            token_override=token,
+            org_url_override=org_url or None,
+        )
+    return create_adapter(platform)
+
+
 # ---------------------------------------------------------------------------
 # Trigger endpoints
 # ---------------------------------------------------------------------------
@@ -118,11 +139,18 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        adapter = create_adapter(req.platform)
+        resolved_profile = await resolve_profile_config(
+            platform=req.platform,
+            repo=repo,
+            require_connection=True,
+        )
+        adapter = await _create_adapter_for_resolution(req.platform, resolved_profile)
+    except ProfileResolutionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
+    config = resolved_profile.config
 
     # Create DB record upfront so we can return scan_id for progress tracking
     scan_db_id: uuid.UUID | None = None
@@ -132,6 +160,10 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
             repo=repo,
             platform=req.platform,
             time_window_days=req.time_window_days,
+        )
+        await storage.set_scan_provenance(
+            scan_db_id,
+            **resolved_profile.scan_provenance(scan_source="scan"),
         )
     except Exception as e:
         log.warning("db_scan_create_failed", error=str(e))
@@ -171,11 +203,18 @@ async def trigger_maintenance_scan(req: MaintenanceScanRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
     try:
-        adapter = create_adapter(req.platform)
+        resolved_profile = await resolve_profile_config(
+            platform=req.platform,
+            repo=repo,
+            require_connection=True,
+        )
+        adapter = await _create_adapter_for_resolution(req.platform, resolved_profile)
+    except ProfileResolutionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
+    config = resolved_profile.config
 
     # Create DB record upfront so we can return scan_id for progress tracking
     scan_db_id: uuid.UUID | None = None
@@ -185,6 +224,10 @@ async def trigger_maintenance_scan(req: MaintenanceScanRequest):
             repo=repo,
             platform=req.platform,
             staleness_months=req.staleness_months,
+        )
+        await storage.set_scan_provenance(
+            scan_db_id,
+            **resolved_profile.scan_provenance(scan_source="scan"),
         )
     except Exception as e:
         log.warning("db_scan_create_failed", error=str(e))
@@ -327,6 +370,11 @@ async def create_scan_issues(scan_id: uuid.UUID, req: CreateIssuesRequest):
     scan = await storage.get_scan(scan_id)
     if not scan:
         raise HTTPException(status_code=404, detail="Scan not found")
+    if not profile_allows_side_effect(scan.get("profile_snapshot"), "scan_issues"):
+        raise HTTPException(
+            status_code=403,
+            detail="Scan issue creation is disabled by the resolved Profile.",
+        )
 
     # Build lookup: finding_id → (agent_name, finding dict)
     finding_map: dict[str, tuple[str, dict]] = {}

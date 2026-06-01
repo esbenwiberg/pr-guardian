@@ -20,17 +20,15 @@ def load_service_defaults() -> dict:
 
 
 def load_repo_config(repo_path: Path) -> GuardianConfig:
-    """Load review.yml from repo root, merge with service defaults."""
+    """Return service defaults for legacy callers.
+
+    Product review and scan paths resolve Profile policy instead. This function
+    deliberately ignores repo-local review.yml files so there is no hidden
+    compatibility path that can override Guardian-owned Profile policy.
+    """
+    _ = repo_path
     base = load_service_defaults()
-
-    repo_config_path = repo_path / "review.yml"
-    if repo_config_path.exists():
-        repo_overrides = yaml.safe_load(repo_config_path.read_text()) or {}
-    else:
-        repo_overrides = {}
-
-    merged = _deep_merge(base, repo_overrides)
-    return GuardianConfig(**merged)
+    return GuardianConfig(**base)
 
 
 async def apply_global_settings(config: GuardianConfig) -> GuardianConfig:
