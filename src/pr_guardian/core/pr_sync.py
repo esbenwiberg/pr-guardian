@@ -350,7 +350,17 @@ async def run_pr_sync() -> None:
     """Single sync pass across all configured platforms."""
     tasks = []
     for connection in await storage.list_broad_sync_connections():
-        token = await storage.get_connection_token(_connection_uuid(connection))
+        try:
+            token = await storage.get_connection_token(_connection_uuid(connection))
+        except Exception as exc:
+            log.warning(
+                "pr_sync_connection_token_resolve_failed",
+                connection_id=connection.get("id", ""),
+                connection_name=connection.get("name", ""),
+                platform=connection.get("platform", ""),
+                error=str(exc),
+            )
+            continue
         if not token:
             log.warning(
                 "pr_sync_connection_missing_token",

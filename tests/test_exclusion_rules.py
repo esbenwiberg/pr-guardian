@@ -515,7 +515,9 @@ class TestMultiPatSync:
 
         assert called_tokens == []
 
-    async def test_run_pr_sync_skips_connection_without_token(self, monkeypatch):
+    async def test_run_pr_sync_skips_connections_with_missing_or_broken_tokens(
+        self, monkeypatch
+    ):
         from pr_guardian.core import pr_sync
 
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -537,11 +539,29 @@ class TestMultiPatSync:
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "name": "broken-token",
+                "platform": "github",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
+            {
+                "id": "44444444-4444-4444-4444-444444444444",
+                "name": "late-good",
+                "platform": "github",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
         ]
 
         async def _token(connection_id):
             if str(connection_id) == "22222222-2222-2222-2222-222222222222":
                 return ""
+            if str(connection_id) == "33333333-3333-3333-3333-333333333333":
+                raise RuntimeError("cannot decrypt token")
+            if str(connection_id) == "44444444-4444-4444-4444-444444444444":
+                return "tok-late-good"
             return "tok-good"
 
         called_tokens: list[str] = []
@@ -559,4 +579,4 @@ class TestMultiPatSync:
         ):
             await pr_sync.run_pr_sync()
 
-        assert called_tokens == ["tok-good"]
+        assert called_tokens == ["tok-good", "tok-late-good"]
