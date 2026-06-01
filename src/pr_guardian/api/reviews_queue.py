@@ -577,10 +577,12 @@ async def override_candidate_readiness(
     review_id, updated = started
     status_posted = True
     try:
-        # Readiness status is the only platform write in the override endpoint;
-        # review result side effects remain gated inside the orchestrator.
-        await adapter.set_readiness_status(
-            pr, "success", f"Guardian readiness overridden: {reason}"
+        # Readiness statuses are always on; route through the readiness status
+        # helper so endpoint code does not own platform-write semantics.
+        from pr_guardian.core.readiness import _post_readiness_status
+
+        status_posted = await _post_readiness_status(
+            adapter, pr, "success", f"Guardian readiness overridden: {reason}"
         )
     except Exception as exc:  # noqa: BLE001
         status_posted = False
