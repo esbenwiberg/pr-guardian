@@ -377,7 +377,7 @@ class TestSyncTimeFilter:
         assert result["pr_created_at"] == "2026-05-01T10:00:00Z"
         assert result["pr_updated_at"] == "2026-05-03T12:00:00Z"
 
-    async def test_github_sync_skips_repos_matching_rule(self):
+    async def test_github_sync_does_not_apply_browse_exclusion_rules(self):
         from pr_guardian.core import pr_sync
 
         adapter = AsyncMock()
@@ -399,6 +399,15 @@ class TestSyncTimeFilter:
             }
         ]
 
+        connection = {
+            "id": "11111111-1111-1111-1111-111111111111",
+            "name": "GitHub Browse",
+            "platform": "github",
+            "org_url": None,
+            "sync_enabled": True,
+            "health_status": "healthy",
+        }
+
         with (
             patch("pr_guardian.platform.github.GitHubAdapter", return_value=adapter),
             patch(
@@ -406,97 +415,146 @@ class TestSyncTimeFilter:
                 AsyncMock(return_value=rules),
             ),
         ):
-            await pr_sync._sync_github("token-xyz")
+            await pr_sync._sync_github("token-xyz", connection)
 
-        # Only the non-skipped repo should have its PRs queried.
+        # Exclusions are browse-only; sync still records what the Connection can see.
         called_repos = [c.args[0] for c in adapter.list_repo_open_prs.call_args_list]
         assert "acme/keep" in called_repos
-        assert "acme/test-skip" not in called_repos
+        assert "acme/test-skip" in called_repos
 
 
 # ---------------------------------------------------------------------------
-# Multi-PAT iteration in run_pr_sync
+# Connection iteration in run_pr_sync
 # ---------------------------------------------------------------------------
 
 
 class TestMultiPatSync:
-    async def test_run_pr_sync_iterates_all_pats(self, monkeypatch):
+    async def test_run_pr_sync_iterates_healthy_sync_connections(self, monkeypatch):
         from pr_guardian.core import pr_sync
 
-        monkeypatch.delenv("GITHUB_TOKEN", raising=False)
-        monkeypatch.delenv("ADO_PAT", raising=False)
-        monkeypatch.delenv("ADO_ORG_URL", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "env-token-must-not-sync")
+        monkeypatch.setenv("ADO_PAT", "ado-env-must-not-sync")
+        monkeypatch.setenv("ADO_ORG_URL", "https://dev.azure.com/env")
 
-        pats = [
-            {"name": "org-a"},
-            {"name": "org-b"},
-            {"name": "org-c"},
+        connections = [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "name": "org-a",
+                "platform": "github",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "name": "org-b",
+                "platform": "github",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
+            {
+                "id": "33333333-3333-3333-3333-333333333333",
+                "name": "ado-org",
+                "platform": "ado",
+                "org_url": "https://dev.azure.com/acme",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
         ]
-        token_map = {"org-a": "tok-a", "org-b": "tok-b", "org-c": "tok-c"}
+        token_map = {
+            "11111111-1111-1111-1111-111111111111": "tok-a",
+            "22222222-2222-2222-2222-222222222222": "tok-b",
+            "33333333-3333-3333-3333-333333333333": "ado-token",
+        }
 
-        async def _resolve(pat_name=None):
-            return token_map[pat_name]
+        async def _token(connection_id):
+            return token_map[str(connection_id)]
+
+        github_tokens: list[str] = []
+        ado_tokens: list[str] = []
+
+        async def _fake_sync_github(token, connection):
+            github_tokens.append(token)
+
+        async def _fake_sync_ado(token, connection):
+            ado_tokens.append(token)
+
+        with (
+            patch(
+                "pr_guardian.core.pr_sync.storage.list_broad_sync_connections",
+                AsyncMock(return_value=connections),
+            ),
+            patch("pr_guardian.core.pr_sync.storage.get_connection_token", side_effect=_token),
+            patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
+            patch("pr_guardian.core.pr_sync._sync_ado", side_effect=_fake_sync_ado),
+        ):
+            await pr_sync.run_pr_sync()
+
+        assert sorted(github_tokens) == ["tok-a", "tok-b"]
+        assert ado_tokens == ["ado-token"]
+
+    async def test_run_pr_sync_does_not_fall_back_to_env(self, monkeypatch):
+        from pr_guardian.core import pr_sync
+
+        monkeypatch.setenv("GITHUB_TOKEN", "env-token")
+        monkeypatch.setenv("ADO_PAT", "ado-env-token")
+        monkeypatch.setenv("ADO_ORG_URL", "https://dev.azure.com/env")
 
         called_tokens: list[str] = []
 
-        async def _fake_sync_github(token, pat_label="env"):
+        async def _fake_sync_github(token, connection):
             called_tokens.append(token)
 
         with (
             patch(
-                "pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=pats)
+                "pr_guardian.core.pr_sync.storage.list_broad_sync_connections",
+                AsyncMock(return_value=[]),
             ),
-            patch("pr_guardian.core.pr_sync.storage.resolve_github_token", side_effect=_resolve),
             patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
         ):
             await pr_sync.run_pr_sync()
 
-        assert sorted(called_tokens) == ["tok-a", "tok-b", "tok-c"]
+        assert called_tokens == []
 
-    async def test_run_pr_sync_falls_back_to_env_when_no_db_pats(self, monkeypatch):
-        from pr_guardian.core import pr_sync
-
-        monkeypatch.setenv("GITHUB_TOKEN", "env-token")
-        monkeypatch.delenv("ADO_PAT", raising=False)
-        monkeypatch.delenv("ADO_ORG_URL", raising=False)
-
-        called_tokens: list[str] = []
-
-        async def _fake_sync_github(token, pat_label="env"):
-            called_tokens.append(token)
-
-        with (
-            patch("pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=[])),
-            patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
-        ):
-            await pr_sync.run_pr_sync()
-
-        assert called_tokens == ["env-token"]
-
-    async def test_run_pr_sync_skips_pat_with_resolve_failure(self, monkeypatch):
+    async def test_run_pr_sync_skips_connection_without_token(self, monkeypatch):
         from pr_guardian.core import pr_sync
 
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
         monkeypatch.delenv("ADO_PAT", raising=False)
         monkeypatch.delenv("ADO_ORG_URL", raising=False)
 
-        pats = [{"name": "good"}, {"name": "broken"}]
+        connections = [
+            {
+                "id": "11111111-1111-1111-1111-111111111111",
+                "name": "good",
+                "platform": "github",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
+            {
+                "id": "22222222-2222-2222-2222-222222222222",
+                "name": "missing-token",
+                "platform": "github",
+                "sync_enabled": True,
+                "health_status": "healthy",
+            },
+        ]
 
-        async def _resolve(pat_name=None):
-            if pat_name == "broken":
-                raise LookupError("corrupt")
+        async def _token(connection_id):
+            if str(connection_id) == "22222222-2222-2222-2222-222222222222":
+                return ""
             return "tok-good"
 
         called_tokens: list[str] = []
 
-        async def _fake_sync_github(token, pat_label="env"):
+        async def _fake_sync_github(token, connection):
             called_tokens.append(token)
 
         with (
             patch(
-                "pr_guardian.core.pr_sync.storage.list_github_pats", AsyncMock(return_value=pats)
+                "pr_guardian.core.pr_sync.storage.list_broad_sync_connections",
+                AsyncMock(return_value=connections),
             ),
-            patch("pr_guardian.core.pr_sync.storage.resolve_github_token", side_effect=_resolve),
+            patch("pr_guardian.core.pr_sync.storage.get_connection_token", side_effect=_token),
             patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
         ):
             await pr_sync.run_pr_sync()
