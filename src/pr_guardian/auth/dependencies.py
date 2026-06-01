@@ -36,6 +36,16 @@ async def require_signed_in(request: Request) -> Identity:
     return identity
 
 
+async def require_human_signed_in(request: Request) -> Identity:
+    """Require a signed-in human user. API keys cannot perform human actions."""
+    identity = _get_identity(request)
+    if identity.kind == "anonymous" and not identity.is_admin:
+        raise HTTPException(401, "Signed-in access required")
+    if identity.kind == "api_key":
+        raise HTTPException(403, "Human user required")
+    return identity
+
+
 async def require_profile_manager(request: Request) -> Identity:
     """Require admin or Profile Manager access. API keys are never accepted."""
     identity = _get_identity(request)

@@ -1173,6 +1173,135 @@ async def record_candidate_transition(
         return _transition_to_dict(row)
 
 
+async def try_start_candidate_review(
+    candidate_id: uuid.UUID,
+    pr: PlatformPR,
+    *,
+    source: str = "automatic",
+    actor: str = "system",
+    reason: str = "ready",
+    readiness_snapshot: dict[str, Any] | None = None,
+    comment_mode: str = "summary",
+    review_source: str | None = None,
+) -> tuple[uuid.UUID, dict[str, Any]] | None:
+    """Atomically move a ready candidate to reviewing and create its review row.
+
+    Returns ``None`` when another worker already claimed the candidate.
+    """
+    if reason != "ready" and source == "automatic":
+        raise ValueError("Automatic candidate reviews can only start from ready candidates")
+
+    async with async_session() as session:
+        existing = await session.get(ReadinessCandidateRow, candidate_id)
+        previous_state = existing.state if existing else None
+        result = await session.execute(
+            sa_update(ReadinessCandidateRow)
+            .where(ReadinessCandidateRow.id == candidate_id)
+            .where(ReadinessCandidateRow.state.in_(("waiting", "blocked", "error")))
+            .values(state="reviewing", reason=reason, updated_at=_now())
+        )
+        if result.rowcount != 1:
+            await session.rollback()
+            return None
+
+        candidate = await session.get(ReadinessCandidateRow, candidate_id)
+        if candidate is None:
+            await session.rollback()
+            return None
+        await session.refresh(candidate)
+        candidate.state = "reviewing"
+        candidate.reason = reason
+        candidate.readiness_snapshot = readiness_snapshot or candidate.readiness_snapshot or {}
+
+        snapshot = candidate.readiness_snapshot or {}
+        transition = ReadinessCandidateTransitionRow(
+            candidate_id=candidate_id,
+            from_state=previous_state,
+            to_state="reviewing",
+            source=source,
+            actor=actor,
+            reason=reason,
+            readiness_snapshot=snapshot,
+        )
+        session.add(transition)
+        review = ReviewRow(
+            pr_id=pr.pr_id,
+            repo=pr.repo,
+            platform=pr.platform.value,
+            author=pr.author,
+            title=pr.title,
+            source_branch=pr.source_branch,
+            target_branch=pr.target_branch,
+            head_commit_sha=pr.head_commit_sha or candidate.head_sha,
+            pr_url=pr.pr_url or candidate.pr_url,
+            stage="queued",
+            comment_mode=comment_mode,
+            profile_id=candidate.profile_id,
+            profile_snapshot=candidate.profile_snapshot,
+            connection_id=candidate.connection_id,
+            connection_snapshot=candidate.connection_snapshot,
+            repo_link_id=candidate.repo_link_id,
+            candidate_id=candidate.id,
+            review_source=review_source or source,
+        )
+        session.add(review)
+        await session.commit()
+        await session.refresh(review)
+        await session.refresh(candidate)
+        return review.id, _candidate_to_dict(candidate)
+
+
+async def mark_candidate_reviewed_for_review(review_id: uuid.UUID) -> bool:
+    """Mark the linked candidate reviewed when the completed review still matches its SHA."""
+    async with async_session() as session:
+        review = await session.get(ReviewRow, review_id)
+        if review is None or review.candidate_id is None:
+            return False
+        candidate = await session.get(ReadinessCandidateRow, review.candidate_id)
+        if candidate is None or candidate.state != "reviewing":
+            return False
+        if candidate.head_sha != review.head_commit_sha:
+            return False
+        transition = ReadinessCandidateTransitionRow(
+            candidate_id=candidate.id,
+            from_state=candidate.state,
+            to_state="reviewed",
+            source="review_completion",
+            actor="guardian",
+            reason="review_completed",
+            readiness_snapshot=candidate.readiness_snapshot or {},
+        )
+        candidate.state = "reviewed"
+        candidate.reason = "review_completed"
+        candidate.updated_at = _now()
+        session.add(transition)
+        await session.commit()
+        return True
+
+
+async def record_profile_audit_event(
+    *,
+    actor: str,
+    action: str,
+    target_type: str,
+    target_id: uuid.UUID | None = None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+) -> uuid.UUID:
+    async with async_session() as session:
+        row = ProfileAuditEventRow(
+            actor=actor,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            before=before,
+            after=after or {},
+        )
+        session.add(row)
+        await session.commit()
+        return row.id
+
+
 async def list_candidate_transitions(candidate_id: uuid.UUID) -> list[dict[str, Any]]:
     async with async_session() as session:
         rows = (

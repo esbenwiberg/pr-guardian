@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import asyncio
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -262,6 +263,7 @@ async def evaluate_candidate(
     source: str = "reconciler",
     adapter: PlatformAdapter | None = None,
     pr: PlatformPR | None = None,
+    start_review: bool = True,
 ) -> dict[str, Any]:
     candidate = await storage.get_readiness_candidate_by_id(candidate_id)
     if candidate is None:
@@ -311,6 +313,15 @@ async def evaluate_candidate(
             "status_write_failed",
             {**decision.snapshot, "status_write": {"state": status_state, "ok": False}},
         )
+    if decision.ready and start_review:
+        started = await _start_automatic_review(candidate_id, pr, adapter, source, decision)
+        if started is not None:
+            return started
+        updated = await storage.get_readiness_candidate_by_id(candidate_id)
+        if updated is None:
+            raise LookupError(f"Readiness candidate not found after handoff: {candidate_id}")
+        return updated
+
     if candidate["state"] != decision.state or candidate.get("reason") != decision.reason:
         await storage.record_candidate_transition(
             candidate_id,
@@ -333,6 +344,56 @@ async def evaluate_candidate(
     if updated is None:
         raise LookupError(f"Readiness candidate not found after update: {candidate_id}")
     return updated
+
+
+async def _start_automatic_review(
+    candidate_id: uuid.UUID,
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    source: str,
+    decision: ReadinessDecision,
+) -> dict[str, Any] | None:
+    started = await storage.try_start_candidate_review(
+        candidate_id,
+        pr,
+        source=source,
+        actor=source,
+        reason=decision.reason,
+        readiness_snapshot=decision.snapshot,
+        comment_mode="summary",
+        review_source="automatic",
+    )
+    if started is None:
+        return None
+    review_id, candidate = started
+
+    async def _run() -> None:
+        try:
+            from pr_guardian.config.profile_resolver import resolve_profile_snapshot_config
+            from pr_guardian.core.orchestrator import run_review
+
+            resolved = await resolve_profile_snapshot_config(
+                candidate.get("profile_snapshot"),
+                candidate.get("connection_snapshot"),
+            )
+            await run_review(
+                pr,
+                adapter,
+                service_config=resolved.config,
+                existing_review_db_id=review_id,
+                comment_mode="summary",
+                manual_comment_override=False,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "automatic_candidate_review_failed",
+                candidate_id=str(candidate_id),
+                review_id=str(review_id),
+                error=str(exc),
+            )
+
+    asyncio.create_task(_run())
+    return candidate
 
 
 async def evaluate_readiness(

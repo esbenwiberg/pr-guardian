@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from pr_guardian.auth.dependencies import require_admin
+from pr_guardian.auth.dependencies import require_admin, require_human_signed_in
 from pr_guardian.auth.identity import Identity
 
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
@@ -802,7 +802,11 @@ def _build_verdict_body(
 
 
 @router.post("/reviews/{review_id}/submit-verdict")
-async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
+async def submit_verdict(
+    review_id: uuid.UUID,
+    body: SubmitVerdictRequest,
+    identity=Depends(require_human_signed_in),
+):
     """Post the reviewer's final verdict back to the platform (GitHub / ADO)
     and record it on the review for audit. Used by the wizard's final step."""
     if body.verdict not in _VALID_VERDICTS:
@@ -850,11 +854,25 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
         )
 
     try:
-        adapter = (
-            await create_github_adapter(review.get("pat_name"))
-            if platform_str == "github"
-            else create_adapter(platform_str)
-        )
+        connection_id = review.get("connection_id")
+        if connection_id:
+            connection = await storage.get_connection(uuid.UUID(str(connection_id)))
+            if not connection or connection.get("archived_at"):
+                raise HTTPException(409, "Stored Connection is archived or inaccessible")
+            token = await storage.get_connection_token(uuid.UUID(str(connection_id)))
+            if not token:
+                raise HTTPException(409, "Stored Connection has no accessible token")
+            adapter = create_adapter(
+                platform_str,
+                token_override=token,
+                org_url_override=connection.get("org_url") or None,
+            )
+        else:
+            adapter = (
+                await create_github_adapter(review.get("pat_name"))
+                if platform_str == "github"
+                else create_adapter(platform_str)
+            )
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     decision_counts = _summarise_decisions(review)
@@ -940,6 +958,7 @@ async def submit_verdict(review_id: uuid.UUID, body: SubmitVerdictRequest):
             "platform_actions": actions,
             "posted": posted,
             "error": error,
+            "actor_email": identity.email or identity.display_name,
             "at": datetime.now(timezone.utc).isoformat(),
         },
     )

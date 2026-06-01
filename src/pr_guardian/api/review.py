@@ -128,6 +128,7 @@ async def _run_review_background(
             dismissals=dismissals,
             pat_name=pat_name,
             existing_review_db_id=review_db_id,
+            manual_comment_override=True,
         )
         if result is not None and dismissals is not None:
             from pr_guardian.persistence.storage import infer_fixes, finding_signature as _fsig
