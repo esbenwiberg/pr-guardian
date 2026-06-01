@@ -54,14 +54,17 @@ async def lifespan(app: FastAPI):
         # Start PR sync background loop
         import asyncio
         from pr_guardian.core.pr_sync import pr_sync_loop
+        from pr_guardian.core.readiness_reconciler import readiness_reconciler_loop
 
         sync_task = asyncio.create_task(pr_sync_loop())
+        readiness_task = asyncio.create_task(readiness_reconciler_loop())
         yield
-        sync_task.cancel()
-        try:
-            await sync_task
-        except asyncio.CancelledError:
-            pass
+        for task in (sync_task, readiness_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await close_db()
     else:
         log.info(

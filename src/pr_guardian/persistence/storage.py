@@ -872,6 +872,44 @@ async def get_repo_link(repo_link_id: uuid.UUID) -> dict[str, Any] | None:
         return _repo_link_to_dict(row) if row else None
 
 
+async def get_active_repo_link_for_repo(
+    *,
+    platform: str,
+    repo: str,
+    org_url: str = "",
+    project: str = "",
+    require_auto_review: bool = False,
+) -> dict[str, Any] | None:
+    """Return the active exact repo link for a platform repository identity."""
+    normalized_platform = platform.lower().strip()
+    owner, _, name = repo.partition("/")
+    if not name:
+        owner, name = "", owner
+    if normalized_platform == "github":
+        canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+    else:
+        repo_name = name or owner
+        repo_project = project or (owner if name else "")
+        canonical = _canonical_repo_key(
+            platform,
+            org_url=org_url,
+            project=repo_project,
+            repo_name=repo_name,
+        )
+    async with async_session() as session:
+        query = (
+            select(RepoLinkRow)
+            .where(func.lower(RepoLinkRow.platform) == normalized_platform)
+            .where(RepoLinkRow.canonical_repo_key == canonical)
+            .where(RepoLinkRow.archived_at.is_(None))
+        )
+        if require_auto_review:
+            query = query.where(RepoLinkRow.auto_review_enabled.is_(True))
+            query = query.where(RepoLinkRow.paused.is_(False))
+        row = await session.scalar(query)
+        return _repo_link_to_dict(row) if row else None
+
+
 async def list_repo_links(*, include_archived: bool = False) -> list[dict[str, Any]]:
     async with async_session() as session:
         query = select(RepoLinkRow).order_by(RepoLinkRow.platform, RepoLinkRow.canonical_repo_key)
@@ -1045,6 +1083,60 @@ async def get_readiness_candidate(
     async with async_session() as session:
         row = await session.scalar(query)
         return _candidate_to_dict(row) if row else None
+
+
+async def get_readiness_candidate_by_id(candidate_id: uuid.UUID) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(ReadinessCandidateRow, candidate_id)
+        return _candidate_to_dict(row) if row else None
+
+
+async def list_active_readiness_candidates(
+    *,
+    platform: str | None = None,
+    repo: str | None = None,
+    pr_id: str | None = None,
+    head_sha: str | None = None,
+    states: list[str] | tuple[str, ...] | set[str] | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List non-terminal readiness candidates for webhook routing and reconciliation."""
+    async with async_session() as session:
+        query = select(ReadinessCandidateRow).order_by(ReadinessCandidateRow.updated_at.asc())
+        if platform:
+            query = query.where(func.lower(ReadinessCandidateRow.platform) == platform.lower())
+        if repo:
+            owner, _, name = repo.partition("/")
+            if platform and platform.lower() == "github" and name:
+                canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+                query = query.where(ReadinessCandidateRow.canonical_repo_key == canonical)
+            else:
+                query = query.where(func.lower(ReadinessCandidateRow.repo) == repo.lower())
+        if pr_id:
+            query = query.where(ReadinessCandidateRow.pr_id == pr_id)
+        if head_sha:
+            query = query.where(ReadinessCandidateRow.head_sha == head_sha)
+        if states:
+            query = query.where(ReadinessCandidateRow.state.in_(tuple(states)))
+        else:
+            query = query.where(ReadinessCandidateRow.state.in_(("waiting", "blocked", "error")))
+        rows = (await session.scalars(query.limit(limit))).all()
+        return [_candidate_to_dict(row) for row in rows]
+
+
+async def list_recoverable_readiness_candidates(*, limit: int = 100) -> list[dict[str, Any]]:
+    recoverable_reasons = ("", "checks_pending", "checks_failed", "checks_timeout", "archmap_wait")
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(ReadinessCandidateRow)
+                .where(ReadinessCandidateRow.state.in_(("waiting", "blocked")))
+                .where(ReadinessCandidateRow.reason.in_(recoverable_reasons))
+                .order_by(ReadinessCandidateRow.updated_at.asc())
+                .limit(limit)
+            )
+        ).all()
+        return [_candidate_to_dict(row) for row in rows]
 
 
 async def record_candidate_transition(

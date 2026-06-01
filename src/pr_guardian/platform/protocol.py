@@ -1,9 +1,32 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, PlatformPR
+
+
+@dataclass(frozen=True)
+class PlatformPRMetadata:
+    """Platform facts that affect readiness but are not review quality signals."""
+
+    head_sha: str
+    draft: bool = False
+    fork: bool = False
+    closed: bool = False
+    merged: bool = False
+
+
+@dataclass(frozen=True)
+class PlatformReadinessSignal:
+    """One visible automated platform check, status, or policy."""
+
+    name: str
+    state: str
+    source: str
+    url: str = ""
+    description: str = ""
 
 
 class PlatformAdapter(Protocol):
@@ -33,6 +56,26 @@ class PlatformAdapter(Protocol):
         self, pr: PlatformPR, state: str, description: str, context: str = "pr-guardian"
     ) -> None:
         """Set a commit status check."""
+        ...
+
+    async def fetch_pr_metadata(self, pr: PlatformPR) -> PlatformPRMetadata:
+        """Fetch PR metadata used by readiness evaluation."""
+        ...
+
+    async def fetch_readiness_signals(self, pr: PlatformPR) -> list[PlatformReadinessSignal]:
+        """Fetch visible automated checks/statuses/policies for the PR head SHA."""
+        ...
+
+    async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
+        """Write Guardian's readiness status."""
+        ...
+
+    async def set_review_status(self, pr: PlatformPR, state: str, description: str) -> None:
+        """Write Guardian's review execution/result status."""
+        ...
+
+    async def find_archmap_artifact(self, pr: PlatformPR, head_sha: str) -> bool:
+        """Return whether the platform exposes the archmap artifact for the head SHA."""
         ...
 
     async def request_reviewers(self, pr: PlatformPR, group: str) -> None:
