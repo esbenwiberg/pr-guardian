@@ -61,31 +61,60 @@ function statusLabel(pr) {
   return pr.approval_status || 'pending';
 }
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;',
+  }[char]));
+}
+
+function safePrUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' || url.protocol === 'http:' ? url.toString() : '#';
+  } catch {
+    return '#';
+  }
+}
+
 function render(items, total) {
   countEl.textContent = `${total} open PR${total === 1 ? '' : 's'}`;
   loadingEl.classList.add('hidden');
   emptyEl.classList.toggle('hidden', items.length > 0);
-  listEl.innerHTML = items.map(pr => `
-    <a class="block px-5 py-4 hover:bg-slate-800/40 transition-colors" href="${pr.pr_url || '#'}" target="_blank" rel="noopener">
+  listEl.innerHTML = items.map(pr => {
+    const href = safePrUrl(pr.pr_url);
+    const repo = escapeHtml(pr.repo || 'unknown repo');
+    const title = escapeHtml(pr.title || 'Untitled pull request');
+    const author = escapeHtml(pr.author_display || pr.author || 'unknown author');
+    const sourceBranch = escapeHtml(pr.source_branch || 'unknown branch');
+    const targetBranch = escapeHtml(pr.target_branch || 'target');
+    const status = escapeHtml(statusLabel(pr));
+    const connectionName = escapeHtml(pr.connection_snapshot?.name || 'synced connection');
+    return `
+    <a class="block px-5 py-4 hover:bg-slate-800/40 transition-colors" href="${href}" target="_blank" rel="noopener">
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2 text-xs text-slate-500 mb-1">
-            <span class="font-semibold text-slate-300">${platformLabel(pr.platform)}</span>
-            <span>${pr.repo || 'unknown repo'}</span>
-            <span>#${pr.pr_id || ''}</span>
+            <span class="font-semibold text-slate-300">${escapeHtml(platformLabel(pr.platform))}</span>
+            <span>${repo}</span>
+            <span>#${escapeHtml(pr.pr_id || '')}</span>
           </div>
-          <div class="text-sm font-medium text-slate-100 truncate">${pr.title || 'Untitled pull request'}</div>
+          <div class="text-sm font-medium text-slate-100 truncate">${title}</div>
           <div class="text-xs text-slate-500 mt-1">
-            ${pr.author_display || pr.author || 'unknown author'} · ${pr.source_branch || 'unknown branch'} -> ${pr.target_branch || 'target'}
+            ${author} &middot; ${sourceBranch} -> ${targetBranch}
           </div>
         </div>
         <div class="shrink-0 text-right">
-          <div class="text-xs text-slate-300">${statusLabel(pr)}</div>
-          <div class="text-2xs text-slate-600 mt-1">${pr.connection_snapshot?.name || 'synced connection'}</div>
+          <div class="text-xs text-slate-300">${status}</div>
+          <div class="text-2xs text-slate-600 mt-1">${connectionName}</div>
         </div>
       </div>
     </a>
-  `).join('');
+  `;
+  }).join('');
 }
 
 async function loadPullRequests() {
