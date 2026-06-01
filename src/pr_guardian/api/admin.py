@@ -33,6 +33,9 @@ async def whoami(identity: Identity = Depends(require_admin)):
         "key_name": identity.key_name,
         "scopes": identity.scopes,
         "is_admin": identity.is_admin,
+        "can_manage_profiles": bool(
+            identity.kind != "api_key" and (identity.is_admin or identity.can_manage_profiles)
+        ),
         "display_name": identity.display_name,
     }
 

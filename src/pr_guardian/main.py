@@ -14,6 +14,7 @@ from pr_guardian.api.dashboard import router as dashboard_api_router
 from pr_guardian.api.dashboard_page import router as dashboard_page_router
 from pr_guardian.api.health_api import router as health_router
 from pr_guardian.api.pr_dashboard_api import router as pr_dashboard_router
+from pr_guardian.api.profiles import router as profiles_router
 from pr_guardian.api.review import router as review_router
 from pr_guardian.api.reviews_queue import router as reviews_queue_router
 from pr_guardian.api.scans import router as scans_router
@@ -86,6 +87,7 @@ app.include_router(scans_router)
 app.include_router(dashboard_api_router)
 app.include_router(dashboard_page_router)
 app.include_router(pr_dashboard_router)
+app.include_router(profiles_router)
 app.include_router(admin_router)
 app.include_router(agent_router)
 

@@ -90,13 +90,35 @@ def _safe_token_prefix(prefix: str | None) -> str:
     return prefix[:8] + "..."
 
 
+def _secretish_key(key: str) -> bool:
+    lowered = key.lower()
+    if any(marker in lowered for marker in ("token", "secret", "password", "api_key")):
+        return True
+    return lowered in {"pat", "authorization"} or lowered.endswith("_pat")
+
+
+def _redact_for_audit(value: Any, *, key: str = "") -> Any:
+    if key and _secretish_key(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {str(k): _redact_for_audit(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_for_audit(item) for item in value]
+    if isinstance(value, str) and value.lower().startswith(("bearer ", "token ")):
+        return "[redacted]"
+    return value
+
+
 def _audit_diff(before: dict[str, Any] | None, after: dict[str, Any] | None) -> dict[str, Any]:
-    """Build a compact field-level diff from already-redacted DTOs."""
+    """Build a compact field-level diff from redacted DTOs."""
     before = before or {}
     after = after or {}
     fields = sorted(set(before) | set(after))
     return {
-        key: {"before": before.get(key), "after": after.get(key)}
+        key: {
+            "before": _redact_for_audit(before.get(key), key=key),
+            "after": _redact_for_audit(after.get(key), key=key),
+        }
         for key in fields
         if before.get(key) != after.get(key)
     }
@@ -325,13 +347,15 @@ async def create_profile(
     async with async_session() as session:
         session.add(row)
         await session.flush()
+        audit_before, audit_after = _audit_before_after(None, _profile_to_dict(row))
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
                 action="profile.created",
                 target_type="profile",
                 target_id=row.id,
-                after=_profile_to_dict(row),
+                before=audit_before,
+                after=audit_after,
             )
         )
         await session.commit()
@@ -339,10 +363,57 @@ async def create_profile(
         return _profile_to_dict(row)
 
 
+async def list_profiles(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(ProfileRow).order_by(ProfileRow.is_default.desc(), ProfileRow.name)
+        if not include_archived:
+            query = query.where(ProfileRow.archived_at.is_(None))
+        rows = (await session.scalars(query)).all()
+        return [_profile_to_dict(row) for row in rows]
+
+
 async def get_profile(profile_id: uuid.UUID) -> dict[str, Any] | None:
     async with async_session() as session:
         row = await session.get(ProfileRow, profile_id)
         return _profile_to_dict(row) if row else None
+
+
+async def update_profile(
+    profile_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    settings: dict[str, Any] | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(ProfileRow, profile_id)
+        if row is None:
+            return None
+        before = _profile_to_dict(row)
+        if name is not None:
+            row.name = name
+        if description is not None:
+            row.description = description
+        if settings is not None:
+            row.settings = settings
+        row.updated_by = actor
+        row.updated_at = _now()
+        after = _profile_to_dict(row)
+        audit_before, audit_after = _audit_before_after(before, after)
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="profile.updated",
+                target_type="profile",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _profile_to_dict(row)
 
 
 async def archive_profile(profile_id: uuid.UUID, *, actor: str = "system") -> bool:
@@ -368,14 +439,15 @@ async def archive_profile(profile_id: uuid.UUID, *, actor: str = "system") -> bo
         row.archived_at = _now()
         row.updated_by = actor
         row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _profile_to_dict(row))
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
                 action="profile.archived",
                 target_type="profile",
                 target_id=row.id,
-                before=before,
-                after=_profile_to_dict(row),
+                before=audit_before,
+                after=audit_after,
             )
         )
         await session.commit()
@@ -395,8 +467,6 @@ async def create_connection(
     is_default: bool = False,
     actor: str = "system",
 ) -> dict[str, Any]:
-    from sqlalchemy import update as sa_update
-
     from pr_guardian.persistence.crypto import encrypt
 
     async with async_session() as session:
@@ -423,13 +493,15 @@ async def create_connection(
         )
         session.add(row)
         await session.flush()
+        audit_before, audit_after = _audit_before_after(None, _connection_to_dict(row))
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
                 action="connection.created",
                 target_type="connection",
                 target_id=row.id,
-                after=_connection_to_dict(row),
+                before=audit_before,
+                after=audit_after,
             )
         )
         await session.commit()
@@ -437,10 +509,108 @@ async def create_connection(
         return _connection_to_dict(row)
 
 
+async def list_connections(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(ConnectionRow).order_by(ConnectionRow.platform, ConnectionRow.name)
+        if not include_archived:
+            query = query.where(ConnectionRow.archived_at.is_(None))
+        rows = (await session.scalars(query)).all()
+        return [_connection_to_dict(row) for row in rows]
+
+
 async def get_connection(connection_id: uuid.UUID) -> dict[str, Any] | None:
     async with async_session() as session:
         row = await session.get(ConnectionRow, connection_id)
         return _connection_to_dict(row) if row else None
+
+
+async def get_connection_token(connection_id: uuid.UUID) -> str:
+    from pr_guardian.persistence.crypto import decrypt
+
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        if row is None or row.encrypted_token is None:
+            return ""
+        return decrypt(row.encrypted_token)
+
+
+async def update_connection(
+    connection_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    platform: str | None = None,
+    token: str | None = None,
+    org_url: str | None = None,
+    description: str | None = None,
+    sync_enabled: bool | None = None,
+    health_status: str | None = None,
+    health_message: str | None = None,
+    health_checked_at: datetime | None = None,
+    is_default: bool | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    from pr_guardian.persistence.crypto import encrypt
+
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        if row is None:
+            return None
+        before = _connection_to_dict(row)
+        if sync_enabled is True and health_status != "healthy" and row.health_status != "healthy":
+            raise HealthGateError("Connection must validate healthy before sync can be enabled")
+        new_platform = platform.strip().lower() if platform is not None else row.platform
+        if is_default is True and new_platform == "github":
+            await session.execute(
+                sa_update(ConnectionRow)
+                .where(ConnectionRow.platform == "github")
+                .where(ConnectionRow.id != connection_id)
+                .values(is_default=False)
+            )
+        if name is not None:
+            row.name = name
+        if platform is not None:
+            row.platform = new_platform
+        if token is not None:
+            row.encrypted_token = encrypt(token)
+            row.token_prefix = _token_prefix(token)
+        if org_url is not None:
+            row.org_url = org_url
+        if description is not None:
+            row.description = description
+        if sync_enabled is not None:
+            row.sync_enabled = sync_enabled
+        if health_status is not None:
+            row.health_status = health_status
+        if health_message is not None:
+            row.health_message = health_message
+        if health_checked_at is not None:
+            row.health_checked_at = health_checked_at
+        if is_default is not None:
+            row.is_default = is_default
+        row.updated_by = actor
+        row.updated_at = _now()
+        after = _connection_to_dict(row)
+        audit_before, audit_after = _audit_before_after(before, after)
+        if token is not None and audit_after is not None:
+            diff = audit_after.setdefault("diff", {})
+            fields = audit_after.setdefault("fields", {})
+            before_fields = audit_before.setdefault("fields", {}) if audit_before else {}
+            before_fields["token_secret"] = "changed"
+            fields["token_secret"] = "changed"
+            diff["token_secret"] = {"before": "changed", "after": "changed"}
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="connection.updated",
+                target_type="connection",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _connection_to_dict(row)
 
 
 async def archive_connection(connection_id: uuid.UUID, *, actor: str = "system") -> bool:
@@ -464,14 +634,15 @@ async def archive_connection(connection_id: uuid.UUID, *, actor: str = "system")
         row.archived_at = _now()
         row.updated_by = actor
         row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _connection_to_dict(row))
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
                 action="connection.archived",
                 target_type="connection",
                 target_id=row.id,
-                before=before,
-                after=_connection_to_dict(row),
+                before=audit_before,
+                after=audit_after,
             )
         )
         await session.commit()
@@ -515,6 +686,10 @@ async def create_repo_link(
                 "Repo link platform must match the selected Connection platform "
                 f"({platform!r} != {connection.platform!r})"
             )
+        if connection.health_status != "healthy":
+            raise HealthGateError(
+                "Connection must validate healthy before it can be used for repo links"
+            )
 
         row = RepoLinkRow(
             platform=platform,
@@ -533,13 +708,15 @@ async def create_repo_link(
         )
         session.add(row)
         await session.flush()
+        audit_before, audit_after = _audit_before_after(None, _repo_link_to_dict(row))
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
                 action="repo_link.created",
                 target_type="repo_link",
                 target_id=row.id,
-                after=_repo_link_to_dict(row),
+                before=audit_before,
+                after=audit_after,
             )
         )
         await session.commit()
@@ -574,16 +751,99 @@ async def update_repo_link_state(
                 raise ArchiveBlockedError(
                     "Cannot activate repo link while its Connection is archived or missing"
                 )
+            if connection.health_status != "healthy":
+                raise HealthGateError(
+                    "Connection must validate healthy before auto-review can be enabled"
+                )
         row.updated_by = actor
         row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _repo_link_to_dict(row))
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
                 action="repo_link.updated",
                 target_type="repo_link",
                 target_id=row.id,
-                before=before,
-                after=_repo_link_to_dict(row),
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _repo_link_to_dict(row)
+
+
+async def update_repo_link(
+    repo_link_id: uuid.UUID,
+    *,
+    profile_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
+    repo_url: str | None = None,
+    auto_review_enabled: bool | None = None,
+    paused: bool | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(RepoLinkRow, repo_link_id)
+        if row is None:
+            return None
+        before = _repo_link_to_dict(row)
+        if profile_id is not None:
+            profile = await session.get(ProfileRow, profile_id)
+            if profile is None:
+                raise LookupError(f"Profile not found: {profile_id}")
+            if profile.archived_at is not None:
+                raise ArchiveBlockedError("Cannot link a repository to an archived Profile")
+            row.profile_id = profile_id
+        if connection_id is not None:
+            connection = await session.get(ConnectionRow, connection_id)
+            if connection is None:
+                raise LookupError(f"Connection not found: {connection_id}")
+            if connection.archived_at is not None:
+                raise ArchiveBlockedError("Cannot link a repository to an archived Connection")
+            if connection.health_status != "healthy":
+                raise HealthGateError(
+                    "Connection must validate healthy before it can be used for repo links"
+                )
+            if connection.platform.lower().strip() != row.platform.lower().strip():
+                raise ValueError(
+                    "Repo link platform must match the selected Connection platform "
+                    f"({row.platform!r} != {connection.platform!r})"
+                )
+            row.connection_id = connection_id
+        if repo_url is not None:
+            row.repo_url = repo_url
+        if auto_review_enabled is not None:
+            row.auto_review_enabled = auto_review_enabled
+        if paused is not None:
+            row.paused = paused
+        if row.auto_review_enabled and not row.paused:
+            profile = await session.get(ProfileRow, row.profile_id)
+            connection = await session.get(ConnectionRow, row.connection_id)
+            if profile is None or profile.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Profile is archived or missing"
+                )
+            if connection is None or connection.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Connection is archived or missing"
+                )
+            if connection.health_status != "healthy":
+                raise HealthGateError(
+                    "Connection must validate healthy before auto-review can be enabled"
+                )
+        row.updated_by = actor
+        row.updated_at = _now()
+        after = _repo_link_to_dict(row)
+        audit_before, audit_after = _audit_before_after(before, after)
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="repo_link.updated",
+                target_type="repo_link",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
             )
         )
         await session.commit()
@@ -597,6 +857,39 @@ async def get_repo_link(repo_link_id: uuid.UUID) -> dict[str, Any] | None:
         return _repo_link_to_dict(row) if row else None
 
 
+async def list_repo_links(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(RepoLinkRow).order_by(RepoLinkRow.platform, RepoLinkRow.canonical_repo_key)
+        if not include_archived:
+            query = query.where(RepoLinkRow.archived_at.is_(None))
+        rows = (await session.scalars(query)).all()
+        return [_repo_link_to_dict(row) for row in rows]
+
+
+async def archive_repo_link(repo_link_id: uuid.UUID, *, actor: str = "system") -> bool:
+    async with async_session() as session:
+        row = await session.get(RepoLinkRow, repo_link_id)
+        if row is None:
+            return False
+        before = _repo_link_to_dict(row)
+        row.archived_at = _now()
+        row.updated_by = actor
+        row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _repo_link_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="repo_link.archived",
+                target_type="repo_link",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        return True
+
+
 async def add_profile_manager(email: str, *, added_by: str = "system") -> bool:
     async with async_session() as session:
         key = email.lower().strip()
@@ -605,6 +898,56 @@ async def add_profile_manager(email: str, *, added_by: str = "system") -> bool:
         session.add(ProfileManagerRow(email=key, added_by=added_by))
         await session.commit()
         return True
+
+
+async def is_profile_manager(email: str) -> bool:
+    key = email.lower().strip()
+    if not key:
+        return False
+    async with async_session() as session:
+        return await session.get(ProfileManagerRow, key) is not None
+
+
+async def list_profile_managers() -> list[dict[str, Any]]:
+    async with async_session() as session:
+        rows = (
+            await session.scalars(select(ProfileManagerRow).order_by(ProfileManagerRow.created_at))
+        ).all()
+        return [
+            {
+                "email": row.email,
+                "added_by": row.added_by,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+
+async def remove_profile_manager(email: str) -> bool:
+    key = email.lower().strip()
+    async with async_session() as session:
+        row = await session.get(ProfileManagerRow, key)
+        if row is None:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+async def list_profile_audit_events(
+    *,
+    target_type: str | None = None,
+    target_id: uuid.UUID | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(ProfileAuditEventRow).order_by(ProfileAuditEventRow.created_at.desc())
+        if target_type:
+            query = query.where(ProfileAuditEventRow.target_type == target_type)
+        if target_id:
+            query = query.where(ProfileAuditEventRow.target_id == target_id)
+        rows = (await session.scalars(query.limit(limit))).all()
+        return [_audit_event_to_dict(row) for row in rows]
 
 
 async def create_readiness_candidate(
