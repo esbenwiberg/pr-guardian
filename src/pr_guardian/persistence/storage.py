@@ -54,6 +54,7 @@ DEFAULT_PROFILE_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
 READINESS_STATES = frozenset(
     {"waiting", "blocked", "reviewing", "reviewed", "superseded", "error"}
 )
+TERMINAL_READINESS_STATES = frozenset({"reviewing", "reviewed", "superseded"})
 
 add_excluded_repo = _exclusions.add_excluded_repo
 add_exclusion_rule = _exclusions.add_exclusion_rule
@@ -1197,7 +1198,7 @@ async def try_start_candidate_review(
         result = await session.execute(
             sa_update(ReadinessCandidateRow)
             .where(ReadinessCandidateRow.id == candidate_id)
-            .where(ReadinessCandidateRow.state.in_(("waiting", "blocked", "error")))
+            .where(ReadinessCandidateRow.state.not_in(tuple(TERMINAL_READINESS_STATES)))
             .values(state="reviewing", reason=reason, updated_at=_now())
         )
         if result.rowcount != 1:

@@ -570,6 +570,8 @@ async def override_candidate_readiness(
     status_posted = True
     audit_recorded = True
     try:
+        # Readiness status is the only platform write in the override endpoint;
+        # review result side effects remain gated inside the orchestrator.
         await adapter.set_readiness_status(
             pr, "success", f"Guardian readiness overridden: {reason}"
         )
