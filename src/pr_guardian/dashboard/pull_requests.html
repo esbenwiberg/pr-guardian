@@ -295,7 +295,16 @@ async function startReview(pr) {
     if (status) status.textContent = data.error || data.detail || 'Failed to start review.';
     return;
   }
-  if (data.review_id) window.location.href = `/reviews/${encodeURIComponent(data.review_id)}/live`;
+  if (data.review_id) {
+    const suffix = data.mode === 'existing' ? '' : '/live';
+    window.location.href = `/reviews/${encodeURIComponent(data.review_id)}${suffix}`;
+    return;
+  }
+  if (data.redirect_url || data.url) {
+    window.location.href = data.redirect_url || data.url;
+    return;
+  }
+  if (status) status.textContent = data.message || 'Review request accepted.';
 }
 
 async function hideRepo(pr) {
