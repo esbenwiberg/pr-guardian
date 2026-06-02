@@ -42,11 +42,11 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-1 mb-3" id="view-tabs">
-      <button class="browse-tab browse-tab-active" data-view="mine">Mine</button>
+      <button class="browse-tab" data-view="mine">Mine</button>
       <button class="browse-tab" data-view="ready">Ready-ish</button>
       <button class="browse-tab" data-view="attention">Needs attention</button>
       <button class="browse-tab" data-view="stale">Stale</button>
-      <button class="browse-tab" data-view="all">All open</button>
+      <button class="browse-tab browse-tab-active" data-view="all">All open</button>
     </div>
 
     <div class="browse-grid">
@@ -102,7 +102,8 @@ const panelEl = document.getElementById('pr-panel');
 
 let PRS = [];
 let SELECTED_ID = null;
-let VIEW = 'mine';
+let VIEW = 'all';
+let USER_IDENTIFIERS = [];
 
 function platformLabel(platform) {
   return platform === 'ado' ? 'ADO' : 'GH';
@@ -155,9 +156,16 @@ function linkedStatus(pr) {
   return pr.repo_link_id ? 'yes' : 'no';
 }
 
+function isMine(pr) {
+  if (!USER_IDENTIFIERS.length) return false;
+  const author = String(pr.author || '').toLowerCase();
+  const display = String(pr.author_display || '').toLowerCase();
+  return USER_IDENTIFIERS.some((id) => id && (id === author || id === display));
+}
+
 function viewMatches(pr) {
   if (VIEW === 'all') return true;
-  if (VIEW === 'mine') return true; // server applies identity when available; mock fallback keeps rows visible.
+  if (VIEW === 'mine') return isMine(pr);
   if (VIEW === 'ready') return !pr.is_draft && pr.ci_status !== 'failure';
   if (VIEW === 'attention') return pr.is_draft || pr.ci_status === 'failure' || pr.approval_status === 'changes_requested';
   if (VIEW === 'stale') {
@@ -165,6 +173,28 @@ function viewMatches(pr) {
     return updated && Date.now() - updated > 7 * 24 * 60 * 60 * 1000;
   }
   return true;
+}
+
+async function loadIdentity() {
+  const identifiers = [];
+  try {
+    const meResponse = await fetch('/api/me', { credentials: 'same-origin' });
+    if (meResponse.ok) {
+      const me = await meResponse.json();
+      if (me.email) identifiers.push(String(me.email).toLowerCase());
+      if (me.display_name) identifiers.push(String(me.display_name).toLowerCase());
+    }
+  } catch {}
+  try {
+    const identityResponse = await fetch('/api/user/identity', { credentials: 'same-origin' });
+    if (identityResponse.ok) {
+      const identity = await identityResponse.json();
+      if (identity.github_handle) identifiers.push(String(identity.github_handle).toLowerCase());
+      if (identity.ado_upn) identifiers.push(String(identity.ado_upn).toLowerCase());
+    }
+  } catch {}
+  USER_IDENTIFIERS = [...new Set(identifiers)];
+  if (VIEW === 'mine') render();
 }
 
 function clientFiltered(items) {
@@ -365,6 +395,7 @@ refreshEl.addEventListener('click', async () => {
   loadPullRequests().catch(() => render([], 0));
 });
 loadPullRequests().catch(() => render([], 0));
+loadIdentity();
 </script>
 </body>
 </html>

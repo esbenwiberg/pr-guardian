@@ -67,6 +67,17 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
                 "readiness_snapshot": {},
                 "updated_at": "2026-06-02T13:00:00Z",
             },
+            {
+                "id": "candidate-waiting-errorish",
+                "platform": "github",
+                "repo": "repo/api",
+                "pr_id": "128",
+                "head_sha": "mno",
+                "state": "waiting",
+                "reason": "connection_unavailable",
+                "readiness_snapshot": {},
+                "updated_at": "2026-06-02T13:00:00Z",
+            },
         ]
 
     monkeypatch.setattr(reviews_queue.storage, "list_reviews", fake_list_reviews)
@@ -83,6 +94,7 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
     assert {"review-1", "candidate-waiting", "candidate-blocked"} <= ids
     assert "candidate-draft" not in ids
     assert "candidate-errorish" not in ids
+    assert "candidate-waiting-errorish" not in ids
     candidate = next(item for item in response["items"] if item["id"] == "candidate-waiting")
     assert candidate["subject_type"] == "candidate"
     assert candidate["row_key"] == "candidate:candidate-waiting"

@@ -322,15 +322,14 @@ def _candidate_visible(candidate: dict[str, Any]) -> bool:
     state = candidate.get("state")
     reason = candidate.get("reason") or ""
     snapshot = candidate.get("readiness_snapshot") or {}
+    if reason in _HIDDEN_CANDIDATE_REASONS:
+        return False
     if state == "waiting":
         if reason == "draft" or _snapshot_bool(snapshot, "draft", "metadata.draft", "pr.draft"):
             return False
         return True
     if state == "blocked":
-        return (
-            reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS
-            and reason not in _HIDDEN_CANDIDATE_REASONS
-        )
+        return reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS
     return False
 
 
