@@ -65,7 +65,10 @@
   async function fetchMe() {
     try {
       const r = await fetch('/api/me', { credentials: 'same-origin' });
-      if (r.ok) currentUser = await r.json();
+      if (r.ok) {
+        currentUser = await r.json();
+        if (isOpen()) render((input?.value || '').trim().toLowerCase());
+      }
     } catch {}
   }
 
