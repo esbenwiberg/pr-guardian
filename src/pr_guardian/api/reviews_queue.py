@@ -327,7 +327,10 @@ def _candidate_visible(candidate: dict[str, Any]) -> bool:
             return False
         return True
     if state == "blocked":
-        return reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS and reason not in _HIDDEN_CANDIDATE_REASONS
+        return (
+            reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS
+            and reason not in _HIDDEN_CANDIDATE_REASONS
+        )
     return False
 
 
