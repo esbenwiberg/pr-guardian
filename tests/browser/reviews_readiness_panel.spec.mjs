@@ -139,16 +139,16 @@ async function startServer({ manager = false } = {}) {
   return { server, started, baseUrl: `http://127.0.0.1:${server.address().port}` };
 }
 
-async function withPage({ manager = false } = {}, fn) {
+async function withPage({ manager = false, fallbackEvidence = "fact-reviews-shows-opted-readiness" } = {}, fn) {
   const { server, baseUrl } = await startServer({ manager });
   const bundledChromium = "/opt/pw-browsers/chromium-1223/chrome-linux/chrome";
   const launchOptions = fsSync.existsSync(bundledChromium)
     ? { executablePath: bundledChromium }
     : {};
   if (!chromium) {
-    await fs.mkdir(".autopod/evidence/fact-reviews-shows-opted-readiness", { recursive: true });
+    await fs.mkdir(`.autopod/evidence/${fallbackEvidence}`, { recursive: true });
     await fs.writeFile(
-      ".autopod/evidence/fact-reviews-shows-opted-readiness/fallback.txt",
+      `.autopod/evidence/${fallbackEvidence}/fallback.txt`,
       "Playwright unavailable; source and mock API assertions executed.",
     );
     if (!html.includes("readiness-panel") || !html.includes("Start Review Now")) {
@@ -168,7 +168,7 @@ async function withPage({ manager = false } = {}, fn) {
 }
 
 async function reviewsShowsOptedReadinessCandidates() {
-  await withPage({}, async (page, baseUrl) => {
+  await withPage({ fallbackEvidence: "fact-reviews-shows-opted-readiness" }, async (page, baseUrl) => {
     await page.goto(`${baseUrl}/reviews`);
     await page.waitForSelector('[data-row-key="candidate:candidate-waiting"]');
     await page.waitForSelector('[data-row-key="candidate:candidate-blocked"]');
@@ -199,7 +199,7 @@ async function reviewsShowsOptedReadinessCandidates() {
 }
 
 async function readinessPanelActionsRespectPermissions() {
-  await withPage({}, async (page, baseUrl) => {
+  await withPage({ fallbackEvidence: "fact-readiness-panel-actions" }, async (page, baseUrl) => {
     await page.goto(`${baseUrl}/reviews`);
     await page.waitForSelector('[data-row-key="candidate:candidate-waiting"]');
     await page.click('[data-row-key="candidate:candidate-waiting"]');
