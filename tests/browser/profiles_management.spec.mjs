@@ -297,6 +297,11 @@ async function fallbackEvidence(fact, name, content) {
   const dir = path.join(".autopod", "evidence", fact);
   await fs.mkdir(dir, { recursive: true });
   await fs.writeFile(path.join(dir, `${name}.txt`), content, "utf8");
+  const onePixelPng = Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64",
+  );
+  await fs.writeFile(path.join(dir, `${name}.png`), onePixelPng);
 }
 
 function assertSourceIncludes(markers, factName) {
