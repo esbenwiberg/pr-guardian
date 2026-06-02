@@ -21,6 +21,7 @@ router = APIRouter(tags=["dashboard"])
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 _PULL_REQUESTS_HTML = _DASHBOARD_DIR / "pull_requests.html"
+_PROFILES_HTML = _DASHBOARD_DIR / "profiles.html"
 _INSIGHTS_HTML = _DASHBOARD_DIR / "insights.html"
 _REVIEWS_QUEUE_HTML = _DASHBOARD_DIR / "reviews_queue.html"
 _LIVE_PROGRESS_HTML = _DASHBOARD_DIR / "live_progress.html"
@@ -40,6 +41,17 @@ _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 def _is_admin(request: Request) -> bool:
     identity = getattr(request.state, "identity", None)
     return bool(getattr(identity, "is_admin", False))
+
+
+def _can_manage_profiles(request: Request) -> bool:
+    identity = getattr(request.state, "identity", None)
+    return bool(
+        getattr(identity, "kind", "anonymous") != "api_key"
+        and (
+            getattr(identity, "is_admin", False)
+            or getattr(identity, "can_manage_profiles", False)
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -62,6 +74,14 @@ async def reviews_page():
 async def pull_requests_page():
     """Browse-only open pull requests discovered from sync-enabled Connections."""
     return _PULL_REQUESTS_HTML.read_text()
+
+
+@router.get("/profiles", response_class=HTMLResponse)
+async def profiles_page(request: Request):
+    """Profile, Connection, and exact repo-link management for Profile Managers."""
+    if not _can_manage_profiles(request):
+        return RedirectResponse(url="/reviews?error=profile_manager_required", status_code=302)
+    return _PROFILES_HTML.read_text()
 
 
 @router.get("/reviews/{review_id}/live", response_class=HTMLResponse)

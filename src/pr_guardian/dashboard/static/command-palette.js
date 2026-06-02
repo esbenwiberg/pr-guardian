@@ -14,7 +14,8 @@
     { name: 'How It Works',  url: '/how-it-works',    section: 'pages' },
     { name: 'CLI Reference', url: '/cli-reference',   section: 'pages' },
     { name: 'API Reference', url: '/api-reference',   section: 'pages' },
-    { name: 'Settings',      url: '/settings',        section: 'pages' },
+    { name: 'Profiles',      url: '/profiles',        section: 'pages', requiresProfiles: true },
+    { name: 'Settings',      url: '/settings',        section: 'pages', requiresAdmin: true },
   ];
 
   let overlay = null;
@@ -23,6 +24,7 @@
   let items = [];
   let highlighted = 0;
   let recentReviews = [];
+  let currentUser = window.__currentUser || null;
 
   // ---- DOM ----
 
@@ -56,7 +58,15 @@
     input.addEventListener('input', () => { highlighted = 0; render(input.value.trim().toLowerCase()); });
     input.addEventListener('keydown', onKeydown);
 
+    fetchMe();
     fetchReviews();
+  }
+
+  async function fetchMe() {
+    try {
+      const r = await fetch('/api/me', { credentials: 'same-origin' });
+      if (r.ok) currentUser = await r.json();
+    } catch {}
   }
 
   async function fetchReviews() {
@@ -92,7 +102,10 @@
     let html = '';
 
     // Pages (always show, filter by query)
-    const pages = PAGES.filter(p => !q || p.name.toLowerCase().includes(q));
+    const pages = PAGES
+      .filter(p => !p.requiresAdmin || Boolean(currentUser && currentUser.is_admin))
+      .filter(p => !p.requiresProfiles || Boolean(currentUser && currentUser.can_manage_profiles))
+      .filter(p => !q || p.name.toLowerCase().includes(q));
     if (pages.length) {
       html += sectionLabel('Pages');
       pages.forEach(p => {
