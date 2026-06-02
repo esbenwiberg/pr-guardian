@@ -80,7 +80,7 @@ const chromiumPath = '/opt/pw-browsers/chromium-1223/chrome-linux/chrome';
 const launchOptions = fs.existsSync(chromiumPath) ? {{ executablePath: chromiumPath }} : {{}};
 
 const roles = {{
-  admin: {{ is_admin: true, can_manage_profiles: true }},
+  admin: {{ is_admin: true, can_manage_profiles: false }},
   manager: {{ is_admin: false, can_manage_profiles: true }},
   ordinary: {{ is_admin: false, can_manage_profiles: false }},
 }};

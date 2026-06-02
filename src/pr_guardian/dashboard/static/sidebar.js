@@ -90,11 +90,13 @@
 
   // Read admin status from a synchronously-injected hint, if present, to avoid flash.
   const seedAdmin = (window.__currentUser && window.__currentUser.is_admin) ? true : false;
-  const seedManageProfiles = (window.__currentUser && window.__currentUser.can_manage_profiles) ? true : false;
+  const seedManageProfiles = seedAdmin || (
+    (window.__currentUser && window.__currentUser.can_manage_profiles) ? true : false
+  );
 
   function render(user) {
     const isAdmin = Boolean(user && user.is_admin);
-    const canManageProfiles = Boolean(user && user.can_manage_profiles);
+    const canManageProfiles = isAdmin || Boolean(user && user.can_manage_profiles);
     const items = NAV_PRIMARY.map(navItem).join('')
       + (canManageProfiles ? navItem(NAV_PROFILES) : '')
       + (isAdmin ? navItem(NAV_ADMIN) : '');
