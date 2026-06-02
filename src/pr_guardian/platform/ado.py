@@ -105,6 +105,10 @@ class ADOAdapter:
             project=project.get("name", ""),
         )
 
+    async def fetch_archmap_artifact(self, pr: PlatformPR) -> str | None:
+        """ADO artifact lookup is not wired yet; absence is non-blocking."""
+        return None
+
     async def _fetch_file_content(
         self,
         client: httpx.AsyncClient,

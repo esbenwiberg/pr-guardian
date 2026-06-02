@@ -36,6 +36,10 @@ class PlatformAdapter(Protocol):
         """Fetch and parse the PR diff."""
         ...
 
+    async def fetch_archmap_artifact(self, pr: PlatformPR) -> str | None:
+        """Fetch the optional Archmap JSON artifact for this PR head SHA."""
+        ...
+
     async def post_comment(self, pr: PlatformPR, body: str) -> None:
         """Post a comment on the PR."""
         ...

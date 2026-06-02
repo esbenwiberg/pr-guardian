@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 from pr_guardian.models.pr import PlatformPR, Diff
 from pr_guardian.models.languages import LanguageMap
@@ -37,6 +38,9 @@ class TrustTier(str, Enum):
     SPOT_CHECK = "spot_check"
     MANDATORY_HUMAN = "mandatory_human"
     HUMAN_PRIMARY = "human_primary"
+
+
+ArchmapClassification = Literal["leaf", "branch", "hub"]
 
 
 # Ordered from most trusting to least trusting — used for max() comparisons.
@@ -93,6 +97,36 @@ class BlastRadius:
     propagates_to_api: bool = False
 
 
+@dataclass(frozen=True)
+class ArchmapFile:
+    """Archmap's topology verdict for one changed file."""
+
+    path: str
+    classification: ArchmapClassification
+    ca: int
+    tca: int
+    instability: float
+    risk: int | None
+    overridden: bool
+    reason: str
+    dependents: tuple[str, ...] = ()
+
+
+@dataclass
+class ArchmapContext:
+    """Optional Archmap artifact data scoped to this review's changed files."""
+
+    commit: str | None = None
+    generated_at: str = ""
+    files: dict[str, ArchmapFile] = field(default_factory=dict)
+    scope_requested: list[str] = field(default_factory=list)
+    scope_missing: list[str] = field(default_factory=list)
+    error: str = ""
+
+    def hub_files(self) -> list[ArchmapFile]:
+        return [f for f in self.files.values() if f.classification == "hub"]
+
+
 @dataclass
 class ChangeProfile:
     """Semantic classification of what this PR changes."""
@@ -138,5 +172,6 @@ class ReviewContext:
     hotspots: set[str] = field(default_factory=set)
     security_surface: SecuritySurface = field(default_factory=SecuritySurface)
     blast_radius: BlastRadius = field(default_factory=BlastRadius)
+    archmap: ArchmapContext = field(default_factory=ArchmapContext)
     change_profile: ChangeProfile = field(default_factory=ChangeProfile)
     trust_tier_result: TrustTierResult = field(default_factory=TrustTierResult)

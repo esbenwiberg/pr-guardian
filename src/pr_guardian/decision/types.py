@@ -10,6 +10,7 @@ StickyTriggerKind = Literal[
     "trust_tier",
     "repo_risk",
     "high_diff",
+    "archmap_hub",
 ]
 
 

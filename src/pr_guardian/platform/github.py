@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+from io import BytesIO
+from zipfile import BadZipFile, ZipFile
 
 import httpx
 import structlog
@@ -12,6 +14,9 @@ from pr_guardian.platform.models import WebhookPayload
 from pr_guardian.platform.protocol import PlatformPRMetadata, PlatformReadinessSignal
 
 log = structlog.get_logger()
+
+_ARCHMAP_ARTIFACT_MAX_BYTES = 2_000_000
+_ARCHMAP_ARTIFACT_FILE = "archmap.json"
 
 
 def _compute_ci_status(runs: list[dict]) -> str:
@@ -29,6 +34,25 @@ def _compute_ci_status(runs: list[dict]) -> str:
     if conclusions and all(c in ("success", "neutral", "skipped") for c in conclusions):
         return "success"
     return "unknown"
+
+
+def _extract_archmap_json(zip_bytes: bytes) -> str | None:
+    """Extract archmap.json from a GitHub Actions artifact zip."""
+    try:
+        with ZipFile(BytesIO(zip_bytes)) as archive:
+            matches = [
+                info
+                for info in archive.infolist()
+                if not info.is_dir() and info.filename.endswith(_ARCHMAP_ARTIFACT_FILE)
+            ]
+            if not matches:
+                return None
+            info = matches[0]
+            if info.file_size > _ARCHMAP_ARTIFACT_MAX_BYTES:
+                raise ValueError("archmap artifact is too large")
+            return archive.read(info).decode("utf-8", errors="replace")
+    except BadZipFile:
+        return None
 
 
 class GitHubAdapter:
@@ -106,6 +130,43 @@ class GitHubAdapter:
                 )
             )
         return Diff(files=diff_files)
+
+    async def fetch_archmap_artifact(self, pr: PlatformPR) -> str | None:
+        """Download archmap-<head_sha> from GitHub Actions artifacts if it exists."""
+        if not pr.head_commit_sha:
+            return None
+
+        client = self._get_client()
+        artifact_name = f"archmap-{pr.head_commit_sha}"
+        resp = await client.get(
+            f"/repos/{pr.repo}/actions/artifacts",
+            params={"name": artifact_name, "per_page": 100},
+        )
+        if resp.status_code == 404:
+            return None
+        resp.raise_for_status()
+
+        artifacts = [
+            artifact
+            for artifact in resp.json().get("artifacts", [])
+            if artifact.get("name") == artifact_name and not artifact.get("expired", False)
+        ]
+        if not artifacts:
+            return None
+
+        artifacts.sort(key=lambda artifact: artifact.get("created_at", ""), reverse=True)
+        artifact_id = artifacts[0].get("id")
+        if artifact_id is None:
+            return None
+
+        zip_resp = await client.get(
+            f"/repos/{pr.repo}/actions/artifacts/{artifact_id}/zip",
+            follow_redirects=True,
+        )
+        if zip_resp.status_code == 404:
+            return None
+        zip_resp.raise_for_status()
+        return _extract_archmap_json(zip_resp.content)
 
     async def post_comment(self, pr: PlatformPR, body: str) -> None:
         client = self._get_client()

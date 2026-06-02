@@ -191,6 +191,24 @@ def check_overrides(
             )
         )
 
+    archmap_hubs = context.archmap.hub_files()
+    if archmap_hubs:
+        source = archmap_hubs[0].path
+        examples = ", ".join(
+            f"{f.path} "
+            f"(Ca={f.ca}, dependents={len(f.dependents)}, "
+            f"risk={f.risk if f.risk is not None else 'n/a'})"
+            for f in archmap_hubs[:3]
+        )
+        sticky.append(
+            StickyTrigger(
+                kind="archmap_hub",
+                label=f"Archmap hub touched: {source}",
+                source=source,
+                reason=f"Archmap classified {len(archmap_hubs)} changed file(s) as hub: {examples}",
+            )
+        )
+
     return sticky, finding_reasons
 
 

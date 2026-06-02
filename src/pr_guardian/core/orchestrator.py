@@ -31,11 +31,12 @@ from pr_guardian.decision.engine import decide
 from pr_guardian.decision.severity_filter import filter_findings
 from pr_guardian.decision.validator import validate_findings
 from pr_guardian.discovery.blast_radius import compute_blast_radius
+from pr_guardian.discovery.archmap import parse_archmap_artifact
 from pr_guardian.discovery.change_profile import build_change_profile
 from pr_guardian.discovery.dep_graph import build_dep_graph
 from pr_guardian.languages.detector import detect_languages
 from pr_guardian.mechanical.runner import all_checks_passed, run_mechanical_checks
-from pr_guardian.models.context import RepoRiskClass, ReviewContext
+from pr_guardian.models.context import ArchmapContext, RepoRiskClass, ReviewContext
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
@@ -97,6 +98,48 @@ AGENT_REGISTRY = {
     "test_quality": TestQualityAgent,
     "hotspot": HotspotAgent,
 }
+
+
+async def _load_archmap_context(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    changed_files: list[str],
+    _plog,
+) -> ArchmapContext:
+    """Best-effort load of Archmap's optional PR artifact."""
+    try:
+        raw_artifact = await adapter.fetch_archmap_artifact(pr)
+    except Exception as exc:
+        log.warning("archmap_artifact_fetch_failed", pr_id=pr.pr_id, repo=pr.repo, error=str(exc))
+        _plog("warn", "discovery", f"Archmap artifact unavailable: {exc}")
+        return ArchmapContext(error=str(exc))
+
+    if not raw_artifact:
+        _plog("info", "discovery", "No Archmap artifact found for this PR head SHA.")
+        return ArchmapContext()
+
+    archmap = parse_archmap_artifact(
+        raw_artifact,
+        expected_commit=pr.head_commit_sha,
+        changed_files=changed_files,
+    )
+    if archmap.error:
+        _plog("warn", "discovery", f"Archmap artifact ignored: {archmap.error}")
+        return archmap
+
+    hubs = archmap.hub_files()
+    _plog(
+        "info",
+        "discovery",
+        f"Archmap artifact loaded: {len(archmap.files)} changed file(s), {len(hubs)} hub(s).",
+    )
+    if archmap.scope_missing:
+        _plog(
+            "warn",
+            "discovery",
+            "Archmap scope missing file(s): " + ", ".join(archmap.scope_missing[:10]),
+        )
+    return archmap
 
 
 async def run_review(
@@ -267,6 +310,7 @@ async def _run_pipeline(
         config.file_roles,
     )
     hotspots = await load_hotspots(pr.repo)
+    archmap = await _load_archmap_context(pr, adapter, changed_files, _plog)
 
     risk_class_map = {
         "standard": RepoRiskClass.STANDARD,
@@ -288,6 +332,7 @@ async def _run_pipeline(
         hotspots=hotspots,
         security_surface=security_surface,
         blast_radius=blast_radius,
+        archmap=archmap,
         change_profile=change_profile,
     )
 
