@@ -25,6 +25,9 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
         return [
             {
                 "id": "candidate-waiting",
+                "repo_link_id": "repo-link-1",
+                "profile_id": "profile-1",
+                "connection_id": "connection-1",
                 "platform": "github",
                 "repo": "repo/api",
                 "pr_id": "124",
@@ -36,6 +39,9 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
             },
             {
                 "id": "candidate-blocked",
+                "repo_link_id": "repo-link-1",
+                "profile_id": "profile-1",
+                "connection_id": "connection-1",
                 "platform": "github",
                 "repo": "repo/api",
                 "pr_id": "125",
@@ -47,6 +53,9 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
             },
             {
                 "id": "candidate-draft",
+                "repo_link_id": "repo-link-1",
+                "profile_id": "profile-1",
+                "connection_id": "connection-1",
                 "platform": "github",
                 "repo": "repo/api",
                 "pr_id": "126",
@@ -58,6 +67,9 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
             },
             {
                 "id": "candidate-errorish",
+                "repo_link_id": "repo-link-1",
+                "profile_id": "profile-1",
+                "connection_id": "connection-1",
                 "platform": "github",
                 "repo": "repo/api",
                 "pr_id": "127",
@@ -69,12 +81,37 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
             },
             {
                 "id": "candidate-waiting-errorish",
+                "repo_link_id": "repo-link-1",
+                "profile_id": "profile-1",
+                "connection_id": "connection-1",
                 "platform": "github",
                 "repo": "repo/api",
                 "pr_id": "128",
                 "head_sha": "mno",
                 "state": "waiting",
                 "reason": "connection_unavailable",
+                "readiness_snapshot": {},
+                "updated_at": "2026-06-02T13:00:00Z",
+            },
+            {
+                "id": "candidate-waiting-unknown",
+                "platform": "github",
+                "repo": "repo/api",
+                "pr_id": "129",
+                "head_sha": "pqr",
+                "state": "waiting",
+                "reason": "technical_error",
+                "readiness_snapshot": {},
+                "updated_at": "2026-06-02T13:00:00Z",
+            },
+            {
+                "id": "candidate-unlinked",
+                "platform": "github",
+                "repo": "browse/only",
+                "pr_id": "129",
+                "head_sha": "pqr",
+                "state": "waiting",
+                "reason": "checks_pending",
                 "readiness_snapshot": {},
                 "updated_at": "2026-06-02T13:00:00Z",
             },
@@ -95,6 +132,8 @@ async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monke
     assert "candidate-draft" not in ids
     assert "candidate-errorish" not in ids
     assert "candidate-waiting-errorish" not in ids
+    assert "candidate-unlinked" not in ids
+    assert "candidate-waiting-unknown" not in ids
     candidate = next(item for item in response["items"] if item["id"] == "candidate-waiting")
     assert candidate["subject_type"] == "candidate"
     assert candidate["row_key"] == "candidate:candidate-waiting"

@@ -365,9 +365,6 @@ async function loadPullRequests() {
   const params = new URLSearchParams({ limit: '100' });
   if (searchEl.value.trim()) params.set('search', searchEl.value.trim());
   if (platformEl.value) params.set('platform', platformEl.value);
-  if (VIEW === 'stale') params.set('view', 'stale');
-  if (VIEW === 'ready') params.set('view', 'ready');
-  if (VIEW === 'mine') params.set('view', 'mine');
   const response = await fetch(`/api/prs?${params.toString()}`, { credentials: 'same-origin' });
   if (!response.ok) throw new Error(`Failed to load PRs: ${response.status}`);
   const data = await response.json();

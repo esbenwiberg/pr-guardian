@@ -152,6 +152,9 @@ async function sourceAssertions(baseUrl) {
       throw new Error(`/pull-requests page is missing marker: ${marker}`);
     }
   }
+  if (pullHtml.includes("params.set('view'") || pullHtml.includes('params.set("view"')) {
+    throw new Error("/pull-requests should fetch the broad synced set and filter tabs client-side");
+  }
 
   const apiResponse = await fetch(`${baseUrl}/api/prs`);
   const apiData = await apiResponse.json();

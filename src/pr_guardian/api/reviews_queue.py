@@ -295,6 +295,11 @@ _VISIBLE_BLOCKED_CANDIDATE_REASONS = {
     "repo_link_paused",
     "auto_review_disabled",
 }
+_VISIBLE_WAITING_CANDIDATE_REASONS = {
+    "quiet_period",
+    "checks_pending",
+    "archmap_wait",
+}
 _HIDDEN_CANDIDATE_REASONS = {
     "draft",
     "platform_error",
@@ -322,12 +327,18 @@ def _candidate_visible(candidate: dict[str, Any]) -> bool:
     state = candidate.get("state")
     reason = candidate.get("reason") or ""
     snapshot = candidate.get("readiness_snapshot") or {}
+    if not (
+        candidate.get("repo_link_id")
+        and candidate.get("profile_id")
+        and candidate.get("connection_id")
+    ):
+        return False
     if reason in _HIDDEN_CANDIDATE_REASONS:
         return False
     if state == "waiting":
         if reason == "draft" or _snapshot_bool(snapshot, "draft", "metadata.draft", "pr.draft"):
             return False
-        return True
+        return reason in _VISIBLE_WAITING_CANDIDATE_REASONS
     if state == "blocked":
         return reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS
     return False
