@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
+import subprocess
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
@@ -62,6 +64,105 @@ def test_sidebar_shows_profiles_for_managers_and_settings_for_admins():
         settings = client.get("/settings", follow_redirects=False)
         assert settings.status_code == 302
         assert settings.headers["location"] == "/reviews?error=admin_required"
+
+    _assert_client_nav_visibility()
+
+
+def _assert_client_nav_visibility() -> None:
+    script = f"""
+const fs = require('node:fs');
+const http = require('node:http');
+const {{ chromium }} = require('playwright');
+
+const sidebar = fs.readFileSync({json.dumps(str(SIDEBAR_JS))}, 'utf8');
+const palette = fs.readFileSync({json.dumps(str(COMMAND_PALETTE_JS))}, 'utf8');
+const chromiumPath = '/opt/pw-browsers/chromium-1223/chrome-linux/chrome';
+const launchOptions = fs.existsSync(chromiumPath) ? {{ executablePath: chromiumPath }} : {{}};
+
+const roles = {{
+  admin: {{ is_admin: true, can_manage_profiles: true }},
+  manager: {{ is_admin: false, can_manage_profiles: true }},
+  ordinary: {{ is_admin: false, can_manage_profiles: false }},
+}};
+let currentRole = 'ordinary';
+
+function pageHtml(role) {{
+  return `<!doctype html>
+    <html><body>
+      <aside id="sidebar"></aside>
+      <script>window.__currentUser = ${{JSON.stringify(roles[role])}};<\\/script>
+      <script src="/static/sidebar.js"><\\/script>
+      <script src="/static/command-palette.js"><\\/script>
+    </body></html>`;
+}}
+
+function json(res, status, body) {{
+  res.writeHead(status, {{ 'Content-Type': 'application/json' }});
+  res.end(JSON.stringify(body));
+}}
+
+const server = http.createServer((req, res) => {{
+  const url = new URL(req.url, 'http://127.0.0.1');
+  const role = url.searchParams.get('role') || 'ordinary';
+  if (url.pathname === '/') {{
+    currentRole = role;
+    res.writeHead(200, {{ 'Content-Type': 'text/html' }});
+    res.end(pageHtml(role));
+  }} else if (url.pathname === '/static/sidebar.js') {{
+    res.writeHead(200, {{ 'Content-Type': 'text/javascript' }});
+    res.end(sidebar);
+  }} else if (url.pathname === '/static/command-palette.js') {{
+    res.writeHead(200, {{ 'Content-Type': 'text/javascript' }});
+    res.end(palette);
+  }} else if (url.pathname === '/api/me') {{
+    json(res, 200, roles[currentRole]);
+  }} else if (url.pathname === '/api/dashboard/reviews') {{
+    json(res, 200, []);
+  }} else {{
+    json(res, 404, {{ detail: 'not found' }});
+  }}
+}});
+
+(async () => {{
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const browser = await chromium.launch(launchOptions);
+  const page = await browser.newPage({{ viewport: {{ width: 1280, height: 800 }} }});
+  try {{
+    for (const [role, expected] of Object.entries({{
+      admin: {{ profiles: true, settings: true }},
+      manager: {{ profiles: true, settings: false }},
+      ordinary: {{ profiles: false, settings: false }},
+    }})) {{
+      await page.goto(`http://127.0.0.1:${{port}}/?role=${{role}}`);
+      await page.locator('#sidebar .sidebar-nav').waitFor();
+      const sidebarText = await page.locator('#sidebar').textContent();
+      if (sidebarText.includes('Profiles') !== expected.profiles) {{
+        throw new Error(`${{role}} sidebar Profiles visibility mismatch: ${{sidebarText}}`);
+      }}
+      if (sidebarText.includes('Settings') !== expected.settings) {{
+        throw new Error(`${{role}} sidebar Settings visibility mismatch: ${{sidebarText}}`);
+      }}
+      await page.evaluate(() => window.__cmdPalette.open());
+      const paletteText = await page.locator('#cmd-palette').textContent();
+      if (paletteText.includes('Profiles') !== expected.profiles) {{
+        throw new Error(`${{role}} palette Profiles visibility mismatch: ${{paletteText}}`);
+      }}
+      if (paletteText.includes('Settings') !== expected.settings) {{
+        throw new Error(`${{role}} palette Settings visibility mismatch: ${{paletteText}}`);
+      }}
+      await page.evaluate(() => window.__cmdPalette.close());
+    }}
+  }} finally {{
+    await browser.close();
+    await new Promise(resolve => server.close(resolve));
+  }}
+}})().catch(error => {{
+  console.error(error);
+  process.exit(1);
+}});
+"""
+    subprocess.run(["node", "-e", script], cwd=Path.cwd(), check=True)
 
     with (
         patch("pr_guardian.auth.identity._db_available", return_value=True),
