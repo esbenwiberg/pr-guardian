@@ -31,6 +31,7 @@ def test_sidebar_shows_profiles_for_managers_and_settings_for_admins():
     assert "isAdmin ? navItem(NAV_ADMIN)" in sidebar
     assert "requiresProfiles: true" in palette
     assert "requiresAdmin: true" in palette
+    assert "currentUser.is_admin || currentUser.can_manage_profiles" in palette
 
     with (
         patch("pr_guardian.auth.identity._db_available", return_value=True),

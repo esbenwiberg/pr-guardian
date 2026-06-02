@@ -104,7 +104,7 @@
     // Pages (always show, filter by query)
     const pages = PAGES
       .filter(p => !p.requiresAdmin || Boolean(currentUser && currentUser.is_admin))
-      .filter(p => !p.requiresProfiles || Boolean(currentUser && currentUser.can_manage_profiles))
+      .filter(p => !p.requiresProfiles || canReachProfiles())
       .filter(p => !q || p.name.toLowerCase().includes(q));
     if (pages.length) {
       html += sectionLabel('Pages');
@@ -171,6 +171,10 @@
 
   function sectionLabel(text) {
     return `<div class="dropdown-label">${text}</div>`;
+  }
+
+  function canReachProfiles() {
+    return Boolean(currentUser && (currentUser.is_admin || currentUser.can_manage_profiles));
   }
 
   function renderItem(idx, content, extra, kbd) {
