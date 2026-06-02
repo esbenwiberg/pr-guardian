@@ -1,0 +1,103 @@
+contract_version: 1
+title: "Add readiness candidate engine and platform readiness adapters"
+depends_on:
+  - 01-add-profile-readiness-data
+  - 03-replace-review-yml-with-profile-resolver
+scenarios:
+  - id: opted-pr-waits-and-starts-when-ready
+    given:
+      - "a linked repo has auto-review enabled"
+      - "a new PR head SHA arrives with pending automated checks"
+    when:
+      - "the webhook handler processes the PR event"
+      - "the evaluator runs before checks pass"
+    then:
+      - "a waiting candidate exists"
+      - "guardian/readiness is pending"
+      - "no review is started"
+    and_when:
+      - "the same head SHA later has all non-ignored automated checks passing"
+      - "quiet period and Archmap rules are satisfied"
+    then_also:
+      - "the candidate becomes eligible to transition to reviewing"
+  - id: blocked-reasons-are-distinct-and-recoverable
+    given:
+      - "linked candidates cover failed checks, check timeout, fork origin, and platform permission error"
+    when:
+      - "the evaluator runs"
+    then:
+      - "failed checks and timeout become blocked with readiness failure status"
+      - "fork origin becomes blocked with fork_requires_manual_start"
+      - "permission errors become error"
+      - "failed checks and timeout can recover for the same head SHA when checks later pass"
+  - id: webhooks-are-strict
+    given:
+      - "public GitHub and ADO webhook requests arrive"
+    when:
+      - "the shared secret is missing or invalid"
+    then:
+      - "the request is rejected"
+      - "no candidate is created or updated"
+    and_when:
+      - "an explicit dev/test bypass is enabled"
+    then_also:
+      - "test fixtures can still exercise webhook routing"
+  - id: reconciler-recovers-missed-events
+    given:
+      - "a waiting candidate exists"
+      - "no check-completed webhook was delivered"
+    when:
+      - "the reconciler re-reads platform readiness and checks are now passing"
+    then:
+      - "the candidate becomes eligible for review start"
+      - "a transition records reconciler as source"
+  - id: archmap-soft-wait-and-ado-lookup
+    given:
+      - "a Profile marks Archmap as expected"
+      - "an ADO PR head SHA is under evaluation"
+    when:
+      - "the Archmap artifact is not found before the archmap wait deadline"
+    then:
+      - "the evaluator proceeds after timeout with a warning in readiness snapshot"
+      - "the ADO adapter looked for artifact name archmap-<sha>"
+required_facts:
+  - id: fact-opted-pr-waits-then-starts-review
+    proves:
+      - opted-pr-waits-and-starts-when-ready
+    kind: integration-test
+    artifact:
+      path: tests/test_readiness_engine.py
+      change: create
+    command: python -m pytest tests/test_readiness_engine.py::test_opted_pr_waits_for_checks_then_becomes_reviewable
+  - id: fact-failed-timeout-fork-blocks
+    proves:
+      - blocked-reasons-are-distinct-and-recoverable
+    kind: integration-test
+    artifact:
+      path: tests/test_readiness_engine.py
+      change: create
+    command: python -m pytest tests/test_readiness_engine.py::test_failed_timeout_fork_and_permission_readiness_outcomes
+  - id: fact-strict-webhook-secrets
+    proves:
+      - webhooks-are-strict
+    kind: integration-test
+    artifact:
+      path: tests/test_webhook_security_and_router.py
+      change: create
+    command: python -m pytest tests/test_webhook_security_and_router.py::test_github_and_ado_webhooks_require_valid_secrets
+  - id: fact-reconciler-recovers-missed-events
+    proves:
+      - reconciler-recovers-missed-events
+    kind: integration-test
+    artifact:
+      path: tests/test_readiness_engine.py
+      change: create
+    command: python -m pytest tests/test_readiness_engine.py::test_reconciler_starts_candidate_after_missed_check_event
+  - id: fact-archmap-soft-wait-and-ado-lookup
+    proves:
+      - archmap-soft-wait-and-ado-lookup
+    kind: integration-test
+    artifact:
+      path: tests/test_readiness_engine.py
+      change: create
+    command: python -m pytest tests/test_readiness_engine.py::test_archmap_wait_times_out_soft_and_ado_uses_sha_artifact_name

@@ -31,6 +31,7 @@ class Identity:
     key_name: str | None = None
     scopes: list[str] = field(default_factory=list)
     is_admin: bool = False
+    can_manage_profiles: bool = False
 
     @property
     def display_name(self) -> str:
@@ -84,13 +85,13 @@ class IdentityMiddleware(BaseHTTPMiddleware):
         # 3. Anonymous fallback
         if not _db_available() or _dev_admin_mode():
             # No DB, or GUARDIAN_DEV_ADMIN=1 — treat anonymous as admin
-            return Identity(kind="anonymous", is_admin=True)
+            return Identity(kind="anonymous", is_admin=True, can_manage_profiles=True)
 
         return Identity(kind="anonymous", is_admin=False)
 
     async def _resolve_api_key(self, raw_key: str) -> Identity:
         if not _db_available():
-            return Identity(kind="anonymous", is_admin=True)
+            return Identity(kind="anonymous", is_admin=True, can_manage_profiles=True)
 
         try:
             from pr_guardian.persistence import storage
@@ -112,11 +113,18 @@ class IdentityMiddleware(BaseHTTPMiddleware):
             key_name=key_data["name"],
             scopes=key_data.get("scopes", ["read"]),
             is_admin=is_admin,
+            can_manage_profiles=False,
         )
 
     async def _resolve_user(self, email: str) -> Identity:
         is_admin = await self._check_admin_by_email(email)
-        return Identity(kind="user", email=email, is_admin=is_admin)
+        can_manage_profiles = is_admin or await self._check_profile_manager_by_email(email)
+        return Identity(
+            kind="user",
+            email=email,
+            is_admin=is_admin,
+            can_manage_profiles=can_manage_profiles,
+        )
 
     async def _check_admin_by_email(self, email: str) -> bool:
         if not email or not _db_available():
@@ -125,6 +133,16 @@ class IdentityMiddleware(BaseHTTPMiddleware):
             from pr_guardian.persistence import storage
 
             return await storage.is_admin(email)
+        except Exception:
+            return False
+
+    async def _check_profile_manager_by_email(self, email: str) -> bool:
+        if not email or not _db_available():
+            return not _db_available()
+        try:
+            from pr_guardian.persistence import storage
+
+            return await storage.is_profile_manager(email)
         except Exception:
             return False
 

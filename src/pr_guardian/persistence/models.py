@@ -7,12 +7,16 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Boolean,
+    JSON,
+    CheckConstraint,
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -20,6 +24,10 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 class Base(DeclarativeBase):
     pass
+
+
+def _json_type():
+    return JSON().with_variant(JSONB, "postgresql")
 
 
 class ReviewRow(Base):
@@ -41,25 +49,39 @@ class ReviewRow(Base):
     risk_tier: Mapped[str] = mapped_column(String(16), default="")
     repo_risk_class: Mapped[str] = mapped_column(String(16), default="standard")
     trust_tier: Mapped[str] = mapped_column(String(32), default="")
-    trust_tier_details: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    trust_tier_details: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     combined_score: Mapped[float] = mapped_column(Float, default=0.0)
     decision: Mapped[str] = mapped_column(String(32), default="pending")
 
     mechanical_passed: Mapped[bool] = mapped_column(Boolean, default=True)
-    override_reasons: Mapped[dict | list] = mapped_column(JSONB, default=list)
+    override_reasons: Mapped[dict | list] = mapped_column(_json_type(), default=list)
     summary: Mapped[str] = mapped_column(Text, default="")
 
     # Pipeline stage tracking for live progress
     stage: Mapped[str] = mapped_column(String(32), default="queued")
     stage_detail: Mapped[str] = mapped_column(Text, default="")
-    pipeline_log: Mapped[list] = mapped_column(JSONB, default=list)
+    pipeline_log: Mapped[list] = mapped_column(_json_type(), default=list)
 
     total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
 
     comment_mode: Mapped[str] = mapped_column(String(32), server_default="none", nullable=False)
-    pat_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
+    )
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
+    )
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("repo_links.id"), nullable=True
+    )
+    candidate_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("readiness_candidates.id"), nullable=True
+    )
+    review_source: Mapped[str] = mapped_column(String(32), default="manual")
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -86,7 +108,7 @@ class MechanicalResultRow(Base):
     tool: Mapped[str] = mapped_column(String(64))
     passed: Mapped[bool] = mapped_column(Boolean)
     severity: Mapped[str] = mapped_column(String(16), default="info")
-    findings: Mapped[list] = mapped_column(JSONB, default=list)
+    findings: Mapped[list] = mapped_column(_json_type(), default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     review: Mapped[ReviewRow] = relationship(back_populates="mechanical_results")
@@ -101,7 +123,7 @@ class AgentResultRow(Base):
     )
     agent_name: Mapped[str] = mapped_column(String(64), index=True)
     verdict: Mapped[str] = mapped_column(String(16))
-    languages_reviewed: Mapped[list] = mapped_column(JSONB, default=list)
+    languages_reviewed: Mapped[list] = mapped_column(_json_type(), default=list)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     verdict_explanation: Mapped[str | None] = mapped_column(Text, nullable=True)
 
@@ -179,11 +201,24 @@ class ScanRow(Base):
 
     stage: Mapped[str] = mapped_column(String(32), default="queued")
     stage_detail: Mapped[str] = mapped_column(Text, default="")
-    pipeline_log: Mapped[list] = mapped_column(JSONB, default=list)
+    pipeline_log: Mapped[list] = mapped_column(_json_type(), default=list)
 
     total_input_tokens: Mapped[int] = mapped_column(Integer, default=0)
     total_output_tokens: Mapped[int] = mapped_column(Integer, default=0)
     cost_usd: Mapped[float] = mapped_column(Float, default=0.0)
+
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
+    )
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
+    )
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("repo_links.id"), nullable=True
+    )
+    scan_source: Mapped[str] = mapped_column(String(32), default="scan")
 
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -250,7 +285,7 @@ class ScanIssueRow(Base):
         UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE"), index=True
     )
     # JSON list of ScanFindingRow UUIDs covered by this issue
-    finding_ids: Mapped[list] = mapped_column(JSONB, default=list)
+    finding_ids: Mapped[list] = mapped_column(_json_type(), default=list)
     issue_url: Mapped[str] = mapped_column(Text, default="")
     issue_number: Mapped[str] = mapped_column(String(32), default="")
     title: Mapped[str] = mapped_column(Text, default="")
@@ -280,7 +315,7 @@ class FindingDismissalRow(Base):
         String(24)
     )  # by_design | false_positive | acknowledged | will_fix
     comment: Mapped[str] = mapped_column(Text, default="")
-    source_finding: Mapped[dict] = mapped_column(JSONB, default=dict)
+    source_finding: Mapped[dict] = mapped_column(_json_type(), default=dict)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
@@ -322,27 +357,238 @@ class PostedInlineCommentRow(Base):
 
 
 # ---------------------------------------------------------------------------
-# GitHub PAT management
+# Profiles, connections, repo links, and readiness candidates
 # ---------------------------------------------------------------------------
 
 
-class GithubPatRow(Base):
-    """A named GitHub Personal Access Token, stored encrypted."""
+class ProfileRow(Base):
+    """Guardian-owned reusable review and scan policy."""
 
-    __tablename__ = "github_pats"
+    __tablename__ = "profiles"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
-    description: Mapped[str] = mapped_column(String(256), default="")
-    encrypted_token: Mapped[str] = mapped_column(Text)
-    token_prefix: Mapped[str] = mapped_column(String(20), default="")
+    description: Mapped[str] = mapped_column(Text, default="")
+    settings: Mapped[dict] = mapped_column(_json_type(), default=dict)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(256), default="system")
+    updated_by: Mapped[str] = mapped_column(String(256), default="system")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+
+
+class ConnectionRow(Base):
+    """Named outbound platform credential. Secret values are encrypted."""
+
+    __tablename__ = "connections"
+    __table_args__ = (
+        Index(
+            "uq_connections_single_default_github",
+            "is_default",
+            unique=True,
+            postgresql_where=__import__("sqlalchemy").text(
+                "platform = 'github' AND is_default = TRUE AND archived_at IS NULL"
+            ),
+            sqlite_where=__import__("sqlalchemy").text(
+                "platform = 'github' AND is_default = 1 AND archived_at IS NULL"
+            ),
+        ),
+        CheckConstraint("platform in ('github', 'ado')", name="ck_connections_platform"),
+        CheckConstraint(
+            "health_status in ('unknown', 'healthy', 'unhealthy')",
+            name="ck_connections_health_status",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    description: Mapped[str] = mapped_column(String(256), default="")
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    org_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    encrypted_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_secret_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
+    token_prefix: Mapped[str] = mapped_column(String(20), default="")
+    health_status: Mapped[str] = mapped_column(String(16), default="unknown")
+    health_message: Mapped[str] = mapped_column(Text, default="")
+    health_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    sync_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(256), default="system")
+    updated_by: Mapped[str] = mapped_column(String(256), default="system")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class RepoLinkRow(Base):
+    """Exact repository opt-in tying one repository to one Profile and Connection."""
+
+    __tablename__ = "repo_links"
+    __table_args__ = (
+        Index(
+            "uq_repo_links_active_canonical",
+            "platform",
+            "canonical_repo_key",
+            unique=True,
+            postgresql_where=__import__("sqlalchemy").text("archived_at IS NULL"),
+            sqlite_where=__import__("sqlalchemy").text("archived_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    org_url: Mapped[str] = mapped_column(Text, default="")
+    project: Mapped[str] = mapped_column(String(256), default="")
+    repo_owner: Mapped[str] = mapped_column(String(256), default="")
+    repo_name: Mapped[str] = mapped_column(String(256))
+    repo_url: Mapped[str] = mapped_column(Text, default="")
+    canonical_repo_key: Mapped[str] = mapped_column(String(512), index=True)
+    profile_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), ForeignKey("profiles.id"))
+    connection_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connections.id")
+    )
+    auto_review_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[str] = mapped_column(String(256), default="system")
+    updated_by: Mapped[str] = mapped_column(String(256), default="system")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ProfileManagerRow(Base):
+    """Signed-in user allowed to manage Profiles and Connections."""
+
+    __tablename__ = "profile_managers"
+
+    email: Mapped[str] = mapped_column(String(256), primary_key=True)
+    added_by: Mapped[str] = mapped_column(String(256), default="system")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ProfileAuditEventRow(Base):
+    """Append-only audit history for profile/connection/link management."""
+
+    __tablename__ = "profile_audit_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    actor: Mapped[str] = mapped_column(String(256), default="system")
+    action: Mapped[str] = mapped_column(String(64))
+    target_type: Mapped[str] = mapped_column(String(64))
+    target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    before: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    after: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class ReadinessCandidateRow(Base):
+    """Durable readiness state for one PR head SHA on an opted-in repo."""
+
+    __tablename__ = "readiness_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "canonical_repo_key",
+            "pr_id",
+            "head_sha",
+            name="uq_readiness_candidate_sha",
+        ),
+        CheckConstraint(
+            "state in ('waiting', 'blocked', 'reviewing', 'reviewed', 'superseded', 'error')",
+            name="ck_readiness_candidates_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    repo_link_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("repo_links.id"), index=True
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
+    )
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
+    )
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    org_url: Mapped[str] = mapped_column(Text, default="")
+    project: Mapped[str] = mapped_column(String(256), default="")
+    repo_owner: Mapped[str] = mapped_column(String(256), default="")
+    repo_name: Mapped[str] = mapped_column(String(256))
+    repo: Mapped[str] = mapped_column(String(512), index=True)
+    canonical_repo_key: Mapped[str] = mapped_column(String(512), index=True)
+    pr_id: Mapped[str] = mapped_column(String(64), index=True)
+    pr_url: Mapped[str] = mapped_column(Text, default="")
+    head_sha: Mapped[str] = mapped_column(String(64), index=True)
+    state: Mapped[str] = mapped_column(String(16), default="waiting")
+    reason: Mapped[str] = mapped_column(String(128), default="")
+    readiness_snapshot: Mapped[dict] = mapped_column(_json_type(), default=dict)
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    transitions: Mapped[list["ReadinessCandidateTransitionRow"]] = relationship(
+        back_populates="candidate",
+        lazy="selectin",
+        order_by="ReadinessCandidateTransitionRow.created_at",
+    )
+
+
+class ReadinessCandidateTransitionRow(Base):
+    """Append-only readiness candidate transition history."""
+
+    __tablename__ = "readiness_candidate_transitions"
+    __table_args__ = (
+        CheckConstraint(
+            "from_state is null or from_state in "
+            "('waiting', 'blocked', 'reviewing', 'reviewed', 'superseded', 'error')",
+            name="ck_readiness_transitions_from_state",
+        ),
+        CheckConstraint(
+            "to_state in ('waiting', 'blocked', 'reviewing', 'reviewed', 'superseded', 'error')",
+            name="ck_readiness_transitions_to_state",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    candidate_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("readiness_candidates.id"), index=True
+    )
+    from_state: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    to_state: Mapped[str] = mapped_column(String(16))
+    source: Mapped[str] = mapped_column(String(64), default="")
+    actor: Mapped[str] = mapped_column(String(256), default="")
+    reason: Mapped[str] = mapped_column(String(128), default="")
+    readiness_snapshot: Mapped[dict] = mapped_column(_json_type(), default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+    candidate: Mapped[ReadinessCandidateRow] = relationship(back_populates="transitions")
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +617,7 @@ class ApiKeyRow(Base):
     name: Mapped[str] = mapped_column(String(128))
     key_hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     key_prefix: Mapped[str] = mapped_column(String(12))  # "prg_xxxx" for display
-    scopes: Mapped[list] = mapped_column(JSONB, default=lambda: ["read"])
+    scopes: Mapped[list] = mapped_column(_json_type(), default=lambda: ["read"])
     created_by: Mapped[str] = mapped_column(String(256))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -410,6 +656,10 @@ class SyncSourceRow(Base):
     project: Mapped[str] = mapped_column(String(256), default="")  # ADO only
     repo: Mapped[str] = mapped_column(String(256))  # "owner/name" for GH, "name" for ADO
     repo_url: Mapped[str] = mapped_column(Text, default="")
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
+    )
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -444,11 +694,23 @@ class SyncedPRRow(Base):
     has_conflicts: Mapped[bool] = mapped_column(Boolean, default=False)
     # approved | changes_requested | pending | draft | merged
     approval_status: Mapped[str] = mapped_column(String(32), default="pending")
-    reviewers: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
-    assignees: Mapped[list] = mapped_column(JSONB, default=list)  # list of usernames
+    reviewers: Mapped[list] = mapped_column(_json_type(), default=list)  # list of usernames
+    assignees: Mapped[list] = mapped_column(_json_type(), default=list)  # list of usernames
     comment_count: Mapped[int] = mapped_column(Integer, default=0)
     # 'success' | 'failure' | 'pending' | 'unknown'
     ci_status: Mapped[str] = mapped_column(String(32), default="unknown")
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("profiles.id"), nullable=True
+    )
+    profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("connections.id"), nullable=True
+    )
+    connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+    repo_link_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("repo_links.id"), nullable=True
+    )
+    sync_source: Mapped[str] = mapped_column(String(32), default="sync")
     pr_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     pr_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     synced_at: Mapped[datetime] = mapped_column(

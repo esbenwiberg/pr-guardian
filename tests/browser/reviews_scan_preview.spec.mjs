@@ -15,23 +15,23 @@ try {
 
   await input.fill("https://github.com/octocat/spoon");
   await preview.waitFor({ state: "visible" });
-  if ((await preview.textContent()) !== "Will scan GitHub repo: octocat/spoon") {
+  if ((await preview.textContent()) !== "Will review GitHub repository: octocat/spoon") {
     throw new Error("GitHub URL preview did not render canonical owner/repo");
   }
 
   await input.fill("https://github.com/octocat/spoon.git");
-  if ((await preview.textContent()) !== "Will scan GitHub repo: octocat/spoon") {
+  if ((await preview.textContent()) !== "Will review GitHub repository: octocat/spoon") {
     throw new Error("GitHub .git suffix was not stripped");
   }
 
   await input.fill("https://dev.azure.com/myorg/myproj/_git/myrepo");
-  if ((await preview.textContent()) !== "Will scan Azure DevOps repo: myproj/myrepo") {
+  if ((await preview.textContent()) !== "Will review Azure DevOps repository: myproj/myrepo") {
     throw new Error("ADO URL preview did not render canonical project/repo");
   }
 
   await input.fill("project/repo");
   await platform.selectOption("ado");
-  if ((await preview.textContent()) !== "Will scan Azure DevOps repo: project/repo") {
+  if ((await preview.textContent()) !== "Will review Azure DevOps repository: project/repo") {
     throw new Error("ADO two-segment shorthand did not respect platform selector");
   }
 

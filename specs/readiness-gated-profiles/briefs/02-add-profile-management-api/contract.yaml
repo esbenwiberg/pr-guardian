@@ -1,0 +1,60 @@
+contract_version: 1
+title: "Add Profile and Connection management APIs"
+depends_on:
+  - 01-add-profile-readiness-data
+scenarios:
+  - id: profile-manager-can-create-setup
+    given:
+      - "a signed-in user exists in profile_managers"
+    when:
+      - "the user creates a Connection"
+      - "the Connection validates healthy"
+      - "the user creates a Profile"
+      - "the user creates a repo link using that Profile and Connection"
+    then:
+      - "the API returns the repo link with Profile and Connection IDs"
+      - "the repo link can enable auto-review"
+      - "/api/me reports can_manage_profiles true"
+  - id: audit-redacts-secrets
+    given:
+      - "a Profile Manager updates a Connection token"
+    when:
+      - "audit history is requested"
+    then:
+      - "the audit event includes actor, action, target, timestamp, and field-level diff"
+      - "the diff includes token prefix or secret changed marker only"
+      - "the diff does not contain the raw token"
+  - id: health-gates-sync-and-repo-link
+    given:
+      - "a saved Connection has health_status unhealthy"
+    when:
+      - "a Profile Manager tries to create a repo link with it"
+      - "a Profile Manager tries to enable sync_enabled for it"
+    then:
+      - "both writes are rejected with actionable validation errors"
+      - "the unhealthy Connection remains saved for later repair"
+required_facts:
+  - id: fact-profile-manager-can-link-repo
+    proves:
+      - profile-manager-can-create-setup
+    kind: integration-test
+    artifact:
+      path: tests/test_profiles_api.py
+      change: create
+    command: python -m pytest tests/test_profiles_api.py::test_profile_manager_can_create_connection_profile_and_repo_link
+  - id: fact-audit-field-diffs-redact-secrets
+    proves:
+      - audit-redacts-secrets
+    kind: integration-test
+    artifact:
+      path: tests/test_profiles_api.py
+      change: create
+    command: python -m pytest tests/test_profiles_api.py::test_profile_audit_diffs_redact_connection_secrets
+  - id: fact-unhealthy-connection-blocks-sync-and-link
+    proves:
+      - health-gates-sync-and-repo-link
+    kind: integration-test
+    artifact:
+      path: tests/test_connection_health.py
+      change: create
+    command: python -m pytest tests/test_connection_health.py::test_unhealthy_connection_blocks_repo_link_and_sync_enabled

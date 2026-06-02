@@ -14,6 +14,7 @@ from pr_guardian.api.dashboard import router as dashboard_api_router
 from pr_guardian.api.dashboard_page import router as dashboard_page_router
 from pr_guardian.api.health_api import router as health_router
 from pr_guardian.api.pr_dashboard_api import router as pr_dashboard_router
+from pr_guardian.api.profiles import router as profiles_router
 from pr_guardian.api.review import router as review_router
 from pr_guardian.api.reviews_queue import router as reviews_queue_router
 from pr_guardian.api.scans import router as scans_router
@@ -53,14 +54,17 @@ async def lifespan(app: FastAPI):
         # Start PR sync background loop
         import asyncio
         from pr_guardian.core.pr_sync import pr_sync_loop
+        from pr_guardian.core.readiness_reconciler import readiness_reconciler_loop
 
         sync_task = asyncio.create_task(pr_sync_loop())
+        readiness_task = asyncio.create_task(readiness_reconciler_loop())
         yield
-        sync_task.cancel()
-        try:
-            await sync_task
-        except asyncio.CancelledError:
-            pass
+        for task in (sync_task, readiness_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
         await close_db()
     else:
         log.info(
@@ -86,6 +90,7 @@ app.include_router(scans_router)
 app.include_router(dashboard_api_router)
 app.include_router(dashboard_page_router)
 app.include_router(pr_dashboard_router)
+app.include_router(profiles_router)
 app.include_router(admin_router)
 app.include_router(agent_router)
 

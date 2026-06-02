@@ -1,0 +1,61 @@
+contract_version: 1
+title: "Add Profile, Connection, repo-link, and readiness data model"
+depends_on: []
+scenarios:
+  - id: persist-linked-profile-and-candidate
+    given:
+      - "a default/noop Profile exists"
+      - "a healthy GitHub Connection exists"
+    when:
+      - "storage creates a custom Profile"
+      - "storage links an exact repository to the Profile and Connection"
+      - "storage creates a readiness candidate for a PR head SHA"
+      - "storage records a candidate transition"
+      - "storage stores review and scan provenance snapshots"
+    then:
+      - "the repo link points to exactly one active Profile and one Connection"
+      - "the candidate can be loaded by platform/repo/pr/head SHA"
+      - "the transition history is ordered and includes source, reason, and snapshot"
+      - "review and scan rows remain readable without dereferencing mutable Profile data"
+  - id: protect-archived-connections-and-profiles
+    given:
+      - "a Profile and Connection are referenced by an active repo link"
+    when:
+      - "storage attempts to archive either object directly"
+    then:
+      - "the archive is rejected with an actionable error"
+      - "archiving succeeds only after the repo link is moved, paused, or disabled according to the storage contract"
+  - id: migrate-github-pats-to-connections
+    given:
+      - "a database with existing github_pats rows"
+    when:
+      - "the new migration is applied"
+    then:
+      - "each PAT becomes a GitHub Connection with name, token prefix, health unknown, and sync_enabled preserved or defaulted"
+      - "runtime model imports no longer require a github_pats table"
+      - "ReviewRow no longer exposes pat_name as the execution credential contract"
+required_facts:
+  - id: fact-profile-link-candidate-persistence
+    proves:
+      - persist-linked-profile-and-candidate
+    kind: integration-test
+    artifact:
+      path: tests/test_readiness_storage.py
+      change: create
+    command: python -m pytest tests/test_readiness_storage.py::test_profile_link_candidate_and_provenance_persistence
+  - id: fact-connection-archive-protection
+    proves:
+      - protect-archived-connections-and-profiles
+    kind: integration-test
+    artifact:
+      path: tests/test_profiles_storage.py
+      change: create
+    command: python -m pytest tests/test_profiles_storage.py::test_profile_and_connection_archive_protection
+  - id: fact-existing-pats-migrate-to-connections
+    proves:
+      - migrate-github-pats-to-connections
+    kind: integration-test
+    artifact:
+      path: tests/test_profiles_storage.py
+      change: create
+    command: python -m pytest tests/test_profiles_storage.py::test_existing_github_pats_migrate_to_connections

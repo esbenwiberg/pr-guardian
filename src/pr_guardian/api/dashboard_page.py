@@ -20,7 +20,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 router = APIRouter(tags=["dashboard"])
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
-_PR_DASHBOARD_HTML = _DASHBOARD_DIR / "pr_dashboard.html"
+_PULL_REQUESTS_HTML = _DASHBOARD_DIR / "pull_requests.html"
+_PROFILES_HTML = _DASHBOARD_DIR / "profiles.html"
 _INSIGHTS_HTML = _DASHBOARD_DIR / "insights.html"
 _REVIEWS_QUEUE_HTML = _DASHBOARD_DIR / "reviews_queue.html"
 _LIVE_PROGRESS_HTML = _DASHBOARD_DIR / "live_progress.html"
@@ -33,7 +34,6 @@ _ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
 _HUMAN_WIZARD_HTML = _DASHBOARD_DIR / "human_wizard.html"
-_BROWSE_PR_HTML = _DASHBOARD_DIR / "browse_pr.html"
 _CLI_REFERENCE_HTML = _DASHBOARD_DIR / "cli_reference.html"
 _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 
@@ -41,6 +41,16 @@ _API_REFERENCE_HTML = _DASHBOARD_DIR / "api_reference.html"
 def _is_admin(request: Request) -> bool:
     identity = getattr(request.state, "identity", None)
     return bool(getattr(identity, "is_admin", False))
+
+
+def _can_manage_profiles(request: Request) -> bool:
+    identity = getattr(request.state, "identity", None)
+    return bool(
+        getattr(identity, "kind", "anonymous") != "api_key"
+        and (
+            getattr(identity, "is_admin", False) or getattr(identity, "can_manage_profiles", False)
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -57,6 +67,20 @@ async def root():
 async def reviews_page():
     """Reviews queue — the new root."""
     return _REVIEWS_QUEUE_HTML.read_text()
+
+
+@router.get("/pull-requests", response_class=HTMLResponse)
+async def pull_requests_page():
+    """Browse-only open pull requests discovered from sync-enabled Connections."""
+    return _PULL_REQUESTS_HTML.read_text()
+
+
+@router.get("/profiles", response_class=HTMLResponse)
+async def profiles_page(request: Request):
+    """Profile, Connection, and exact repo-link management for Profile Managers."""
+    if not _can_manage_profiles(request):
+        return RedirectResponse(url="/reviews?error=profile_manager_required", status_code=302)
+    return _PROFILES_HTML.read_text()
 
 
 @router.get("/reviews/{review_id}/live", response_class=HTMLResponse)
@@ -166,22 +190,24 @@ async def legacy_dashboard():
 
 @router.get("/pr-dashboard")
 async def legacy_pr_dashboard():
-    return RedirectResponse(url="/reviews", status_code=302)
+    return RedirectResponse(url="/pull-requests", status_code=302)
 
 
 @router.get("/browse-pr")
 async def legacy_browse_pr():
-    return RedirectResponse(url="/reviews", status_code=302)
+    return RedirectResponse(url="/pull-requests", status_code=302)
 
 
-@router.get("/scans")
-async def legacy_scans():
-    return RedirectResponse(url="/reviews?subject=repo", status_code=302)
+@router.get("/scans", response_class=HTMLResponse)
+async def scans_page():
+    """Recent-changes and maintenance scan history."""
+    return _SCANS_HTML.read_text()
 
 
-@router.get("/scans/{scan_id}")
-async def legacy_scan_detail(scan_id: str):
-    return RedirectResponse(url=f"/reviews/{scan_id}", status_code=302)
+@router.get("/scans/{scan_id}", response_class=HTMLResponse)
+async def scan_detail_page(scan_id: str):
+    """Recent-changes and maintenance scan detail."""
+    return _SCANS_HTML.read_text()
 
 
 @router.get("/prompts")

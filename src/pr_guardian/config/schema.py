@@ -260,8 +260,26 @@ class InlineCommentsConfig(BaseModel):
     severity_threshold: str = "MEDIUM"
 
 
+class ReadinessConfig(BaseModel):
+    quiet_period_seconds: int = 10
+    max_wait_minutes: int = 30
+    archmap_max_wait_minutes: int = 10
+    ignored_statuses: list[str] = Field(default_factory=list)
+    ignored_checks: list[str] = Field(default_factory=list)
+    archmap_expected: bool = False
+
+
+class SideEffectsConfig(BaseModel):
+    comments: bool = False
+    labels: bool = False
+    reviewers: bool = False
+    formal_approve: bool = False
+    formal_request_changes: bool = False
+    scan_issues: bool = False
+
+
 class GuardianConfig(BaseModel):
-    """Top-level config: merged from service defaults + per-repo review.yml."""
+    """Top-level config: merged from service defaults + resolved Profile policy."""
 
     llm: LLMConfig = Field(default_factory=LLMConfig)
     repo_risk_class: str = "standard"
@@ -287,3 +305,7 @@ class GuardianConfig(BaseModel):
     recent_changes: RecentChangesConfig = Field(default_factory=RecentChangesConfig)
     maintenance: MaintenanceConfig = Field(default_factory=MaintenanceConfig)
     inline_comments: InlineCommentsConfig = Field(default_factory=InlineCommentsConfig)
+    readiness: ReadinessConfig = Field(default_factory=ReadinessConfig)
+    side_effects: SideEffectsConfig = Field(default_factory=SideEffectsConfig)
+    guardian_clearance: bool = False
+    platform_approval_enabled: bool = False

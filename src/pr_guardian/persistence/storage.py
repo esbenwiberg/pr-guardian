@@ -13,6 +13,7 @@ from typing import Any
 
 import structlog
 from sqlalchemy import func, select
+from sqlalchemy import update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pr_guardian.models.output import ReviewResult
@@ -23,13 +24,19 @@ from pr_guardian.persistence.models import (
     AdminRow,
     AgentResultRow,
     ApiKeyRow,
+    ConnectionRow,
     ExcludedRepoRow,
     FindingDismissalRow,
     FindingRow,
-    GithubPatRow,
     GlobalConfigRow,
     MechanicalResultRow,
     PostedInlineCommentRow,
+    ProfileAuditEventRow,
+    ProfileManagerRow,
+    ProfileRow,
+    ReadinessCandidateRow,
+    ReadinessCandidateTransitionRow,
+    RepoLinkRow,
     PromptOverrideRow,
     ReviewRow,
     ScanAgentResultRow,
@@ -43,6 +50,12 @@ from pr_guardian.persistence.models import (
 
 log = structlog.get_logger()
 
+DEFAULT_PROFILE_ID = uuid.UUID("00000000-0000-0000-0000-000000000001")
+READINESS_STATES = frozenset(
+    {"waiting", "blocked", "reviewing", "reviewed", "superseded", "error"}
+)
+TERMINAL_READINESS_STATES = frozenset({"reviewing", "reviewed", "superseded"})
+
 add_excluded_repo = _exclusions.add_excluded_repo
 add_exclusion_rule = _exclusions.add_exclusion_rule
 get_pr_filter_options = _exclusions.get_pr_filter_options
@@ -53,9 +66,1317 @@ remove_exclusion_rule = _exclusions.remove_exclusion_rule
 repo_matches_rules = _exclusions.repo_matches_rules
 
 
+class ArchiveBlockedError(RuntimeError):
+    """Raised when an archive operation would strand an active repo link."""
+
+
+class HealthGateError(RuntimeError):
+    """Raised when a management write requires a healthy Connection."""
+
+
+def _token_prefix(token: str) -> str:
+    if len(token) <= 8:
+        return "****"
+    return token[:8] + "..."
+
+
+def _safe_token_prefix(prefix: str | None) -> str:
+    """Return a display-only token prefix that cannot contain a full short secret."""
+    if not prefix:
+        return ""
+    if prefix == "****" or prefix.endswith("..."):
+        return prefix
+    if len(prefix) <= 8:
+        return "****"
+    return prefix[:8] + "..."
+
+
+def _secretish_key(key: str) -> bool:
+    lowered = key.lower()
+    if any(marker in lowered for marker in ("token", "secret", "password", "api_key")):
+        return True
+    return lowered in {"pat", "authorization"} or lowered.endswith("_pat")
+
+
+def _redact_for_audit(value: Any, *, key: str = "") -> Any:
+    if key and _secretish_key(key):
+        return "[redacted]"
+    if isinstance(value, dict):
+        return {str(k): _redact_for_audit(v, key=str(k)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_redact_for_audit(item) for item in value]
+    if isinstance(value, str) and value.lower().startswith(("bearer ", "token ")):
+        return "[redacted]"
+    return value
+
+
+def _audit_diff(before: dict[str, Any] | None, after: dict[str, Any] | None) -> dict[str, Any]:
+    """Build a compact field-level diff from redacted DTOs."""
+    before = before or {}
+    after = after or {}
+    fields = sorted(set(before) | set(after))
+    return {
+        key: {
+            "before": _redact_for_audit(before.get(key), key=key),
+            "after": _redact_for_audit(after.get(key), key=key),
+        }
+        for key in fields
+        if before.get(key) != after.get(key)
+    }
+
+
+def _audit_before_after(
+    before: dict[str, Any] | None, after: dict[str, Any] | None
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    diff = _audit_diff(before, after)
+    return (
+        {"fields": {key: value["before"] for key, value in diff.items()}} if before else None,
+        {
+            "fields": {key: value["after"] for key, value in diff.items()},
+            "diff": diff,
+        },
+    )
+
+
+def _audit_event_to_dict(row: ProfileAuditEventRow) -> dict[str, Any]:
+    before = row.before
+    after = row.after
+    diff = after.get("diff") if isinstance(after, dict) else None
+    if not isinstance(diff, dict):
+        diff = _audit_diff(before, after)
+    return {
+        "id": str(row.id),
+        "actor": row.actor,
+        "action": row.action,
+        "target_type": row.target_type,
+        "target_id": str(row.target_id) if row.target_id else None,
+        "before": before,
+        "after": after,
+        "diff": diff,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _default_profile_settings() -> dict[str, Any]:
+    return {
+        "guardian_clearance": False,
+        "platform_approval_enabled": False,
+        "side_effects": {
+            "comments": False,
+            "labels": False,
+            "reviewers": False,
+            "formal_approve": False,
+            "formal_request_changes": False,
+            "scan_issues": False,
+        },
+        "readiness": {
+            "quiet_period_seconds": 10,
+            "max_wait_minutes": 30,
+            "archmap_max_wait_minutes": 10,
+            "ignored_statuses": [],
+            "ignored_checks": [],
+            "archmap_expected": False,
+        },
+    }
+
+
+def _canonical_repo_key(
+    platform: str,
+    *,
+    org_url: str = "",
+    project: str = "",
+    repo_owner: str = "",
+    repo_name: str,
+) -> str:
+    normalized_platform = platform.lower().strip()
+    if normalized_platform == "github":
+        return f"github:{repo_owner.lower().strip()}/{repo_name.lower().strip()}"
+    if normalized_platform == "ado":
+        return (
+            "ado:"
+            f"{org_url.lower().rstrip('/')}:"
+            f"{project.lower().strip()}/{repo_name.lower().strip()}"
+        )
+    return f"{normalized_platform}:{repo_owner.lower().strip()}/{repo_name.lower().strip()}"
+
+
+def _profile_to_dict(row: ProfileRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "description": row.description,
+        "settings": row.settings or {},
+        "is_system": row.is_system,
+        "is_default": row.is_default,
+        "archived_at": row.archived_at.isoformat() if row.archived_at else None,
+        "created_by": row.created_by,
+        "updated_by": row.updated_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _connection_to_dict(row: ConnectionRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "name": row.name,
+        "description": row.description,
+        "platform": row.platform,
+        "org_url": row.org_url,
+        "token_prefix": _safe_token_prefix(row.token_prefix),
+        "health_status": row.health_status,
+        "health_message": row.health_message,
+        "health_checked_at": row.health_checked_at.isoformat() if row.health_checked_at else None,
+        "sync_enabled": row.sync_enabled,
+        "is_default": row.is_default,
+        "archived_at": row.archived_at.isoformat() if row.archived_at else None,
+        "created_by": row.created_by,
+        "updated_by": row.updated_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _repo_link_to_dict(row: RepoLinkRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "platform": row.platform,
+        "org_url": row.org_url,
+        "project": row.project,
+        "repo_owner": row.repo_owner,
+        "repo_name": row.repo_name,
+        "repo_url": row.repo_url,
+        "canonical_repo_key": row.canonical_repo_key,
+        "profile_id": str(row.profile_id),
+        "connection_id": str(row.connection_id),
+        "auto_review_enabled": row.auto_review_enabled,
+        "paused": row.paused,
+        "archived_at": row.archived_at.isoformat() if row.archived_at else None,
+        "created_by": row.created_by,
+        "updated_by": row.updated_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _candidate_to_dict(row: ReadinessCandidateRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "repo_link_id": str(row.repo_link_id),
+        "profile_id": str(row.profile_id) if row.profile_id else None,
+        "connection_id": str(row.connection_id) if row.connection_id else None,
+        "platform": row.platform,
+        "org_url": row.org_url,
+        "project": row.project,
+        "repo_owner": row.repo_owner,
+        "repo_name": row.repo_name,
+        "repo": row.repo,
+        "canonical_repo_key": row.canonical_repo_key,
+        "pr_id": row.pr_id,
+        "pr_url": row.pr_url,
+        "head_sha": row.head_sha,
+        "state": row.state,
+        "reason": row.reason,
+        "readiness_snapshot": row.readiness_snapshot or {},
+        "profile_snapshot": row.profile_snapshot,
+        "connection_snapshot": row.connection_snapshot,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _transition_to_dict(row: ReadinessCandidateTransitionRow) -> dict[str, Any]:
+    return {
+        "id": str(row.id),
+        "candidate_id": str(row.candidate_id),
+        "from_state": row.from_state,
+        "to_state": row.to_state,
+        "source": row.source,
+        "actor": row.actor,
+        "reason": row.reason,
+        "readiness_snapshot": row.readiness_snapshot or {},
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Write operations
 # ---------------------------------------------------------------------------
+
+
+async def ensure_default_profile() -> dict[str, Any]:
+    """Create the system default/noop Profile if it is missing."""
+    async with async_session() as session:
+        row = await session.get(ProfileRow, DEFAULT_PROFILE_ID)
+        if row is None:
+            row = ProfileRow(
+                id=DEFAULT_PROFILE_ID,
+                name="Default / noop",
+                description="System default profile for unlinked manual work.",
+                settings=_default_profile_settings(),
+                is_system=True,
+                is_default=True,
+                created_by="system",
+                updated_by="system",
+            )
+            session.add(row)
+            await session.commit()
+            await session.refresh(row)
+        return _profile_to_dict(row)
+
+
+async def create_profile(
+    name: str,
+    *,
+    description: str = "",
+    settings: dict[str, Any] | None = None,
+    actor: str = "system",
+) -> dict[str, Any]:
+    row = ProfileRow(
+        name=name,
+        description=description,
+        settings=settings or {},
+        is_system=False,
+        is_default=False,
+        created_by=actor,
+        updated_by=actor,
+    )
+    async with async_session() as session:
+        session.add(row)
+        await session.flush()
+        audit_before, audit_after = _audit_before_after(None, _profile_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="profile.created",
+                target_type="profile",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _profile_to_dict(row)
+
+
+async def list_profiles(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(ProfileRow).order_by(ProfileRow.is_default.desc(), ProfileRow.name)
+        if not include_archived:
+            query = query.where(ProfileRow.archived_at.is_(None))
+        rows = (await session.scalars(query)).all()
+        return [_profile_to_dict(row) for row in rows]
+
+
+async def get_profile(profile_id: uuid.UUID) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(ProfileRow, profile_id)
+        return _profile_to_dict(row) if row else None
+
+
+async def update_profile(
+    profile_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    description: str | None = None,
+    settings: dict[str, Any] | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(ProfileRow, profile_id)
+        if row is None:
+            return None
+        before = _profile_to_dict(row)
+        if name is not None:
+            row.name = name
+        if description is not None:
+            row.description = description
+        if settings is not None:
+            row.settings = settings
+        row.updated_by = actor
+        row.updated_at = _now()
+        after = _profile_to_dict(row)
+        audit_before, audit_after = _audit_before_after(before, after)
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="profile.updated",
+                target_type="profile",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _profile_to_dict(row)
+
+
+async def archive_profile(profile_id: uuid.UUID, *, actor: str = "system") -> bool:
+    async with async_session() as session:
+        row = await session.get(ProfileRow, profile_id)
+        if row is None:
+            return False
+        if row.is_default:
+            raise ArchiveBlockedError("Default/noop Profile cannot be archived")
+        active_link = await session.scalar(
+            select(RepoLinkRow.id)
+            .where(RepoLinkRow.profile_id == profile_id)
+            .where(RepoLinkRow.archived_at.is_(None))
+            .where(RepoLinkRow.paused.is_(False))
+            .where(RepoLinkRow.auto_review_enabled.is_(True))
+            .limit(1)
+        )
+        if active_link:
+            raise ArchiveBlockedError(
+                "Profile is used by an active repo link; move, pause, or disable the link first"
+            )
+        before = _profile_to_dict(row)
+        row.archived_at = _now()
+        row.updated_by = actor
+        row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _profile_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="profile.archived",
+                target_type="profile",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        return True
+
+
+async def create_connection(
+    name: str,
+    *,
+    platform: str,
+    token: str | None = None,
+    org_url: str | None = None,
+    description: str = "",
+    sync_enabled: bool = False,
+    health_status: str = "unknown",
+    health_message: str = "",
+    is_default: bool = False,
+    actor: str = "system",
+) -> dict[str, Any]:
+    from pr_guardian.persistence.crypto import encrypt
+
+    async with async_session() as session:
+        if is_default and platform == "github":
+            await session.execute(
+                sa_update(ConnectionRow)
+                .where(ConnectionRow.platform == "github")
+                .where(ConnectionRow.id.isnot(None))
+                .values(is_default=False)
+            )
+        row = ConnectionRow(
+            name=name,
+            description=description,
+            platform=platform,
+            org_url=org_url,
+            encrypted_token=encrypt(token) if token else None,
+            token_prefix=_token_prefix(token) if token else "",
+            health_status=health_status,
+            health_message=health_message,
+            sync_enabled=sync_enabled,
+            is_default=is_default,
+            created_by=actor,
+            updated_by=actor,
+        )
+        session.add(row)
+        await session.flush()
+        audit_before, audit_after = _audit_before_after(None, _connection_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="connection.created",
+                target_type="connection",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _connection_to_dict(row)
+
+
+async def list_connections(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(ConnectionRow).order_by(ConnectionRow.platform, ConnectionRow.name)
+        if not include_archived:
+            query = query.where(ConnectionRow.archived_at.is_(None))
+        rows = (await session.scalars(query)).all()
+        return [_connection_to_dict(row) for row in rows]
+
+
+async def list_broad_sync_connections() -> list[dict[str, Any]]:
+    """Return active Connections eligible for broad pull-request browse sync."""
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(ConnectionRow)
+                .where(ConnectionRow.archived_at.is_(None))
+                .where(ConnectionRow.sync_enabled.is_(True))
+                .where(ConnectionRow.health_status == "healthy")
+                .order_by(ConnectionRow.platform, ConnectionRow.name)
+            )
+        ).all()
+        return [_connection_to_dict(row) for row in rows]
+
+
+async def get_connection(connection_id: uuid.UUID) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        return _connection_to_dict(row) if row else None
+
+
+async def get_connection_token(connection_id: uuid.UUID) -> str:
+    from pr_guardian.persistence.crypto import decrypt
+
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        if row is None or row.encrypted_token is None:
+            return ""
+        return decrypt(row.encrypted_token)
+
+
+async def update_connection(
+    connection_id: uuid.UUID,
+    *,
+    name: str | None = None,
+    platform: str | None = None,
+    token: str | None = None,
+    org_url: str | None = None,
+    description: str | None = None,
+    sync_enabled: bool | None = None,
+    health_status: str | None = None,
+    health_message: str | None = None,
+    health_checked_at: datetime | None = None,
+    is_default: bool | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    from pr_guardian.persistence.crypto import encrypt
+
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        if row is None:
+            return None
+        before = _connection_to_dict(row)
+        if sync_enabled is True and health_status != "healthy" and row.health_status != "healthy":
+            raise HealthGateError("Connection must validate healthy before sync can be enabled")
+        new_platform = platform.strip().lower() if platform is not None else row.platform
+        if is_default is True and new_platform == "github":
+            await session.execute(
+                sa_update(ConnectionRow)
+                .where(ConnectionRow.platform == "github")
+                .where(ConnectionRow.id != connection_id)
+                .values(is_default=False)
+            )
+        if name is not None:
+            row.name = name
+        if platform is not None:
+            row.platform = new_platform
+        if token is not None:
+            row.encrypted_token = encrypt(token)
+            row.token_prefix = _token_prefix(token)
+        if org_url is not None:
+            row.org_url = org_url
+        if description is not None:
+            row.description = description
+        if sync_enabled is not None:
+            row.sync_enabled = sync_enabled
+        if health_status is not None:
+            row.health_status = health_status
+        if health_message is not None:
+            row.health_message = health_message
+        if health_checked_at is not None:
+            row.health_checked_at = health_checked_at
+        if is_default is not None:
+            row.is_default = is_default
+        row.updated_by = actor
+        row.updated_at = _now()
+        after = _connection_to_dict(row)
+        audit_before, audit_after = _audit_before_after(before, after)
+        if token is not None and audit_after is not None:
+            diff = audit_after.setdefault("diff", {})
+            fields = audit_after.setdefault("fields", {})
+            before_fields = audit_before.setdefault("fields", {}) if audit_before else {}
+            before_fields["token_secret"] = "changed"
+            fields["token_secret"] = "changed"
+            diff["token_secret"] = {"before": "changed", "after": "changed"}
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="connection.updated",
+                target_type="connection",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _connection_to_dict(row)
+
+
+async def archive_connection(connection_id: uuid.UUID, *, actor: str = "system") -> bool:
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        if row is None:
+            return False
+        active_link = await session.scalar(
+            select(RepoLinkRow.id)
+            .where(RepoLinkRow.connection_id == connection_id)
+            .where(RepoLinkRow.archived_at.is_(None))
+            .where(RepoLinkRow.paused.is_(False))
+            .where(RepoLinkRow.auto_review_enabled.is_(True))
+            .limit(1)
+        )
+        if active_link:
+            raise ArchiveBlockedError(
+                "Connection is used by an active repo link; move, pause, or disable the link first"
+            )
+        before = _connection_to_dict(row)
+        row.archived_at = _now()
+        row.updated_by = actor
+        row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _connection_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="connection.archived",
+                target_type="connection",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        return True
+
+
+async def create_repo_link(
+    *,
+    platform: str,
+    repo_name: str,
+    profile_id: uuid.UUID,
+    connection_id: uuid.UUID,
+    org_url: str = "",
+    project: str = "",
+    repo_owner: str = "",
+    repo_url: str = "",
+    auto_review_enabled: bool = False,
+    paused: bool = False,
+    actor: str = "system",
+) -> dict[str, Any]:
+    canonical = _canonical_repo_key(
+        platform,
+        org_url=org_url,
+        project=project,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+    )
+    async with async_session() as session:
+        profile = await session.get(ProfileRow, profile_id)
+        if profile is None:
+            raise LookupError(f"Profile not found: {profile_id}")
+        if profile.archived_at is not None:
+            raise ArchiveBlockedError("Cannot link a repository to an archived Profile")
+        connection = await session.get(ConnectionRow, connection_id)
+        if connection is None:
+            raise LookupError(f"Connection not found: {connection_id}")
+        if connection.archived_at is not None:
+            raise ArchiveBlockedError("Cannot link a repository to an archived Connection")
+        if connection.platform.lower().strip() != platform.lower().strip():
+            raise ValueError(
+                "Repo link platform must match the selected Connection platform "
+                f"({platform!r} != {connection.platform!r})"
+            )
+        if connection.health_status != "healthy":
+            raise HealthGateError(
+                "Connection must validate healthy before it can be used for repo links"
+            )
+
+        row = RepoLinkRow(
+            platform=platform,
+            org_url=org_url,
+            project=project,
+            repo_owner=repo_owner,
+            repo_name=repo_name,
+            repo_url=repo_url,
+            canonical_repo_key=canonical,
+            profile_id=profile_id,
+            connection_id=connection_id,
+            auto_review_enabled=auto_review_enabled,
+            paused=paused,
+            created_by=actor,
+            updated_by=actor,
+        )
+        session.add(row)
+        await session.flush()
+        audit_before, audit_after = _audit_before_after(None, _repo_link_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="repo_link.created",
+                target_type="repo_link",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _repo_link_to_dict(row)
+
+
+async def update_repo_link_state(
+    repo_link_id: uuid.UUID,
+    *,
+    auto_review_enabled: bool | None = None,
+    paused: bool | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(RepoLinkRow, repo_link_id)
+        if row is None:
+            return None
+        before = _repo_link_to_dict(row)
+        if auto_review_enabled is not None:
+            row.auto_review_enabled = auto_review_enabled
+        if paused is not None:
+            row.paused = paused
+        if row.auto_review_enabled and not row.paused:
+            profile = await session.get(ProfileRow, row.profile_id)
+            connection = await session.get(ConnectionRow, row.connection_id)
+            if profile is None or profile.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Profile is archived or missing"
+                )
+            if connection is None or connection.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Connection is archived or missing"
+                )
+            if connection.health_status != "healthy":
+                raise HealthGateError(
+                    "Connection must validate healthy before auto-review can be enabled"
+                )
+        row.updated_by = actor
+        row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _repo_link_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="repo_link.updated",
+                target_type="repo_link",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _repo_link_to_dict(row)
+
+
+async def update_repo_link(
+    repo_link_id: uuid.UUID,
+    *,
+    profile_id: uuid.UUID | None = None,
+    connection_id: uuid.UUID | None = None,
+    repo_url: str | None = None,
+    auto_review_enabled: bool | None = None,
+    paused: bool | None = None,
+    actor: str = "system",
+) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(RepoLinkRow, repo_link_id)
+        if row is None:
+            return None
+        before = _repo_link_to_dict(row)
+        if profile_id is not None:
+            profile = await session.get(ProfileRow, profile_id)
+            if profile is None:
+                raise LookupError(f"Profile not found: {profile_id}")
+            if profile.archived_at is not None:
+                raise ArchiveBlockedError("Cannot link a repository to an archived Profile")
+            row.profile_id = profile_id
+        if connection_id is not None:
+            connection = await session.get(ConnectionRow, connection_id)
+            if connection is None:
+                raise LookupError(f"Connection not found: {connection_id}")
+            if connection.archived_at is not None:
+                raise ArchiveBlockedError("Cannot link a repository to an archived Connection")
+            if connection.health_status != "healthy":
+                raise HealthGateError(
+                    "Connection must validate healthy before it can be used for repo links"
+                )
+            if connection.platform.lower().strip() != row.platform.lower().strip():
+                raise ValueError(
+                    "Repo link platform must match the selected Connection platform "
+                    f"({row.platform!r} != {connection.platform!r})"
+                )
+            row.connection_id = connection_id
+        if repo_url is not None:
+            row.repo_url = repo_url
+        if auto_review_enabled is not None:
+            row.auto_review_enabled = auto_review_enabled
+        if paused is not None:
+            row.paused = paused
+        if row.auto_review_enabled and not row.paused:
+            profile = await session.get(ProfileRow, row.profile_id)
+            connection = await session.get(ConnectionRow, row.connection_id)
+            if profile is None or profile.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Profile is archived or missing"
+                )
+            if connection is None or connection.archived_at is not None:
+                raise ArchiveBlockedError(
+                    "Cannot activate repo link while its Connection is archived or missing"
+                )
+            if connection.health_status != "healthy":
+                raise HealthGateError(
+                    "Connection must validate healthy before auto-review can be enabled"
+                )
+        row.updated_by = actor
+        row.updated_at = _now()
+        after = _repo_link_to_dict(row)
+        audit_before, audit_after = _audit_before_after(before, after)
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="repo_link.updated",
+                target_type="repo_link",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        await session.refresh(row)
+        return _repo_link_to_dict(row)
+
+
+async def get_repo_link(repo_link_id: uuid.UUID) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(RepoLinkRow, repo_link_id)
+        return _repo_link_to_dict(row) if row else None
+
+
+async def get_active_repo_link_for_repo(
+    *,
+    platform: str,
+    repo: str,
+    org_url: str = "",
+    project: str = "",
+    require_auto_review: bool = False,
+) -> dict[str, Any] | None:
+    """Return the active exact repo link for a platform repository identity."""
+    normalized_platform = platform.lower().strip()
+    owner, _, name = repo.partition("/")
+    if not name:
+        owner, name = "", owner
+    if normalized_platform == "github":
+        canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+    else:
+        repo_name = name or owner
+        repo_project = project or (owner if name else "")
+        canonical = _canonical_repo_key(
+            platform,
+            org_url=org_url,
+            project=repo_project,
+            repo_name=repo_name,
+        )
+    async with async_session() as session:
+        query = (
+            select(RepoLinkRow)
+            .where(func.lower(RepoLinkRow.platform) == normalized_platform)
+            .where(RepoLinkRow.canonical_repo_key == canonical)
+            .where(RepoLinkRow.archived_at.is_(None))
+        )
+        if require_auto_review:
+            query = query.where(RepoLinkRow.auto_review_enabled.is_(True))
+            query = query.where(RepoLinkRow.paused.is_(False))
+        row = await session.scalar(query)
+        return _repo_link_to_dict(row) if row else None
+
+
+async def list_repo_links(*, include_archived: bool = False) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(RepoLinkRow).order_by(RepoLinkRow.platform, RepoLinkRow.canonical_repo_key)
+        if not include_archived:
+            query = query.where(RepoLinkRow.archived_at.is_(None))
+        rows = (await session.scalars(query)).all()
+        return [_repo_link_to_dict(row) for row in rows]
+
+
+async def archive_repo_link(repo_link_id: uuid.UUID, *, actor: str = "system") -> bool:
+    async with async_session() as session:
+        row = await session.get(RepoLinkRow, repo_link_id)
+        if row is None:
+            return False
+        before = _repo_link_to_dict(row)
+        row.archived_at = _now()
+        row.updated_by = actor
+        row.updated_at = _now()
+        audit_before, audit_after = _audit_before_after(before, _repo_link_to_dict(row))
+        session.add(
+            ProfileAuditEventRow(
+                actor=actor,
+                action="repo_link.archived",
+                target_type="repo_link",
+                target_id=row.id,
+                before=audit_before,
+                after=audit_after,
+            )
+        )
+        await session.commit()
+        return True
+
+
+async def add_profile_manager(email: str, *, added_by: str = "system") -> bool:
+    async with async_session() as session:
+        key = email.lower().strip()
+        if await session.get(ProfileManagerRow, key):
+            return False
+        session.add(ProfileManagerRow(email=key, added_by=added_by))
+        await session.commit()
+        return True
+
+
+async def is_profile_manager(email: str) -> bool:
+    key = email.lower().strip()
+    if not key:
+        return False
+    async with async_session() as session:
+        return await session.get(ProfileManagerRow, key) is not None
+
+
+async def list_profile_managers() -> list[dict[str, Any]]:
+    async with async_session() as session:
+        rows = (
+            await session.scalars(select(ProfileManagerRow).order_by(ProfileManagerRow.created_at))
+        ).all()
+        return [
+            {
+                "email": row.email,
+                "added_by": row.added_by,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+            for row in rows
+        ]
+
+
+async def remove_profile_manager(email: str) -> bool:
+    key = email.lower().strip()
+    async with async_session() as session:
+        row = await session.get(ProfileManagerRow, key)
+        if row is None:
+            return False
+        await session.delete(row)
+        await session.commit()
+        return True
+
+
+async def list_profile_audit_events(
+    *,
+    target_type: str | None = None,
+    target_id: uuid.UUID | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        query = select(ProfileAuditEventRow).order_by(ProfileAuditEventRow.created_at.desc())
+        if target_type:
+            query = query.where(ProfileAuditEventRow.target_type == target_type)
+        if target_id:
+            query = query.where(ProfileAuditEventRow.target_id == target_id)
+        rows = (await session.scalars(query.limit(limit))).all()
+        return [_audit_event_to_dict(row) for row in rows]
+
+
+async def create_readiness_candidate(
+    *,
+    repo_link_id: uuid.UUID,
+    pr_id: str,
+    head_sha: str,
+    pr_url: str = "",
+    state: str = "waiting",
+    reason: str = "",
+    readiness_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if state not in READINESS_STATES:
+        raise ValueError(f"Invalid readiness candidate state: {state}")
+    async with async_session() as session:
+        link = await session.get(RepoLinkRow, repo_link_id)
+        if link is None:
+            raise LookupError(f"Repo link not found: {repo_link_id}")
+        profile = await session.get(ProfileRow, link.profile_id)
+        connection = await session.get(ConnectionRow, link.connection_id)
+        row = ReadinessCandidateRow(
+            repo_link_id=repo_link_id,
+            profile_id=link.profile_id,
+            connection_id=link.connection_id,
+            platform=link.platform,
+            org_url=link.org_url,
+            project=link.project,
+            repo_owner=link.repo_owner,
+            repo_name=link.repo_name,
+            repo=f"{link.repo_owner}/{link.repo_name}" if link.repo_owner else link.repo_name,
+            canonical_repo_key=link.canonical_repo_key,
+            pr_id=pr_id,
+            pr_url=pr_url,
+            head_sha=head_sha,
+            state=state,
+            reason=reason,
+            readiness_snapshot=readiness_snapshot or {},
+            profile_snapshot=_profile_to_dict(profile) if profile else None,
+            connection_snapshot=_connection_to_dict(connection) if connection else None,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _candidate_to_dict(row)
+
+
+async def get_readiness_candidate(
+    *,
+    platform: str,
+    repo: str,
+    pr_id: str,
+    head_sha: str,
+    org_url: str = "",
+    project: str = "",
+) -> dict[str, Any] | None:
+    normalized_platform = platform.lower().strip()
+    owner, _, name = repo.partition("/")
+    if not name:
+        owner, name = "", owner
+    base_query = (
+        select(ReadinessCandidateRow)
+        .where(func.lower(ReadinessCandidateRow.platform) == normalized_platform)
+        .where(ReadinessCandidateRow.pr_id == pr_id)
+        .where(ReadinessCandidateRow.head_sha == head_sha)
+    )
+    if normalized_platform == "github":
+        canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+        query = base_query.where(ReadinessCandidateRow.canonical_repo_key == canonical)
+    else:
+        repo_name = name or owner
+        repo_project = project or (owner if name else "")
+        query = base_query.where(func.lower(ReadinessCandidateRow.repo_name) == repo_name.lower())
+        if repo_project:
+            query = query.where(func.lower(ReadinessCandidateRow.project) == repo_project.lower())
+        if org_url:
+            query = query.where(
+                func.lower(func.rtrim(ReadinessCandidateRow.org_url, "/"))
+                == org_url.lower().rstrip("/")
+            )
+    async with async_session() as session:
+        row = await session.scalar(query)
+        return _candidate_to_dict(row) if row else None
+
+
+async def get_readiness_candidate_by_id(candidate_id: uuid.UUID) -> dict[str, Any] | None:
+    async with async_session() as session:
+        row = await session.get(ReadinessCandidateRow, candidate_id)
+        return _candidate_to_dict(row) if row else None
+
+
+async def list_active_readiness_candidates(
+    *,
+    platform: str | None = None,
+    repo: str | None = None,
+    pr_id: str | None = None,
+    head_sha: str | None = None,
+    states: list[str] | tuple[str, ...] | set[str] | None = None,
+    limit: int = 100,
+) -> list[dict[str, Any]]:
+    """List non-terminal readiness candidates for webhook routing and reconciliation."""
+    async with async_session() as session:
+        query = select(ReadinessCandidateRow).order_by(ReadinessCandidateRow.updated_at.asc())
+        if platform:
+            query = query.where(func.lower(ReadinessCandidateRow.platform) == platform.lower())
+        if repo:
+            owner, _, name = repo.partition("/")
+            if platform and platform.lower() == "github" and name:
+                canonical = _canonical_repo_key(platform, repo_owner=owner, repo_name=name)
+                query = query.where(ReadinessCandidateRow.canonical_repo_key == canonical)
+            else:
+                query = query.where(func.lower(ReadinessCandidateRow.repo) == repo.lower())
+        if pr_id:
+            query = query.where(ReadinessCandidateRow.pr_id == pr_id)
+        if head_sha:
+            query = query.where(ReadinessCandidateRow.head_sha == head_sha)
+        if states:
+            query = query.where(ReadinessCandidateRow.state.in_(tuple(states)))
+        else:
+            query = query.where(ReadinessCandidateRow.state.in_(("waiting", "blocked", "error")))
+        rows = (await session.scalars(query.limit(limit))).all()
+        return [_candidate_to_dict(row) for row in rows]
+
+
+async def list_recoverable_readiness_candidates(*, limit: int = 100) -> list[dict[str, Any]]:
+    recoverable_reasons = ("", "checks_pending", "checks_failed", "checks_timeout", "archmap_wait")
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(ReadinessCandidateRow)
+                .where(ReadinessCandidateRow.state.in_(("waiting", "blocked")))
+                .where(ReadinessCandidateRow.reason.in_(recoverable_reasons))
+                .order_by(ReadinessCandidateRow.updated_at.asc())
+                .limit(limit)
+            )
+        ).all()
+        return [_candidate_to_dict(row) for row in rows]
+
+
+async def record_candidate_transition(
+    candidate_id: uuid.UUID,
+    *,
+    to_state: str,
+    source: str,
+    actor: str = "",
+    reason: str = "",
+    readiness_snapshot: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    if to_state not in READINESS_STATES:
+        raise ValueError(f"Invalid readiness candidate state: {to_state}")
+    async with async_session() as session:
+        candidate = await session.get(ReadinessCandidateRow, candidate_id)
+        if candidate is None:
+            raise LookupError(f"Readiness candidate not found: {candidate_id}")
+        row = ReadinessCandidateTransitionRow(
+            candidate_id=candidate_id,
+            from_state=candidate.state,
+            to_state=to_state,
+            source=source,
+            actor=actor,
+            reason=reason,
+            readiness_snapshot=readiness_snapshot or {},
+        )
+        candidate.state = to_state
+        candidate.reason = reason
+        candidate.readiness_snapshot = readiness_snapshot or candidate.readiness_snapshot or {}
+        candidate.updated_at = _now()
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+        return _transition_to_dict(row)
+
+
+async def try_start_candidate_review(
+    candidate_id: uuid.UUID,
+    pr: PlatformPR,
+    *,
+    source: str = "automatic",
+    actor: str = "system",
+    reason: str = "ready",
+    readiness_snapshot: dict[str, Any] | None = None,
+    comment_mode: str = "summary",
+    review_source: str | None = None,
+    audit_event: dict[str, Any] | None = None,
+) -> tuple[uuid.UUID, dict[str, Any]] | None:
+    """Atomically move a ready candidate to reviewing and create its review row.
+
+    Returns ``None`` when another worker already claimed the candidate.
+    """
+    if reason != "ready" and source == "automatic":
+        raise ValueError("Automatic candidate reviews can only start from ready candidates")
+
+    async with async_session() as session:
+        existing = await session.get(ReadinessCandidateRow, candidate_id)
+        previous_state = existing.state if existing else None
+        result = await session.execute(
+            sa_update(ReadinessCandidateRow)
+            .where(ReadinessCandidateRow.id == candidate_id)
+            .where(ReadinessCandidateRow.state.not_in(tuple(TERMINAL_READINESS_STATES)))
+            .values(state="reviewing", reason=reason, updated_at=_now())
+        )
+        if result.rowcount != 1:
+            await session.rollback()
+            return None
+
+        candidate = await session.get(ReadinessCandidateRow, candidate_id)
+        if candidate is None:
+            await session.rollback()
+            return None
+        await session.refresh(candidate)
+        candidate.state = "reviewing"
+        candidate.reason = reason
+        candidate.readiness_snapshot = readiness_snapshot or candidate.readiness_snapshot or {}
+
+        snapshot = candidate.readiness_snapshot or {}
+        transition = ReadinessCandidateTransitionRow(
+            candidate_id=candidate_id,
+            from_state=previous_state,
+            to_state="reviewing",
+            source=source,
+            actor=actor,
+            reason=reason,
+            readiness_snapshot=snapshot,
+        )
+        session.add(transition)
+        review = ReviewRow(
+            pr_id=pr.pr_id,
+            repo=pr.repo,
+            platform=pr.platform.value,
+            author=pr.author,
+            title=pr.title,
+            source_branch=pr.source_branch,
+            target_branch=pr.target_branch,
+            head_commit_sha=pr.head_commit_sha or candidate.head_sha,
+            pr_url=pr.pr_url or candidate.pr_url,
+            stage="queued",
+            comment_mode=comment_mode,
+            profile_id=candidate.profile_id,
+            profile_snapshot=candidate.profile_snapshot,
+            connection_id=candidate.connection_id,
+            connection_snapshot=candidate.connection_snapshot,
+            repo_link_id=candidate.repo_link_id,
+            candidate_id=candidate.id,
+            review_source=review_source or source,
+        )
+        session.add(review)
+        if audit_event is not None:
+            session.add(
+                ProfileAuditEventRow(
+                    actor=str(audit_event.get("actor") or actor),
+                    action=str(audit_event["action"]),
+                    target_type=str(audit_event["target_type"]),
+                    target_id=audit_event.get("target_id"),
+                    before=audit_event.get("before"),
+                    after=audit_event.get("after") or {},
+                )
+            )
+        await session.commit()
+        await session.refresh(review)
+        await session.refresh(candidate)
+        return review.id, _candidate_to_dict(candidate)
+
+
+async def mark_candidate_reviewed_for_review(review_id: uuid.UUID) -> bool:
+    """Mark the linked candidate reviewed when the completed review still matches its SHA."""
+    async with async_session() as session:
+        review = await session.get(ReviewRow, review_id)
+        if review is None or review.candidate_id is None:
+            return False
+        candidate = await session.get(ReadinessCandidateRow, review.candidate_id)
+        if candidate is None or candidate.state != "reviewing":
+            return False
+        if candidate.head_sha != review.head_commit_sha:
+            return False
+        transition = ReadinessCandidateTransitionRow(
+            candidate_id=candidate.id,
+            from_state=candidate.state,
+            to_state="reviewed",
+            source="review_completion",
+            actor="guardian",
+            reason="review_completed",
+            readiness_snapshot=candidate.readiness_snapshot or {},
+        )
+        candidate.state = "reviewed"
+        candidate.reason = "review_completed"
+        candidate.updated_at = _now()
+        session.add(transition)
+        await session.commit()
+        return True
+
+
+async def record_profile_audit_event(
+    *,
+    actor: str,
+    action: str,
+    target_type: str,
+    target_id: uuid.UUID | None = None,
+    before: dict[str, Any] | None = None,
+    after: dict[str, Any] | None = None,
+) -> uuid.UUID:
+    async with async_session() as session:
+        row = ProfileAuditEventRow(
+            actor=actor,
+            action=action,
+            target_type=target_type,
+            target_id=target_id,
+            before=before,
+            after=after or {},
+        )
+        session.add(row)
+        await session.commit()
+        return row.id
+
+
+async def list_candidate_transitions(candidate_id: uuid.UUID) -> list[dict[str, Any]]:
+    async with async_session() as session:
+        rows = (
+            await session.scalars(
+                select(ReadinessCandidateTransitionRow)
+                .where(ReadinessCandidateTransitionRow.candidate_id == candidate_id)
+                .order_by(ReadinessCandidateTransitionRow.created_at)
+            )
+        ).all()
+        return [_transition_to_dict(r) for r in rows]
+
+
+async def set_review_provenance(
+    review_id: uuid.UUID,
+    *,
+    profile_id: uuid.UUID | None = None,
+    profile_snapshot: dict[str, Any] | None = None,
+    connection_id: uuid.UUID | None = None,
+    connection_snapshot: dict[str, Any] | None = None,
+    repo_link_id: uuid.UUID | None = None,
+    candidate_id: uuid.UUID | None = None,
+    review_source: str | None = None,
+) -> bool:
+    async with async_session() as session:
+        row = await session.get(ReviewRow, review_id)
+        if row is None:
+            return False
+        row.profile_id = profile_id
+        row.profile_snapshot = profile_snapshot
+        row.connection_id = connection_id
+        row.connection_snapshot = connection_snapshot
+        row.repo_link_id = repo_link_id
+        row.candidate_id = candidate_id
+        if review_source is not None:
+            row.review_source = review_source
+        await session.commit()
+        return True
+
+
+async def set_scan_provenance(
+    scan_id: uuid.UUID,
+    *,
+    profile_id: uuid.UUID | None = None,
+    profile_snapshot: dict[str, Any] | None = None,
+    connection_id: uuid.UUID | None = None,
+    connection_snapshot: dict[str, Any] | None = None,
+    repo_link_id: uuid.UUID | None = None,
+    scan_source: str | None = None,
+) -> bool:
+    async with async_session() as session:
+        row = await session.get(ScanRow, scan_id)
+        if row is None:
+            return False
+        row.profile_id = profile_id
+        row.profile_snapshot = profile_snapshot
+        row.connection_id = connection_id
+        row.connection_snapshot = connection_snapshot
+        row.repo_link_id = repo_link_id
+        if scan_source is not None:
+            row.scan_source = scan_source
+        await session.commit()
+        return True
 
 
 async def create_review_record(
@@ -74,7 +1395,7 @@ async def create_review_record(
         pr_url=pr.pr_url,
         stage="discovery",
         comment_mode=comment_mode,
-        pat_name=pat_name,
+        connection_snapshot={"legacy_pat_name": pat_name} if pat_name else None,
     )
     async with async_session() as session:
         session.add(row)
@@ -521,30 +1842,23 @@ async def delete_global_config(key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# GitHub PAT management
+# Legacy GitHub PAT compatibility, backed by unified Connections
 # ---------------------------------------------------------------------------
 
 
-def _pat_to_dict(row: GithubPatRow) -> dict:
-    return {
-        "id": str(row.id),
-        "name": row.name,
-        "description": row.description,
-        "token_prefix": row.token_prefix,
-        "is_default": row.is_default,
-        "created_at": row.created_at.isoformat(),
-        "updated_at": row.updated_at.isoformat(),
-    }
-
-
 async def list_github_pats() -> list[dict]:
-    """Return all configured GitHub PATs (token never included)."""
+    """Return GitHub credential rows using the legacy PAT DTO shape."""
     try:
         async with async_session() as session:
             rows = (
-                await session.scalars(select(GithubPatRow).order_by(GithubPatRow.created_at))
+                await session.scalars(
+                    select(ConnectionRow)
+                    .where(ConnectionRow.platform == "github")
+                    .where(ConnectionRow.archived_at.is_(None))
+                    .order_by(ConnectionRow.created_at)
+                )
             ).all()
-            return [_pat_to_dict(r) for r in rows]
+            return [_connection_to_dict(r) for r in rows]
     except Exception:
         log.warning("list_github_pats_failed", hint="DB unavailable; returning empty list")
         return []
@@ -556,25 +1870,31 @@ async def create_github_pat(
     description: str = "",
     is_default: bool = False,
 ) -> dict:
-    """Store a new named GitHub PAT (token is encrypted)."""
+    """Compatibility wrapper: store a GitHub token as a unified Connection."""
     from sqlalchemy import update as sa_update
 
     from pr_guardian.persistence.crypto import encrypt
 
     async with async_session() as session:
         if is_default:
-            await session.execute(sa_update(GithubPatRow).values(is_default=False))
-        row = GithubPatRow(
+            await session.execute(
+                sa_update(ConnectionRow)
+                .where(ConnectionRow.platform == "github")
+                .values(is_default=False)
+            )
+        row = ConnectionRow(
             name=name,
             description=description,
+            platform="github",
             encrypted_token=encrypt(token),
-            token_prefix=token[:8] + "..." if len(token) > 8 else token,
+            token_prefix=_token_prefix(token),
+            sync_enabled=True,
             is_default=is_default,
         )
         session.add(row)
         await session.commit()
         await session.refresh(row)
-        return _pat_to_dict(row)
+        return _connection_to_dict(row)
 
 
 async def update_github_pat(
@@ -585,18 +1905,22 @@ async def update_github_pat(
     description: str | None = None,
     is_default: bool | None = None,
 ) -> dict | None:
-    """Update fields on an existing PAT. Returns updated dict or None if not found."""
+    """Compatibility wrapper: update a GitHub Connection."""
     from sqlalchemy import update as sa_update
 
     from pr_guardian.persistence.crypto import encrypt
 
     async with async_session() as session:
-        row = await session.get(GithubPatRow, pat_id)
-        if not row:
+        row = await session.get(ConnectionRow, pat_id)
+        platform = getattr(row, "platform", "github") if row else None
+        if not row or (isinstance(platform, str) and platform != "github"):
             return None
         if is_default is True:
             await session.execute(
-                sa_update(GithubPatRow).where(GithubPatRow.id != pat_id).values(is_default=False)
+                sa_update(ConnectionRow)
+                .where(ConnectionRow.platform == "github")
+                .where(ConnectionRow.id != pat_id)
+                .values(is_default=False)
             )
         if name is not None:
             row.name = name
@@ -604,35 +1928,42 @@ async def update_github_pat(
             row.description = description
         if token is not None:
             row.encrypted_token = encrypt(token)
-            row.token_prefix = token[:8] + "..." if len(token) > 8 else token
+            row.token_prefix = _token_prefix(token)
         if is_default is not None:
             row.is_default = is_default
-        row.updated_at = datetime.now(timezone.utc)
+        row.updated_at = _now()
         await session.commit()
         await session.refresh(row)
-        return _pat_to_dict(row)
+        return _connection_to_dict(row)
 
 
 async def delete_github_pat(pat_id: uuid.UUID) -> bool:
-    """Delete a PAT by id. Returns True if deleted."""
+    """Compatibility wrapper: archive a GitHub Connection."""
     async with async_session() as session:
-        row = await session.get(GithubPatRow, pat_id)
-        if not row:
+        row = await session.get(ConnectionRow, pat_id)
+        platform = getattr(row, "platform", "github") if row else None
+        if not row or (isinstance(platform, str) and platform != "github"):
             return False
-        await session.delete(row)
+        active_link = await session.scalar(
+            select(RepoLinkRow.id)
+            .where(RepoLinkRow.connection_id == pat_id)
+            .where(RepoLinkRow.archived_at.is_(None))
+            .where(RepoLinkRow.paused.is_(False))
+            .where(RepoLinkRow.auto_review_enabled.is_(True))
+            .limit(1)
+        )
+        if isinstance(active_link, uuid.UUID | str):
+            raise ArchiveBlockedError(
+                "Connection is used by an active repo link; move, pause, or disable the link first"
+            )
+        row.archived_at = _now()
+        row.updated_at = _now()
         await session.commit()
         return True
 
 
 async def resolve_github_token(pat_name: str | None = None) -> str:
-    """Resolve the GitHub token to use for a review.
-
-    Priority: named PAT (if pat_name given) > default PAT in DB > GITHUB_TOKEN env var.
-
-    When pat_name is explicitly provided, raises LookupError if no matching PAT is found.
-    Falls back gracefully to GITHUB_TOKEN env var only when no pat_name is given and the DB
-    has no default PAT configured (or the DB is unavailable).
-    """
+    """Resolve a GitHub token from unified Connections, falling back to env."""
     import os
 
     from pr_guardian.persistence.crypto import decrypt
@@ -642,25 +1973,28 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
             if pat_name:
                 row = (
                     await session.scalars(
-                        select(GithubPatRow).where(GithubPatRow.name == pat_name)
+                        select(ConnectionRow)
+                        .where(ConnectionRow.platform == "github")
+                        .where(ConnectionRow.name == pat_name)
+                        .where(ConnectionRow.archived_at.is_(None))
                     )
                 ).first()
                 if not row:
                     raise LookupError(f"GitHub PAT not found: {pat_name!r}")
-                try:
-                    decrypted = decrypt(row.encrypted_token)
-                except Exception:
-                    raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
+                decrypted = decrypt(row.encrypted_token or "")
                 if not decrypted:
                     raise LookupError(f"GitHub PAT {pat_name!r} has a corrupted token")
                 return decrypted
             else:
                 row = (
                     await session.scalars(
-                        select(GithubPatRow).where(GithubPatRow.is_default.is_(True))
+                        select(ConnectionRow)
+                        .where(ConnectionRow.platform == "github")
+                        .where(ConnectionRow.is_default.is_(True))
+                        .where(ConnectionRow.archived_at.is_(None))
                     )
                 ).first()
-                if row:
+                if row and row.encrypted_token:
                     decrypted = decrypt(row.encrypted_token)
                     if decrypted:
                         return decrypted
@@ -1232,6 +2566,12 @@ def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
         "total_input_tokens": row.total_input_tokens,
         "total_output_tokens": row.total_output_tokens,
         "cost_usd": row.cost_usd,
+        "profile_id": str(row.profile_id) if row.profile_id else None,
+        "profile_snapshot": row.profile_snapshot,
+        "connection_id": str(row.connection_id) if row.connection_id else None,
+        "connection_snapshot": row.connection_snapshot,
+        "repo_link_id": str(row.repo_link_id) if row.repo_link_id else None,
+        "scan_source": row.scan_source,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,
@@ -1312,7 +2652,13 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "total_output_tokens": row.total_output_tokens,
         "cost_usd": row.cost_usd,
         "comment_mode": row.comment_mode,
-        "pat_name": row.pat_name,
+        "profile_id": str(row.profile_id) if row.profile_id else None,
+        "profile_snapshot": row.profile_snapshot,
+        "connection_id": str(row.connection_id) if row.connection_id else None,
+        "connection_snapshot": row.connection_snapshot,
+        "repo_link_id": str(row.repo_link_id) if row.repo_link_id else None,
+        "candidate_id": str(row.candidate_id) if row.candidate_id else None,
+        "review_source": row.review_source,
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,
@@ -1601,6 +2947,8 @@ async def upsert_sync_source(
     project: str,
     repo: str,
     repo_url: str,
+    connection_id: uuid.UUID | None = None,
+    connection_snapshot: dict[str, Any] | None = None,
 ) -> None:
     """Register a repo as an active sync source."""
     async with async_session() as session:
@@ -1615,6 +2963,8 @@ async def upsert_sync_source(
             row.is_active = True
             row.org = org
             row.repo_url = repo_url
+            row.connection_id = connection_id
+            row.connection_snapshot = connection_snapshot
         else:
             session.add(
                 SyncSourceRow(
@@ -1623,6 +2973,8 @@ async def upsert_sync_source(
                     project=project,
                     repo=repo,
                     repo_url=repo_url,
+                    connection_id=connection_id,
+                    connection_snapshot=connection_snapshot,
                     is_active=True,
                 )
             )
@@ -1671,12 +3023,37 @@ async def upsert_synced_pr(data: dict[str, Any]) -> None:
         "assignees": data.get("assignees") or [],
         "comment_count": int(data.get("comment_count", 0)),
         "ci_status": data.get("ci_status", "unknown"),
+        "profile_id": data.get("profile_id"),
+        "profile_snapshot": data.get("profile_snapshot"),
+        "connection_id": data.get("connection_id"),
+        "connection_snapshot": data.get("connection_snapshot"),
+        "repo_link_id": data.get("repo_link_id"),
+        "sync_source": data.get("sync_source", "sync"),
         "pr_created_at": pr_created_at,
         "pr_updated_at": pr_updated_at,
         "synced_at": now,
     }
 
     async with async_session() as session:
+        bind = session.get_bind()
+        if bind.dialect.name != "postgresql":
+            existing = (
+                await session.scalars(
+                    select(SyncedPRRow)
+                    .where(SyncedPRRow.platform == values["platform"])
+                    .where(SyncedPRRow.pr_id == values["pr_id"])
+                    .where(SyncedPRRow.repo == values["repo"])
+                    .where(SyncedPRRow.project == values["project"])
+                )
+            ).first()
+            if existing:
+                for key, value in values.items():
+                    setattr(existing, key, value)
+            else:
+                session.add(SyncedPRRow(**values))
+            await session.commit()
+            return
+
         stmt = pg_insert(SyncedPRRow).values(id=uuid.uuid4(), **values)
         stmt = stmt.on_conflict_do_update(
             constraint="uq_synced_pr",
@@ -1771,9 +3148,7 @@ async def get_synced_pr_lookup(
             SyncedPRRow.author,
             SyncedPRRow.author_display,
             SyncedPRRow.synced_at,
-        ).where(
-            tuple_(SyncedPRRow.platform, SyncedPRRow.repo, SyncedPRRow.pr_id).in_(unique_keys)
-        )
+        ).where(tuple_(SyncedPRRow.platform, SyncedPRRow.repo, SyncedPRRow.pr_id).in_(unique_keys))
         rows = (await session.execute(q)).all()
 
     out: dict[tuple[str, str, str], dict[str, Any]] = {}
@@ -2083,6 +3458,12 @@ def _synced_pr_to_dict(row: SyncedPRRow) -> dict[str, Any]:
         "assignees": row.assignees or [],
         "comment_count": row.comment_count,
         "ci_status": row.ci_status or "unknown",
+        "profile_id": str(row.profile_id) if row.profile_id else None,
+        "profile_snapshot": row.profile_snapshot,
+        "connection_id": str(row.connection_id) if row.connection_id else None,
+        "connection_snapshot": row.connection_snapshot,
+        "repo_link_id": str(row.repo_link_id) if row.repo_link_id else None,
+        "sync_source": row.sync_source,
         # Guardian review fields populated by list_synced_prs batch lookup
         "has_guardian_review": False,
         "guardian_review_id": None,

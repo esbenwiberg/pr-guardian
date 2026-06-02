@@ -168,11 +168,28 @@ async def trigger_full_review(
 ):
     """Trigger a full review for a PR URL."""
     import asyncio
-    from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
-    from pr_guardian.platform.factory import create_adapter
+    from pr_guardian.api.review import (
+        _create_adapter_for_resolution,
+        _hydrate_pr,
+        _resolve_review_profile,
+        _parse_pr_url,
+    )
+    from pr_guardian.config.profile_resolver import ProfileResolutionError
 
     stub, platform_name = _parse_pr_url(body.pr_url)
-    adapter = create_adapter(platform_name)
+    try:
+        resolved_profile = await _resolve_review_profile(
+            stub,
+            platform_name,
+            require_connection=True,
+        )
+        if not resolved_profile.linked:
+            raise ProfileResolutionError(
+                "API-key review triggers are only allowed for linked repositories."
+            )
+        adapter = await _create_adapter_for_resolution(platform_name, resolved_profile)
+    except ProfileResolutionError as e:
+        raise HTTPException(409, str(e))
 
     try:
         pr = await _hydrate_pr(adapter, stub, platform_name)
@@ -192,7 +209,27 @@ async def trigger_full_review(
         try:
             from pr_guardian.core.orchestrator import run_review
 
-            await run_review(pr, adapter, comment_mode=body.comment_mode, dismissals=dismissals)
+            review_db_id = None
+            try:
+                review_db_id = await storage.create_review_record(
+                    pr,
+                    comment_mode=body.comment_mode,
+                )
+                if review_db_id:
+                    await storage.set_review_provenance(
+                        review_db_id,
+                        **resolved_profile.review_provenance(review_source="api_key"),
+                    )
+            except Exception as exc:
+                log.warning("agent_review_db_create_failed", error=str(exc))
+            await run_review(
+                pr,
+                adapter,
+                service_config=resolved_profile.config,
+                existing_review_db_id=review_db_id,
+                comment_mode=body.comment_mode,
+                dismissals=dismissals,
+            )
         except Exception as e:
             log.error(
                 "agent_review_failed",

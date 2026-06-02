@@ -64,14 +64,14 @@ def detect_languages_cmd(diff_target: str, output_path: str | None, files: tuple
 
 
 @main.command("validate")
-@click.option("--config", "config_path", default="review.yml", help="Config file path")
-def validate_config(config_path: str):
-    """Validate a review.yml configuration file."""
-    from pr_guardian.config.loader import load_repo_config
+def validate_config():
+    """Validate Guardian Profile policy defaults."""
+    from pr_guardian.config.profile_resolver import resolve_default_profile_config
 
     try:
-        config = load_repo_config(Path(config_path).parent)
-        click.echo("✓ Configuration is valid")
+        resolved = asyncio.run(resolve_default_profile_config())
+        config = resolved.config
+        click.echo("✓ Profile policy defaults are valid")
         click.echo(f"  Repo risk class: {config.repo_risk_class}")
         click.echo(f"  Auto-approve: {'enabled' if config.auto_approve.enabled else 'disabled'}")
         click.echo(f"  LLM provider: {config.llm.default_provider}")
@@ -81,12 +81,12 @@ def validate_config(config_path: str):
 
 
 @main.command("dry-run")
-@click.option("--config", "config_path", default=".", help="Repo path with review.yml")
+@click.option("--repo-path", default=".", help="Local repository path for context")
 @click.option("--diff-target", default="main", help="Target branch")
 @click.argument("files", nargs=-1)
-def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
+def dry_run(repo_path: str, diff_target: str, files: tuple[str, ...]):
     """Run triage classification without AI agents."""
-    from pr_guardian.config.loader import load_repo_config
+    from pr_guardian.config.profile_resolver import resolve_default_profile_config
     from pr_guardian.discovery.blast_radius import compute_blast_radius
     from pr_guardian.discovery.change_profile import build_change_profile
     from pr_guardian.discovery.dep_graph import build_dep_graph
@@ -100,8 +100,8 @@ def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
     if not file_list:
         file_list = [line.strip() for line in sys.stdin if line.strip()]
 
-    repo_path = Path(config_path)
-    config = load_repo_config(repo_path)
+    local_repo_path = Path(repo_path)
+    config = asyncio.run(resolve_default_profile_config()).config
 
     diff = Diff(files=[DiffFile(path=f, status="modified") for f in file_list])
     language_map = detect_languages(file_list)
@@ -134,7 +134,7 @@ def dry_run(config_path: str, diff_target: str, files: tuple[str, ...]):
             title="Dry run",
             head_commit_sha="",
         ),
-        repo_path=repo_path,
+        repo_path=local_repo_path,
         diff=diff,
         changed_files=file_list,
         lines_changed=diff.lines_changed,

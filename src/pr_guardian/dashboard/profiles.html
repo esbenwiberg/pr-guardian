@@ -1,0 +1,919 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR Guardian - Profiles</title>
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
+
+<aside id="sidebar"></aside>
+<script src="/static/sidebar.js"></script>
+<script src="/static/command-palette.js"></script>
+
+<div class="ml-16 lg:ml-64">
+  <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
+    <div>
+      <h1 class="text-sm font-semibold text-slate-50">Profiles</h1>
+      <p class="text-2xs text-slate-500" id="profiles-summary">Loading management state...</p>
+    </div>
+    <div class="flex items-center gap-2">
+      <button id="new-profile-btn" class="btn btn-secondary text-xs">New Profile</button>
+      <button id="link-repo-btn" class="btn btn-primary text-xs">Link Repository</button>
+    </div>
+  </header>
+
+  <main class="max-w-[1440px] mx-auto p-6">
+    <div class="flex flex-wrap items-center gap-2 mb-4" id="profile-tabs">
+      <button class="tab tab-active" data-tab="profiles">Profiles</button>
+      <button class="tab" data-tab="repositories">Repositories</button>
+      <button class="tab" data-tab="connections">Connections</button>
+      <button class="tab" data-tab="audit">Audit</button>
+      <button class="tab hidden" data-tab="managers" id="managers-tab">Managers</button>
+    </div>
+
+    <section id="tab-profiles" class="tab-panel grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)_300px] gap-4">
+      <div class="panel p-2">
+        <div class="px-2 py-2 text-2xs uppercase tracking-wide text-slate-500">Profile List</div>
+        <div id="profile-list" class="space-y-1"></div>
+      </div>
+
+      <form id="profile-form" class="panel p-4 space-y-5">
+        <div class="flex items-start justify-between gap-4">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-100" id="profile-editor-title">Profile</h2>
+            <p class="text-xs text-slate-500" id="profile-editor-subtitle">Structured policy controls</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <span id="system-profile-badge" class="badge hidden">System-owned</span>
+            <button type="button" id="archive-profile-btn" class="btn btn-secondary text-xs">Archive</button>
+            <button type="submit" class="btn btn-primary text-xs">Save Profile</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="field">Name
+            <input id="profile-name" class="form-input" autocomplete="off">
+          </label>
+          <label class="field">Severity floor
+            <select id="severity-floor" class="form-select">
+              <option value="">Default</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </label>
+          <label class="field md:col-span-2">Description
+            <input id="profile-description" class="form-input" autocomplete="off">
+          </label>
+        </div>
+
+        <div class="section-grid">
+          <fieldset class="fieldset">
+            <legend>Review Policy</legend>
+            <label class="field">Repo risk class
+              <select id="repo-risk-class" class="form-select">
+                <option value="">Default</option>
+                <option value="standard">Standard</option>
+                <option value="elevated">Elevated</option>
+                <option value="critical">Critical</option>
+              </select>
+            </label>
+            <label class="field">Reviewer group
+              <input id="reviewer-group" class="form-input" autocomplete="off">
+            </label>
+            <label class="field">Auto-approve max score
+              <input id="auto-approve-max-score" type="number" min="0" max="100" step="1" class="form-input">
+            </label>
+            <label class="field">Hard-block score
+              <input id="hard-block-score" type="number" min="0" max="100" step="1" class="form-input">
+            </label>
+          </fieldset>
+
+          <fieldset class="fieldset">
+            <legend>Readiness</legend>
+            <label class="field">Quiet period seconds
+              <input id="quiet-period-seconds" type="number" min="0" max="3600" step="1" class="form-input">
+            </label>
+            <label class="field">Checks max wait minutes
+              <input id="max-wait-minutes" type="number" min="0" max="1440" step="1" class="form-input">
+            </label>
+            <label class="field">Archmap max wait minutes
+              <input id="archmap-max-wait-minutes" type="number" min="0" max="1440" step="1" class="form-input">
+            </label>
+            <label class="toggle-line">
+              <input id="archmap-expected" type="checkbox">
+              <span>Wait for Archmap artifact</span>
+            </label>
+            <label class="field">Ignored statuses
+              <input id="ignored-statuses" class="form-input" autocomplete="off" placeholder="comma separated">
+            </label>
+            <label class="field">Ignored checks
+              <input id="ignored-checks" class="form-input" autocomplete="off" placeholder="comma separated">
+            </label>
+          </fieldset>
+        </div>
+
+        <fieldset class="fieldset">
+          <legend>Side Effects</legend>
+          <div class="toggle-grid">
+            <label class="toggle-line"><input data-side-effect="comments" type="checkbox"> <span>Comments</span></label>
+            <label class="toggle-line"><input data-side-effect="labels" type="checkbox"> <span>Labels</span></label>
+            <label class="toggle-line"><input data-side-effect="reviewers" type="checkbox"> <span>Reviewer requests</span></label>
+            <label class="toggle-line"><input data-side-effect="formal_approve" type="checkbox"> <span>Formal approve</span></label>
+            <label class="toggle-line"><input data-side-effect="formal_request_changes" type="checkbox"> <span>Formal request changes</span></label>
+            <label class="toggle-line"><input data-side-effect="scan_issues" type="checkbox"> <span>Scan issue creation</span></label>
+          </div>
+          <div class="mt-3 flex flex-wrap gap-4">
+            <label class="toggle-line"><input id="guardian-clearance" type="checkbox"> <span>Guardian clearance enabled</span></label>
+            <label class="toggle-line"><input id="platform-approval-enabled" type="checkbox"> <span>Platform approval enabled</span></label>
+          </div>
+        </fieldset>
+      </form>
+
+      <aside class="panel p-4 space-y-4">
+        <div>
+          <h3 class="inspector-title">Usage</h3>
+          <p class="text-2xl font-semibold text-slate-100" id="profile-usage-count">0</p>
+          <p class="text-xs text-slate-500">linked repositories</p>
+        </div>
+        <div>
+          <h3 class="inspector-title">Side Effects</h3>
+          <div id="profile-side-effects" class="space-y-1 text-xs text-slate-400"></div>
+        </div>
+        <div>
+          <h3 class="inspector-title">Recent Audit</h3>
+          <div id="profile-recent-audit" class="space-y-2 text-xs text-slate-400"></div>
+        </div>
+      </aside>
+    </section>
+
+    <section id="tab-repositories" class="tab-panel hidden panel overflow-hidden">
+      <div class="table-wrap">
+        <table class="mgmt-table">
+          <thead><tr><th>Platform</th><th>Org / Project</th><th>Repo</th><th>Profile</th><th>Connection</th><th>Auto-review</th><th>Paused</th><th>Last readiness</th></tr></thead>
+          <tbody id="repo-link-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-connections" class="tab-panel hidden space-y-4">
+      <div class="panel p-4">
+        <div class="flex items-center justify-between gap-4 mb-3">
+          <div>
+            <h2 class="text-sm font-semibold text-slate-100">Connections</h2>
+            <p class="text-xs text-slate-500">Tokens are accepted only during save and are never displayed after save.</p>
+          </div>
+          <button id="new-connection-btn" class="btn btn-primary text-xs">New Connection</button>
+        </div>
+        <div id="env-imports" class="mb-3 text-xs text-slate-400"></div>
+        <div class="table-wrap">
+          <table class="mgmt-table">
+            <thead><tr><th>Name</th><th>Platform</th><th>Org / URL</th><th>Token prefix</th><th>Health</th><th>Sync</th><th>Linked repos</th><th>Updated</th><th>Actions</th></tr></thead>
+            <tbody id="connection-rows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-audit" class="tab-panel hidden panel p-4">
+      <div class="flex items-center justify-between mb-3">
+        <div>
+          <h2 class="text-sm font-semibold text-slate-100">Audit</h2>
+          <p class="text-xs text-slate-500">Field-level diffs are redacted before rendering.</p>
+        </div>
+        <button id="refresh-audit-btn" class="btn btn-secondary text-xs">Refresh</button>
+      </div>
+      <div class="table-wrap">
+        <table class="mgmt-table">
+          <thead><tr><th>Time</th><th>Actor</th><th>Action</th><th>Target</th><th>Before / After</th></tr></thead>
+          <tbody id="audit-rows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="tab-managers" class="tab-panel hidden panel p-4">
+      <div class="flex items-end justify-between gap-4 mb-4">
+        <div>
+          <h2 class="text-sm font-semibold text-slate-100">Profile Managers</h2>
+          <p class="text-xs text-slate-500">Admins can delegate Profile, Connection, and repo-link management.</p>
+        </div>
+        <form id="manager-form" class="flex items-end gap-2">
+          <label class="field">UPN / email
+            <input id="manager-email" type="email" class="form-input w-72" autocomplete="off">
+          </label>
+          <button class="btn btn-primary text-xs" type="submit">Add</button>
+        </form>
+      </div>
+      <div id="manager-rows" class="space-y-2"></div>
+    </section>
+  </main>
+</div>
+
+<div id="modal" class="hidden fixed inset-0 z-50">
+  <div class="absolute inset-0 bg-black/60" data-close-modal></div>
+  <div class="absolute inset-x-4 top-12 mx-auto max-w-2xl panel p-5 shadow-2xl">
+    <div class="flex items-center justify-between mb-4">
+      <h2 id="modal-title" class="text-sm font-semibold text-slate-100">Modal</h2>
+      <button data-close-modal class="text-slate-500 hover:text-slate-200" type="button">x</button>
+    </div>
+    <div id="modal-body"></div>
+  </div>
+</div>
+
+<div id="toast" class="hidden fixed bottom-4 right-4 z-50 px-4 py-2 bg-slate-800 border border-slate-700 text-slate-100 text-xs rounded-lg shadow-xl"></div>
+
+<style>
+  .panel { border: 1px solid rgb(30 41 59); background: rgb(15 23 42 / 0.58); border-radius: 8px; }
+  .hidden { display: none !important; }
+  .tab { font-size: 12px; padding: 7px 12px; border-radius: 7px; border: 1px solid rgb(30 41 59); color: rgb(148 163 184); background: rgb(15 23 42 / 0.45); }
+  .tab:hover { color: rgb(241 245 249); border-color: rgb(71 85 105); }
+  .tab-active { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.5); background: rgb(99 102 241 / 0.10); }
+  .field { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: rgb(148 163 184); }
+  .fieldset { border: 1px solid rgb(30 41 59); border-radius: 8px; padding: 14px; }
+  .fieldset legend { padding: 0 6px; font-size: 11px; color: rgb(203 213 225); font-weight: 600; }
+  .section-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .toggle-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+  .toggle-line { display: flex; align-items: center; gap: 8px; font-size: 12px; color: rgb(203 213 225); }
+  .toggle-line input { width: 14px; height: 14px; accent-color: rgb(99 102 241); }
+  .badge { font-size: 10px; padding: 2px 7px; border-radius: 5px; color: rgb(125 211 252); border: 1px solid rgb(14 165 233 / 0.45); background: rgb(14 165 233 / 0.08); }
+  .profile-list-item { width: 100%; text-align: left; padding: 9px 10px; border-radius: 7px; color: rgb(203 213 225); font-size: 12px; }
+  .profile-list-item:hover { background: rgb(30 41 59 / 0.7); }
+  .profile-list-item.active { background: rgb(99 102 241 / 0.12); color: rgb(224 231 255); }
+  .inspector-title { font-size: 11px; color: rgb(148 163 184); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+  .table-wrap { overflow-x: auto; }
+  .mgmt-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .mgmt-table th { text-align: left; color: rgb(148 163 184); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid rgb(30 41 59); white-space: nowrap; }
+  .mgmt-table td { color: rgb(203 213 225); padding: 10px 12px; border-bottom: 1px solid rgb(30 41 59 / 0.75); vertical-align: top; }
+  .health { font-size: 10px; padding: 2px 7px; border-radius: 5px; border: 1px solid rgb(71 85 105); color: rgb(148 163 184); }
+  .health.healthy { color: rgb(110 231 183); border-color: rgb(16 185 129 / 0.45); background: rgb(16 185 129 / 0.08); }
+  .health.unhealthy { color: rgb(248 113 113); border-color: rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.08); }
+  @media (max-width: 900px) {
+    .section-grid, .toggle-grid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<script>
+(function () {
+  'use strict';
+
+  const API = '/api/profiles';
+  const state = {
+    me: null,
+    profiles: [],
+    connections: [],
+    repoLinks: [],
+    audit: [],
+    managers: [],
+    envImports: {},
+    selectedProfileId: null,
+    activeTab: 'profiles',
+  };
+
+  const els = {
+    summary: document.getElementById('profiles-summary'),
+    profileList: document.getElementById('profile-list'),
+    profileForm: document.getElementById('profile-form'),
+    profileTitle: document.getElementById('profile-editor-title'),
+    profileSubtitle: document.getElementById('profile-editor-subtitle'),
+    profileUsage: document.getElementById('profile-usage-count'),
+    systemBadge: document.getElementById('system-profile-badge'),
+    archiveProfile: document.getElementById('archive-profile-btn'),
+    sideEffects: document.getElementById('profile-side-effects'),
+    recentAudit: document.getElementById('profile-recent-audit'),
+    repoRows: document.getElementById('repo-link-rows'),
+    connectionRows: document.getElementById('connection-rows'),
+    auditRows: document.getElementById('audit-rows'),
+    managerRows: document.getElementById('manager-rows'),
+    envImports: document.getElementById('env-imports'),
+    managersTab: document.getElementById('managers-tab'),
+    modal: document.getElementById('modal'),
+    modalTitle: document.getElementById('modal-title'),
+    modalBody: document.getElementById('modal-body'),
+    toast: document.getElementById('toast'),
+  };
+
+  const profileInputs = {
+    name: document.getElementById('profile-name'),
+    description: document.getElementById('profile-description'),
+    severityFloor: document.getElementById('severity-floor'),
+    repoRiskClass: document.getElementById('repo-risk-class'),
+    reviewerGroup: document.getElementById('reviewer-group'),
+    autoApproveMaxScore: document.getElementById('auto-approve-max-score'),
+    hardBlockScore: document.getElementById('hard-block-score'),
+    quietPeriodSeconds: document.getElementById('quiet-period-seconds'),
+    maxWaitMinutes: document.getElementById('max-wait-minutes'),
+    archmapMaxWaitMinutes: document.getElementById('archmap-max-wait-minutes'),
+    archmapExpected: document.getElementById('archmap-expected'),
+    ignoredStatuses: document.getElementById('ignored-statuses'),
+    ignoredChecks: document.getElementById('ignored-checks'),
+    guardianClearance: document.getElementById('guardian-clearance'),
+    platformApprovalEnabled: document.getElementById('platform-approval-enabled'),
+  };
+
+  function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value ?? '');
+    return div.innerHTML;
+  }
+
+  function csv(value) {
+    return Array.isArray(value) ? value.join(', ') : '';
+  }
+
+  function parseCsv(value) {
+    return String(value || '').split(',').map(v => v.trim()).filter(Boolean);
+  }
+
+  function toNumberOrUndefined(input) {
+    if (input.value === '') return undefined;
+    return Number(input.value);
+  }
+
+  function compact(obj) {
+    Object.keys(obj).forEach(key => {
+      const value = obj[key];
+      if (value === undefined || value === '' || value === null) {
+        delete obj[key];
+      } else if (Array.isArray(value) && !value.length) {
+        delete obj[key];
+      } else if (typeof value === 'object' && !Array.isArray(value)) {
+        compact(value);
+        if (!Object.keys(value).length) delete obj[key];
+      }
+    });
+    return obj;
+  }
+
+  function tokenPrefix(value) {
+    return value ? escapeHtml(value) : '<span class="text-slate-500">none</span>';
+  }
+
+  function healthBadge(connection) {
+    const status = connection.health_status || 'unknown';
+    return `<span class="health ${escapeHtml(status)}" title="${escapeHtml(connection.health_message || '')}">${escapeHtml(status)}</span>`;
+  }
+
+  async function api(path, options = {}) {
+    const response = await fetch(`${API}${path}`, {
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+      ...options,
+    });
+    if (!response.ok) {
+      let detail = response.statusText;
+      try {
+        const body = await response.json();
+        detail = body.detail || detail;
+      } catch {}
+      throw new Error(detail);
+    }
+    if (response.status === 204) return null;
+    return response.json();
+  }
+
+  async function load() {
+    try {
+      const [me, profiles, connections, repoLinks, audit, envImports] = await Promise.all([
+        fetch('/api/me', { credentials: 'same-origin' }).then(r => r.ok ? r.json() : null),
+        api('/profiles'),
+        api('/connections'),
+        api('/repo-links'),
+        api('/audit?limit=50'),
+        api('/env-imports'),
+      ]);
+      state.me = me || {};
+      state.profiles = profiles;
+      state.connections = connections;
+      state.repoLinks = repoLinks;
+      state.audit = audit;
+      state.envImports = envImports;
+      if (!state.selectedProfileId && state.profiles[0]) state.selectedProfileId = state.profiles[0].id;
+      if (state.me.is_admin) {
+        els.managersTab.classList.remove('hidden');
+        try { state.managers = await api('/managers'); } catch { state.managers = []; }
+      }
+      renderAll();
+    } catch (error) {
+      showToast(error.message || 'Failed to load Profiles');
+    }
+  }
+
+  function renderAll() {
+    els.summary.textContent = `${state.profiles.length} profiles · ${state.repoLinks.length} linked repos · ${state.connections.length} connections`;
+    renderTabs();
+    renderProfileList();
+    renderProfileEditor();
+    renderRepoLinks();
+    renderConnections();
+    renderAudit();
+    renderManagers();
+    renderEnvImports();
+  }
+
+  function renderTabs() {
+    document.querySelectorAll('#profile-tabs .tab').forEach(tab => {
+      tab.classList.toggle('tab-active', tab.dataset.tab === state.activeTab);
+    });
+    document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.add('hidden'));
+    document.getElementById(`tab-${state.activeTab}`).classList.remove('hidden');
+  }
+
+  function profileName(id) {
+    return state.profiles.find(p => p.id === id)?.name || 'Unknown profile';
+  }
+
+  function connectionName(id) {
+    return state.connections.find(c => c.id === id)?.name || 'Unknown connection';
+  }
+
+  function selectedProfile() {
+    return state.profiles.find(p => p.id === state.selectedProfileId) || state.profiles[0] || null;
+  }
+
+  function renderProfileList() {
+    els.profileList.innerHTML = state.profiles.map(profile => `
+      <button type="button" class="profile-list-item ${profile.id === state.selectedProfileId ? 'active' : ''}" data-profile-id="${escapeHtml(profile.id)}">
+        <div class="flex items-center gap-2">
+          <span class="truncate">${escapeHtml(profile.name)}</span>
+          ${profile.is_system ? '<span class="badge ml-auto">System</span>' : ''}
+        </div>
+        <div class="text-2xs text-slate-500 truncate">${escapeHtml(profile.description || 'No description')}</div>
+      </button>
+    `).join('') || '<div class="px-2 py-8 text-center text-xs text-slate-500">No Profiles</div>';
+  }
+
+  function renderProfileEditor() {
+    const profile = selectedProfile();
+    if (!profile) return;
+    const settings = profile.settings || {};
+    const thresholds = settings.thresholds || {};
+    const humanReview = settings.human_review || {};
+    const readiness = settings.readiness || {};
+    const sideEffects = settings.side_effects || {};
+    state.selectedProfileId = profile.id;
+    els.profileTitle.textContent = `Profile: ${profile.name}`;
+    els.profileSubtitle.textContent = profile.is_default ? 'Default/noop Profile, editable and non-deletable' : 'Structured policy controls';
+    els.systemBadge.classList.toggle('hidden', !profile.is_system);
+    els.archiveProfile.disabled = Boolean(profile.is_default);
+    els.archiveProfile.classList.toggle('opacity-50', Boolean(profile.is_default));
+    profileInputs.name.value = profile.name || '';
+    profileInputs.description.value = profile.description || '';
+    profileInputs.severityFloor.value = settings.severity_floor || '';
+    profileInputs.repoRiskClass.value = settings.repo_risk_class || '';
+    profileInputs.reviewerGroup.value = humanReview.reviewer_group || '';
+    profileInputs.autoApproveMaxScore.value = thresholds.auto_approve_max_score ?? '';
+    profileInputs.hardBlockScore.value = thresholds.hard_block_score ?? '';
+    profileInputs.quietPeriodSeconds.value = readiness.quiet_period_seconds ?? 10;
+    profileInputs.maxWaitMinutes.value = readiness.max_wait_minutes ?? 30;
+    profileInputs.archmapMaxWaitMinutes.value = readiness.archmap_max_wait_minutes ?? 10;
+    profileInputs.archmapExpected.checked = Boolean(readiness.archmap_expected);
+    profileInputs.ignoredStatuses.value = csv(readiness.ignored_statuses);
+    profileInputs.ignoredChecks.value = csv(readiness.ignored_checks);
+    profileInputs.guardianClearance.checked = Boolean(settings.guardian_clearance);
+    profileInputs.platformApprovalEnabled.checked = Boolean(settings.platform_approval_enabled);
+    document.querySelectorAll('[data-side-effect]').forEach(input => {
+      input.checked = Boolean(sideEffects[input.dataset.sideEffect]);
+    });
+    const usage = state.repoLinks.filter(link => link.profile_id === profile.id).length;
+    els.profileUsage.textContent = String(usage);
+    els.sideEffects.innerHTML = Object.keys(sideEffects).length
+      ? Object.entries(sideEffects).map(([key, value]) => `<div>${escapeHtml(key)}: <span class="${value ? 'text-emerald-300' : 'text-slate-500'}">${value ? 'on' : 'off'}</span></div>`).join('')
+      : '<div class="text-slate-500">No side effects enabled</div>';
+    const profileAudit = state.audit.filter(event => event.target_id === profile.id).slice(0, 4);
+    els.recentAudit.innerHTML = profileAudit.length
+      ? profileAudit.map(event => `<div><span class="text-slate-300">${escapeHtml(event.action)}</span><br><span class="text-slate-500">${escapeHtml(event.actor)} · ${formatDate(event.created_at)}</span></div>`).join('')
+      : '<div class="text-slate-500">No audit rows yet</div>';
+  }
+
+  function collectProfilePayload() {
+    const sideEffects = {};
+    document.querySelectorAll('[data-side-effect]').forEach(input => {
+      sideEffects[input.dataset.sideEffect] = input.checked;
+    });
+    return {
+      name: profileInputs.name.value.trim(),
+      description: profileInputs.description.value.trim(),
+      settings: compact({
+        repo_risk_class: profileInputs.repoRiskClass.value,
+        human_review: { reviewer_group: profileInputs.reviewerGroup.value.trim() },
+        thresholds: {
+          auto_approve_max_score: toNumberOrUndefined(profileInputs.autoApproveMaxScore),
+          hard_block_score: toNumberOrUndefined(profileInputs.hardBlockScore),
+        },
+        severity_floor: profileInputs.severityFloor.value,
+        guardian_clearance: profileInputs.guardianClearance.checked,
+        platform_approval_enabled: profileInputs.platformApprovalEnabled.checked,
+        readiness: {
+          quiet_period_seconds: toNumberOrUndefined(profileInputs.quietPeriodSeconds),
+          max_wait_minutes: toNumberOrUndefined(profileInputs.maxWaitMinutes),
+          archmap_max_wait_minutes: toNumberOrUndefined(profileInputs.archmapMaxWaitMinutes),
+          ignored_statuses: parseCsv(profileInputs.ignoredStatuses.value),
+          ignored_checks: parseCsv(profileInputs.ignoredChecks.value),
+          archmap_expected: profileInputs.archmapExpected.checked,
+        },
+        side_effects: sideEffects,
+      }),
+    };
+  }
+
+  function profileOptions(selectedId) {
+    return state.profiles.map(profile => `<option value="${escapeHtml(profile.id)}" ${profile.id === selectedId ? 'selected' : ''}>${escapeHtml(profile.name)}</option>`).join('');
+  }
+
+  function connectionOptions(selectedId, platform = '') {
+    return state.connections
+      .filter(connection => !platform || connection.platform === platform)
+      .map(connection => `<option value="${escapeHtml(connection.id)}" ${connection.id === selectedId ? 'selected' : ''}>${escapeHtml(connection.name)}</option>`)
+      .join('');
+  }
+
+  function renderRepoLinks() {
+    els.repoRows.innerHTML = state.repoLinks.map(link => {
+      const orgProject = link.platform === 'ado'
+        ? `${link.org_url || ''}${link.project ? ' / ' + link.project : ''}`
+        : link.repo_owner || '';
+      return `
+        <tr data-repo-link-id="${escapeHtml(link.id)}">
+          <td>${escapeHtml(link.platform)}</td>
+          <td>${escapeHtml(orgProject)}</td>
+          <td><div>${escapeHtml(link.repo_name)}</div><div class="text-2xs text-slate-500">${escapeHtml(link.canonical_repo_key)}</div></td>
+          <td><select class="form-select text-xs py-1" data-link-field="profile_id">${profileOptions(link.profile_id)}</select></td>
+          <td><select class="form-select text-xs py-1" data-link-field="connection_id">${connectionOptions(link.connection_id, link.platform)}</select></td>
+          <td><input type="checkbox" data-link-field="auto_review_enabled" ${link.auto_review_enabled ? 'checked' : ''}></td>
+          <td><input type="checkbox" data-link-field="paused" ${link.paused ? 'checked' : ''}></td>
+          <td><span class="text-slate-500">No candidate yet</span></td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="8" class="text-center text-slate-500 py-10">No linked repositories</td></tr>';
+  }
+
+  function renderConnections() {
+    els.connectionRows.innerHTML = state.connections.map(connection => {
+      const linkedCount = state.repoLinks.filter(link => link.connection_id === connection.id).length;
+      const syncDisabled = connection.health_status !== 'healthy';
+      return `
+        <tr data-connection-id="${escapeHtml(connection.id)}">
+          <td>${escapeHtml(connection.name)}</td>
+          <td>${escapeHtml(connection.platform)}</td>
+          <td>${escapeHtml(connection.org_url || '')}</td>
+          <td data-token-prefix>${tokenPrefix(connection.token_prefix)}</td>
+          <td>${healthBadge(connection)}<div class="text-2xs text-slate-500 mt-1">${escapeHtml(connection.health_message || '')}</div></td>
+          <td><input type="checkbox" data-connection-sync ${connection.sync_enabled ? 'checked' : ''} ${syncDisabled ? 'disabled' : ''} title="${syncDisabled ? 'Validate healthy before enabling sync' : ''}"></td>
+          <td>${linkedCount}</td>
+          <td>${formatDate(connection.updated_at)}</td>
+          <td class="whitespace-nowrap">
+            <button class="link-btn" data-edit-connection>Edit</button>
+            <button class="link-btn" data-validate-connection>Validate</button>
+            <button class="link-btn text-red-300" data-archive-connection>Archive</button>
+          </td>
+        </tr>`;
+    }).join('') || '<tr><td colspan="9" class="text-center text-slate-500 py-10">No Connections</td></tr>';
+  }
+
+  function renderEnvImports() {
+    const available = Object.entries(state.envImports || {})
+      .filter(([, value]) => value && value.available)
+      .map(([name]) => name);
+    els.envImports.innerHTML = available.length
+      ? `<div class="rounded border border-sky-500/30 bg-sky-500/10 px-3 py-2">Import available from environment: ${available.map(escapeHtml).join(', ')} <button class="link-btn ml-2" data-env-import>Set up from env</button></div>`
+      : '<div class="text-slate-500">No environment Connection imports are currently advertised.</div>';
+  }
+
+  function renderAudit() {
+    els.auditRows.innerHTML = state.audit.map(event => `
+      <tr>
+        <td>${formatDate(event.created_at)}</td>
+        <td>${escapeHtml(event.actor)}</td>
+        <td>${escapeHtml(event.action)}</td>
+        <td>${escapeHtml(event.target_type)}<br><span class="text-2xs text-slate-500">${escapeHtml(event.target_id || '')}</span></td>
+        <td>${renderDiff(event.diff || {})}</td>
+      </tr>
+    `).join('') || '<tr><td colspan="5" class="text-center text-slate-500 py-10">No audit rows</td></tr>';
+  }
+
+  function renderDiff(diff) {
+    const entries = Object.entries(diff);
+    if (!entries.length) return '<span class="text-slate-500">No field diff</span>';
+    return entries.map(([field, value]) => {
+      const before = scrubSecret(value.before, field);
+      const after = scrubSecret(value.after, field);
+      return `<div><span class="text-slate-400">${escapeHtml(field)}</span>: <span class="text-slate-500">${escapeHtml(before)}</span> -> <span class="text-slate-200">${escapeHtml(after)}</span></div>`;
+    }).join('');
+  }
+
+  function scrubSecret(value, field = '') {
+    const text = typeof value === 'object' ? JSON.stringify(value) : String(value ?? '');
+    if (/token|secret|password|pat/i.test(String(field))) return '[redacted]';
+    if (/token|secret|password|pat/i.test(text)) return '[redacted]';
+    return text;
+  }
+
+  function renderManagers() {
+    if (!state.me?.is_admin) return;
+    els.managerRows.innerHTML = state.managers.map(manager => `
+      <div class="flex items-center gap-3 rounded-lg border border-slate-800 px-3 py-2">
+        <div class="flex-1">
+          <div class="text-sm text-slate-200">${escapeHtml(manager.email)}</div>
+          <div class="text-2xs text-slate-500">Added by ${escapeHtml(manager.added_by || '')} · ${formatDate(manager.created_at)}</div>
+        </div>
+        <button class="btn btn-secondary text-xs" data-remove-manager="${escapeHtml(manager.email)}">Remove</button>
+      </div>
+    `).join('') || '<div class="py-8 text-center text-xs text-slate-500">No Profile Managers</div>';
+  }
+
+  function formatDate(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString(); } catch { return iso; }
+  }
+
+  function showToast(message) {
+    els.toast.textContent = message;
+    els.toast.classList.remove('hidden');
+    setTimeout(() => els.toast.classList.add('hidden'), 3500);
+  }
+
+  function openModal(title, html) {
+    els.modalTitle.textContent = title;
+    els.modalBody.innerHTML = html;
+    els.modal.classList.remove('hidden');
+  }
+
+  function closeModal() {
+    const tokenInput = els.modal.querySelector('input[name="token"]');
+    if (tokenInput) tokenInput.value = '';
+    els.modal.classList.add('hidden');
+    els.modalBody.innerHTML = '';
+  }
+
+  function connectionForm(connection = null) {
+    const isEdit = Boolean(connection);
+    return `
+      <form id="connection-form" class="space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="field">Name<input name="name" class="form-input" autocomplete="off" value="${escapeHtml(connection?.name || '')}" required></label>
+          <label class="field">Platform
+            <select name="platform" class="form-select" ${isEdit ? 'disabled' : ''}>
+              <option value="github" ${connection?.platform === 'github' ? 'selected' : ''}>GitHub</option>
+              <option value="ado" ${connection?.platform === 'ado' ? 'selected' : ''}>Azure DevOps</option>
+            </select>
+          </label>
+          <label class="field md:col-span-2">ADO org URL<input name="org_url" class="form-input" autocomplete="off" value="${escapeHtml(connection?.org_url || '')}" placeholder="https://dev.azure.com/org"></label>
+          <label class="field md:col-span-2">Token<input name="token" type="password" class="form-input" autocomplete="new-password" ${isEdit ? '' : 'required'} placeholder="${isEdit ? 'Leave blank to keep existing token' : 'Token is cleared after save'}"></label>
+          <label class="field md:col-span-2">Description<input name="description" class="form-input" autocomplete="off" value="${escapeHtml(connection?.description || '')}"></label>
+        </div>
+        <label class="toggle-line"><input name="sync_enabled" type="checkbox" ${connection?.sync_enabled ? 'checked' : ''} ${connection && connection.health_status !== 'healthy' ? 'disabled' : ''}> <span>Enable broad PR sync when healthy</span></label>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" class="btn btn-secondary text-xs" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-primary text-xs">${isEdit ? 'Save Connection' : 'Create Connection'}</button>
+        </div>
+      </form>`;
+  }
+
+  function repoLinkForm() {
+    return `
+      <form id="repo-link-form" class="space-y-3">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <label class="field">Platform
+            <select name="platform" class="form-select">
+              <option value="github">GitHub</option>
+              <option value="ado">Azure DevOps</option>
+            </select>
+          </label>
+          <label class="field">Repo owner<input name="repo_owner" class="form-input" autocomplete="off" placeholder="github owner"></label>
+          <label class="field">ADO org URL<input name="org_url" class="form-input" autocomplete="off" placeholder="https://dev.azure.com/org"></label>
+          <label class="field">ADO project<input name="project" class="form-input" autocomplete="off"></label>
+          <label class="field">Repo name<input name="repo_name" class="form-input" autocomplete="off" required></label>
+          <label class="field">Repo URL<input name="repo_url" class="form-input" autocomplete="off"></label>
+          <label class="field">Profile<select name="profile_id" class="form-select" required>${profileOptions(state.selectedProfileId)}</select></label>
+          <label class="field">Connection<select name="connection_id" class="form-select" required>${connectionOptions('')}</select></label>
+        </div>
+        <div class="flex flex-wrap gap-4">
+          <label class="toggle-line"><input name="auto_review_enabled" type="checkbox" checked> <span>Auto-review enabled</span></label>
+          <label class="toggle-line"><input name="paused" type="checkbox"> <span>Paused</span></label>
+        </div>
+        <div class="flex justify-end gap-2 pt-2">
+          <button type="button" class="btn btn-secondary text-xs" data-close-modal>Cancel</button>
+          <button type="submit" class="btn btn-primary text-xs">Link Repository</button>
+        </div>
+      </form>`;
+  }
+
+  function wireEvents() {
+    document.querySelectorAll('#profile-tabs .tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        state.activeTab = tab.dataset.tab;
+        renderTabs();
+      });
+    });
+    els.profileList.addEventListener('click', event => {
+      const button = event.target.closest('[data-profile-id]');
+      if (!button) return;
+      state.selectedProfileId = button.dataset.profileId;
+      renderProfileList();
+      renderProfileEditor();
+    });
+    document.getElementById('new-profile-btn').addEventListener('click', async () => {
+      const created = await api('/profiles', {
+        method: 'POST',
+        body: JSON.stringify({
+          name: uniqueName('New Profile'),
+          description: '',
+          settings: {
+            readiness: { quiet_period_seconds: 10, max_wait_minutes: 30, archmap_max_wait_minutes: 10, archmap_expected: false },
+            side_effects: {},
+          },
+        }),
+      });
+      state.profiles.push(created);
+      state.selectedProfileId = created.id;
+      await refreshAudit();
+      renderAll();
+      showToast('Profile created');
+    });
+    els.profileForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const profile = selectedProfile();
+      if (!profile) return;
+      const updated = await api(`/profiles/${profile.id}`, { method: 'PATCH', body: JSON.stringify(collectProfilePayload()) });
+      state.profiles = state.profiles.map(item => item.id === updated.id ? updated : item);
+      await refreshAudit();
+      renderAll();
+      showToast('Profile saved');
+    });
+    els.archiveProfile.addEventListener('click', async () => {
+      const profile = selectedProfile();
+      if (!profile || profile.is_default) return;
+      await api(`/profiles/${profile.id}`, { method: 'DELETE' });
+      state.profiles = state.profiles.filter(item => item.id !== profile.id);
+      state.selectedProfileId = state.profiles[0]?.id || null;
+      await refreshAudit();
+      renderAll();
+      showToast('Profile archived');
+    });
+    document.getElementById('new-connection-btn').addEventListener('click', () => openConnectionModal());
+    document.getElementById('link-repo-btn').addEventListener('click', () => openRepoLinkModal());
+    document.getElementById('refresh-audit-btn').addEventListener('click', refreshAudit);
+    els.modal.addEventListener('click', event => {
+      if (event.target.closest('[data-close-modal]')) closeModal();
+    });
+    els.connectionRows.addEventListener('click', handleConnectionClick);
+    els.connectionRows.addEventListener('change', handleConnectionChange);
+    els.repoRows.addEventListener('change', handleRepoLinkChange);
+    document.getElementById('manager-form').addEventListener('submit', handleManagerSubmit);
+    els.managerRows.addEventListener('click', handleManagerClick);
+  }
+
+  function uniqueName(base) {
+    let index = state.profiles.length + 1;
+    let name = `${base} ${index}`;
+    while (state.profiles.some(profile => profile.name === name)) {
+      index += 1;
+      name = `${base} ${index}`;
+    }
+    return name;
+  }
+
+  function openConnectionModal(connection = null) {
+    openModal(connection ? 'Edit Connection' : 'New Connection', connectionForm(connection));
+    const form = document.getElementById('connection-form');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const payload = {
+        name: data.get('name'),
+        platform: connection?.platform || data.get('platform'),
+        org_url: data.get('org_url') || null,
+        description: data.get('description') || '',
+        sync_enabled: Boolean(data.get('sync_enabled')),
+      };
+      const token = String(data.get('token') || '');
+      if (token) payload.token = token;
+      if (!connection && !payload.token) throw new Error('Token is required');
+      const saved = await api(connection ? `/connections/${connection.id}` : '/connections', {
+        method: connection ? 'PATCH' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      form.querySelector('input[name="token"]').value = '';
+      state.connections = connection
+        ? state.connections.map(item => item.id === saved.id ? saved : item)
+        : [...state.connections, saved];
+      await refreshAudit();
+      closeModal();
+      renderAll();
+      showToast(`Connection ${connection ? 'saved' : 'created'}`);
+    });
+  }
+
+  function openRepoLinkModal() {
+    openModal('Link Repository', repoLinkForm());
+    const form = document.getElementById('repo-link-form');
+    form.addEventListener('submit', async event => {
+      event.preventDefault();
+      const data = new FormData(form);
+      const payload = {
+        platform: data.get('platform'),
+        repo_owner: data.get('repo_owner') || '',
+        org_url: data.get('org_url') || '',
+        project: data.get('project') || '',
+        repo_name: data.get('repo_name'),
+        repo_url: data.get('repo_url') || '',
+        profile_id: data.get('profile_id'),
+        connection_id: data.get('connection_id'),
+        auto_review_enabled: Boolean(data.get('auto_review_enabled')),
+        paused: Boolean(data.get('paused')),
+      };
+      const saved = await api('/repo-links', { method: 'POST', body: JSON.stringify(payload) });
+      state.repoLinks.push(saved);
+      await refreshAudit();
+      closeModal();
+      state.activeTab = 'repositories';
+      renderAll();
+      showToast('Repository linked');
+    });
+  }
+
+  async function handleConnectionClick(event) {
+    const row = event.target.closest('[data-connection-id]');
+    if (!row) return;
+    const connection = state.connections.find(item => item.id === row.dataset.connectionId);
+    if (!connection) return;
+    if (event.target.matches('[data-edit-connection]')) {
+      openConnectionModal(connection);
+    } else if (event.target.matches('[data-validate-connection]')) {
+      const updated = await api(`/connections/${connection.id}/validate`, { method: 'POST' });
+      state.connections = state.connections.map(item => item.id === updated.id ? updated : item);
+      await refreshAudit();
+      renderAll();
+      showToast('Connection validated');
+    } else if (event.target.matches('[data-archive-connection]')) {
+      await api(`/connections/${connection.id}`, { method: 'DELETE' });
+      state.connections = state.connections.filter(item => item.id !== connection.id);
+      await refreshAudit();
+      renderAll();
+      showToast('Connection archived');
+    }
+  }
+
+  async function handleConnectionChange(event) {
+    const row = event.target.closest('[data-connection-id]');
+    if (!row || !event.target.matches('[data-connection-sync]')) return;
+    const connection = state.connections.find(item => item.id === row.dataset.connectionId);
+    const updated = await api(`/connections/${connection.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ sync_enabled: event.target.checked }),
+    });
+    state.connections = state.connections.map(item => item.id === updated.id ? updated : item);
+    await refreshAudit();
+    renderAll();
+  }
+
+  async function handleRepoLinkChange(event) {
+    const row = event.target.closest('[data-repo-link-id]');
+    if (!row) return;
+    const link = state.repoLinks.find(item => item.id === row.dataset.repoLinkId);
+    const field = event.target.dataset.linkField;
+    if (!link || !field) return;
+    const value = event.target.type === 'checkbox' ? event.target.checked : event.target.value;
+    const updated = await api(`/repo-links/${link.id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ [field]: value }),
+    });
+    state.repoLinks = state.repoLinks.map(item => item.id === updated.id ? updated : item);
+    await refreshAudit();
+    renderAll();
+  }
+
+  async function handleManagerSubmit(event) {
+    event.preventDefault();
+    if (!state.me?.is_admin) return;
+    const input = document.getElementById('manager-email');
+    await api('/managers', { method: 'POST', body: JSON.stringify({ email: input.value }) });
+    input.value = '';
+    state.managers = await api('/managers');
+    renderManagers();
+    showToast('Profile Manager added');
+  }
+
+  async function handleManagerClick(event) {
+    const button = event.target.closest('[data-remove-manager]');
+    if (!button || !state.me?.is_admin) return;
+    await api(`/managers/${encodeURIComponent(button.dataset.removeManager)}`, { method: 'DELETE' });
+    state.managers = await api('/managers');
+    renderManagers();
+    showToast('Profile Manager removed');
+  }
+
+  async function refreshAudit() {
+    state.audit = await api('/audit?limit=50');
+    renderAudit();
+    renderProfileEditor();
+  }
+
+  wireEvents();
+  load();
+})();
+</script>
+</body>
+</html>

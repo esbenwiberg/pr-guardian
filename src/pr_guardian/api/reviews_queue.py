@@ -8,16 +8,20 @@ page is functional in dev sandboxes.
 from __future__ import annotations
 
 import re
+import asyncio
 import uuid as uuid_mod
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from pr_guardian.auth.dependencies import require_human_signed_in, require_profile_manager
+from pr_guardian.auth.identity import Identity
+from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 
 log = structlog.get_logger()
@@ -58,7 +62,71 @@ def _iso(dt: datetime) -> str:
 
 _DEMO_QUEUE = [
     {
+        "id": "demo-candidate-124",
+        "row_key": "candidate:demo-candidate-124",
+        "subject_type": "candidate",
+        "platform": "github",
+        "title": "feat/auth",
+        "repo": "demo/api",
+        "author": "alice",
+        "branch": "feat/auth",
+        "pr_id": "124",
+        "pr_url": "https://github.com/demo/api/pull/124",
+        "state": "waiting",
+        "reason": "checks_pending",
+        "readiness": {
+            "state": "waiting",
+            "reason": "checks_pending",
+            "snapshot": {
+                "checks": {"total": 7, "passed": 4, "pending": 2, "failed": 0},
+                "archmap": {"state": "waiting", "minutes_remaining": 6},
+                "quiet_period": {"satisfied": True},
+            },
+        },
+        "risk_tier": "medium",
+        "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        "estimated_review_minutes": 0,
+        "files_changed": 0,
+        "trigger_origin": "readiness",
+        "triggered_by": None,
+        "stale": False,
+        "started_at": _iso(_now() - timedelta(minutes=3)),
+        "updated_at": _iso(_now() - timedelta(minutes=3)),
+    },
+    {
+        "id": "demo-candidate-88",
+        "row_key": "candidate:demo-candidate-88",
+        "subject_type": "candidate",
+        "platform": "ado",
+        "title": "fix/billing",
+        "repo": "demo/billing",
+        "author": "bob",
+        "branch": "fix/billing",
+        "pr_id": "88",
+        "pr_url": "https://dev.azure.com/demo/project/_git/billing/pullrequest/88",
+        "state": "blocked",
+        "reason": "checks_timeout",
+        "readiness": {
+            "state": "blocked",
+            "reason": "checks_timeout",
+            "snapshot": {
+                "checks": {"total": 4, "passed": 3, "pending": 1, "failed": 0},
+                "quiet_period": {"satisfied": True},
+            },
+        },
+        "risk_tier": "medium",
+        "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        "estimated_review_minutes": 0,
+        "files_changed": 0,
+        "trigger_origin": "readiness",
+        "triggered_by": None,
+        "stale": False,
+        "started_at": _iso(_now() - timedelta(minutes=14)),
+        "updated_at": _iso(_now() - timedelta(minutes=14)),
+    },
+    {
         "id": "demo-pr-482",
+        "row_key": "review:demo-pr-482",
         "subject_type": "pr",
         "platform": "github",
         "title": "feat/auth-refactor",
@@ -77,6 +145,7 @@ _DEMO_QUEUE = [
     },
     {
         "id": "demo-pr-481",
+        "row_key": "review:demo-pr-481",
         "subject_type": "pr",
         "platform": "github",
         "title": "fix/n-plus-one",
@@ -95,6 +164,7 @@ _DEMO_QUEUE = [
     },
     {
         "id": "demo-scan-legacy",
+        "row_key": "review:demo-scan-legacy",
         "subject_type": "scan",
         "platform": "ado",
         "title": "scan/legacy-billing",
@@ -113,6 +183,7 @@ _DEMO_QUEUE = [
     },
     {
         "id": "demo-pr-479",
+        "row_key": "review:demo-pr-479",
         "subject_type": "pr",
         "platform": "github",
         "title": "refactor/billing-job",
@@ -194,6 +265,7 @@ def _shape_review(
     pr_status = cached.get("approval_status")
     return {
         "id": str(row.get("id") or pr_id),
+        "row_key": f"review:{row.get('id') or pr_id}",
         "subject_type": "scan" if row.get("scan_id") else "pr",
         "platform": platform,
         "title": title,
@@ -216,6 +288,119 @@ def _shape_review(
     }
 
 
+_VISIBLE_BLOCKED_CANDIDATE_REASONS = {
+    "checks_failed",
+    "checks_timeout",
+    "fork_requires_manual_start",
+    "repo_link_paused",
+    "auto_review_disabled",
+}
+_VISIBLE_WAITING_CANDIDATE_REASONS = {
+    "quiet_period",
+    "checks_pending",
+    "archmap_wait",
+}
+_HIDDEN_CANDIDATE_REASONS = {
+    "draft",
+    "platform_error",
+    "status_write_failed",
+    "profile_unavailable",
+    "connection_unavailable",
+    "connection_token_unavailable",
+}
+
+
+def _snapshot_bool(snapshot: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value: Any = snapshot
+        for part in key.split("."):
+            if not isinstance(value, dict) or part not in value:
+                value = None
+                break
+            value = value[part]
+        if value is True:
+            return True
+    return False
+
+
+def _candidate_visible(candidate: dict[str, Any]) -> bool:
+    state = candidate.get("state")
+    reason = candidate.get("reason") or ""
+    snapshot = candidate.get("readiness_snapshot") or {}
+    if not (
+        candidate.get("repo_link_id")
+        and candidate.get("profile_id")
+        and candidate.get("connection_id")
+    ):
+        return False
+    if reason in _HIDDEN_CANDIDATE_REASONS:
+        return False
+    if state == "waiting":
+        if reason == "draft" or _snapshot_bool(snapshot, "draft", "metadata.draft", "pr.draft"):
+            return False
+        return reason in _VISIBLE_WAITING_CANDIDATE_REASONS
+    if state == "blocked":
+        return reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS
+    return False
+
+
+def _shape_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    snapshot = candidate.get("readiness_snapshot") or {}
+    pr_id = str(candidate.get("pr_id") or "")
+    repo = candidate.get("repo") or candidate.get("repo_name") or ""
+    title = (
+        snapshot.get("title")
+        or snapshot.get("pr", {}).get("title")
+        or snapshot.get("metadata", {}).get("title")
+        or f"PR #{pr_id}"
+    )
+    author = (
+        snapshot.get("author")
+        or snapshot.get("pr", {}).get("author")
+        or snapshot.get("metadata", {}).get("author")
+        or ""
+    )
+    branch = (
+        snapshot.get("source_branch")
+        or snapshot.get("branch")
+        or snapshot.get("pr", {}).get("source_branch")
+        or snapshot.get("metadata", {}).get("source_branch")
+        or ""
+    )
+    updated_at = candidate.get("updated_at") or candidate.get("created_at")
+    state = candidate.get("state") or "waiting"
+    reason = candidate.get("reason") or ""
+    return {
+        "id": str(candidate.get("id")),
+        "row_key": f"candidate:{candidate.get('id')}",
+        "subject_type": "candidate",
+        "platform": candidate.get("platform") or "",
+        "title": title,
+        "repo": repo,
+        "author": author,
+        "branch": branch,
+        "pr_id": pr_id,
+        "pr_url": candidate.get("pr_url") or "",
+        "head_sha": candidate.get("head_sha") or "",
+        "repo_link_id": candidate.get("repo_link_id"),
+        "profile_id": candidate.get("profile_id"),
+        "connection_id": candidate.get("connection_id"),
+        "connection_snapshot": candidate.get("connection_snapshot"),
+        "state": state,
+        "reason": reason,
+        "readiness": {"state": state, "reason": reason, "snapshot": snapshot},
+        "risk_tier": "medium",
+        "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        "estimated_review_minutes": 0,
+        "files_changed": 0,
+        "trigger_origin": "readiness",
+        "triggered_by": None,
+        "stale": False,
+        "started_at": updated_at,
+        "updated_at": updated_at,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Queue endpoint
 # ---------------------------------------------------------------------------
@@ -229,7 +414,15 @@ async def reviews_queue(request: Request):
     except Exception:
         reviews = []
 
-    if not reviews:
+    try:
+        candidates = await storage.list_active_readiness_candidates(
+            states=["waiting", "blocked"],
+            limit=100,
+        )
+    except Exception:
+        candidates = []
+
+    if not reviews and not candidates:
         return JSONResponse(content={"items": _DEMO_QUEUE, "source": "demo"})
 
     # Bulk-fetch the synced_prs cache so we can (a) show platform-side state
@@ -246,7 +439,17 @@ async def reviews_queue(request: Request):
         pr_lookup = {}
 
     items = [_shape_review(r, pr_lookup) for r in reviews]
-    items.sort(key=lambda r: (not r["stale"], r["started_at"] or ""), reverse=True)
+    items.extend(_shape_candidate(c) for c in candidates if _candidate_visible(c))
+    state_rank = {"blocked": 3, "waiting": 2}
+    items.sort(
+        key=lambda r: (
+            state_rank.get(r.get("state") or "", 1),
+            bool(r.get("stale")),
+            r.get("updated_at") or r.get("started_at") or "",
+            r.get("row_key") or r.get("id") or "",
+        ),
+        reverse=True,
+    )
     return {"items": items, "source": "db"}
 
 
@@ -390,6 +593,223 @@ class FinalizeRequest(BaseModel):
     comment_to_author: str = ""
     verdict: str = "approve"
     comment_mode: str = "inline"
+
+
+class OverrideReadinessRequest(BaseModel):
+    reason: str
+    confirm: bool = False
+    comment_mode: str = "summary"
+
+
+class ManualBypassRequest(BaseModel):
+    comment_mode: str = "summary"
+
+
+def _candidate_pr(candidate: dict[str, Any]) -> PlatformPR:
+    return PlatformPR(
+        platform=Platform((candidate.get("platform") or "").lower()),
+        pr_id=str(candidate.get("pr_id") or ""),
+        repo=str(candidate.get("repo") or ""),
+        repo_url=str(candidate.get("pr_url") or ""),
+        source_branch="",
+        target_branch="",
+        author="",
+        title="",
+        head_commit_sha=str(candidate.get("head_sha") or ""),
+        org=str(candidate.get("org_url") or candidate.get("repo_owner") or ""),
+        project=str(candidate.get("project") or ""),
+    )
+
+
+async def _adapter_from_candidate(candidate: dict[str, Any]):
+    from pr_guardian.platform.factory import create_adapter
+
+    connection_id = candidate.get("connection_id")
+    if not connection_id:
+        return create_adapter(candidate["platform"])
+    connection = await storage.get_connection(uuid_mod.UUID(str(connection_id)))
+    if not connection or connection.get("archived_at"):
+        raise HTTPException(409, "Candidate Connection is archived or inaccessible")
+    token = await storage.get_connection_token(uuid_mod.UUID(str(connection_id)))
+    if not token:
+        raise HTTPException(409, "Candidate Connection has no accessible token")
+    return create_adapter(
+        candidate["platform"],
+        token_override=token,
+        org_url_override=connection.get("org_url") or None,
+    )
+
+
+async def _run_candidate_review(
+    candidate: dict[str, Any],
+    review_id: uuid_mod.UUID,
+    adapter,
+    *,
+    comment_mode: str,
+    manual_comment_override: bool,
+) -> None:
+    try:
+        from pr_guardian.config.profile_resolver import resolve_profile_snapshot_config
+        from pr_guardian.core.orchestrator import run_review
+
+        resolved = await resolve_profile_snapshot_config(
+            candidate.get("profile_snapshot"),
+            candidate.get("connection_snapshot"),
+        )
+        await run_review(
+            _candidate_pr(candidate),
+            adapter,
+            service_config=resolved.config,
+            existing_review_db_id=review_id,
+            comment_mode=comment_mode,
+            manual_comment_override=manual_comment_override,
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.error(
+            "candidate_manual_review_failed",
+            candidate_id=candidate.get("id"),
+            review_id=str(review_id),
+            error=str(exc),
+        )
+
+
+@router.post("/candidates/{candidate_id}/start")
+async def start_candidate_review_now(
+    candidate_id: uuid_mod.UUID,
+    body: ManualBypassRequest,
+    identity: Identity = Depends(require_human_signed_in),
+):
+    """Start a manual review for a candidate without marking readiness success."""
+    candidate = await storage.get_readiness_candidate_by_id(candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Readiness candidate not found")
+    adapter = await _adapter_from_candidate(candidate)
+    pr = _candidate_pr(candidate)
+    actor = identity.email or identity.display_name
+    snapshot = {
+        **(candidate.get("readiness_snapshot") or {}),
+        "manual_bypass": {"actor": actor, "at": _now().isoformat()},
+    }
+    started = await storage.try_start_candidate_review(
+        candidate_id,
+        pr,
+        source="manual_bypass",
+        actor=actor,
+        reason="manual_bypass",
+        readiness_snapshot=snapshot,
+        comment_mode=body.comment_mode,
+        review_source="manual_bypass",
+    )
+    if started is None:
+        raise HTTPException(409, "Candidate was already claimed or is no longer active")
+    review_id, updated = started
+    asyncio.create_task(
+        _run_candidate_review(
+            updated,
+            review_id,
+            adapter,
+            comment_mode=body.comment_mode,
+            manual_comment_override=True,
+        )
+    )
+    return {
+        "status": "queued",
+        "review_id": str(review_id),
+        "candidate_id": str(candidate_id),
+        "readiness_marked_success": False,
+        "source": "manual_bypass",
+        "actor": actor,
+    }
+
+
+@router.post("/candidates/{candidate_id}/override")
+async def override_candidate_readiness(
+    candidate_id: uuid_mod.UUID,
+    body: OverrideReadinessRequest,
+    identity: Identity = Depends(require_profile_manager),
+):
+    """Mark readiness successful by authorized override and start one review."""
+    if not body.confirm:
+        raise HTTPException(400, "Override confirmation is required")
+    reason = body.reason.strip()
+    if not reason:
+        raise HTTPException(400, "Override reason is required")
+    candidate = await storage.get_readiness_candidate_by_id(candidate_id)
+    if not candidate:
+        raise HTTPException(404, "Readiness candidate not found")
+    previous_snapshot = {
+        "state": candidate.get("state"),
+        "reason": candidate.get("reason"),
+        "readiness_snapshot": candidate.get("readiness_snapshot") or {},
+    }
+    actor = identity.email or identity.display_name
+    override_snapshot = {
+        **(candidate.get("readiness_snapshot") or {}),
+        "manual_override": {
+            "actor": actor,
+            "reason": reason,
+            "at": _now().isoformat(),
+            "previous": previous_snapshot,
+        },
+    }
+    adapter = await _adapter_from_candidate(candidate)
+    pr = _candidate_pr(candidate)
+    started = await storage.try_start_candidate_review(
+        candidate_id,
+        pr,
+        source="override",
+        actor=actor,
+        reason="manual_override",
+        readiness_snapshot=override_snapshot,
+        comment_mode=body.comment_mode,
+        audit_event={
+            "actor": actor,
+            "action": "readiness.override",
+            "target_type": "readiness_candidate",
+            "target_id": candidate_id,
+            "before": previous_snapshot,
+            "after": {"reason": reason, "snapshot": override_snapshot},
+        },
+    )
+    if started is None:
+        raise HTTPException(409, "Candidate was already claimed or is no longer active")
+    review_id, updated = started
+    status_posted = True
+    try:
+        # Readiness statuses are always on; route through the readiness status
+        # helper so endpoint code does not own platform-write semantics.
+        from pr_guardian.core.readiness import _post_readiness_status
+
+        status_posted = await _post_readiness_status(
+            adapter, pr, "success", f"Guardian readiness overridden: {reason}"
+        )
+    except Exception as exc:  # noqa: BLE001
+        status_posted = False
+        log.warning(
+            "readiness_override_status_failed",
+            candidate_id=str(candidate_id),
+            review_id=str(review_id),
+            error=str(exc),
+        )
+    asyncio.create_task(
+        _run_candidate_review(
+            updated,
+            review_id,
+            adapter,
+            comment_mode=body.comment_mode,
+            manual_comment_override=True,
+        )
+    )
+    return {
+        "status": "queued",
+        "review_id": str(review_id),
+        "candidate_id": str(candidate_id),
+        "readiness_marked_success": True,
+        "source": "override",
+        "actor": actor,
+        "readiness_status_posted": status_posted,
+        "audit_recorded": True,
+    }
 
 
 def _find_finding_by_id(review: dict[str, Any], finding_id: str) -> dict[str, Any] | None:
@@ -554,8 +974,34 @@ async def _post_github_comment_fallback(
     return formatted
 
 
+async def _adapter_from_review_connection(review: dict[str, Any]):
+    from pr_guardian.platform.factory import create_adapter, create_github_adapter
+
+    connection_id = review.get("connection_id")
+    platform = (review.get("platform") or "").lower()
+    if connection_id:
+        connection = await storage.get_connection(uuid_mod.UUID(str(connection_id)))
+        if not connection or connection.get("archived_at"):
+            raise HTTPException(409, "Stored Connection is archived or inaccessible")
+        token = await storage.get_connection_token(uuid_mod.UUID(str(connection_id)))
+        if not token:
+            raise HTTPException(409, "Stored Connection has no accessible token")
+        return create_adapter(
+            platform,
+            token_override=token,
+            org_url_override=connection.get("org_url") or None,
+        )
+    if platform == "github":
+        return await create_github_adapter(review.get("pat_name"))
+    return create_adapter(platform)
+
+
 @router.post("/{review_id}/finalize")
-async def finalize_review(review_id: str, body: FinalizeRequest):
+async def finalize_review(
+    review_id: str,
+    body: FinalizeRequest,
+    identity: Identity = Depends(require_human_signed_in),
+):
     """Post the reviewer's decisions, comment, and verdict back to the platform.
 
     Brief 05's main contract. Reuses the existing platform adapters so the
@@ -617,8 +1063,6 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
     include_fix_findings_in_summary = body.comment_mode != "inline"
 
     if platform_str:
-        from pr_guardian.models.pr import Platform, PlatformPR
-        from pr_guardian.platform.factory import create_adapter, create_github_adapter
         from pr_guardian.models.findings import Finding, Severity, Certainty
         from pr_guardian.api.review import recover_org_project_from_pr_url
 
@@ -650,11 +1094,7 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
             )
 
         try:
-            adapter = (
-                await create_github_adapter(review.get("pat_name"))
-                if platform_str == "github"
-                else create_adapter(platform_str)
-            )
+            adapter = await _adapter_from_review_connection(review)
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -777,6 +1217,7 @@ async def finalize_review(review_id: str, body: FinalizeRequest):
                 "platform_actions": actions,
                 "posted": posted,
                 "error": error,
+                "actor_email": identity.email or identity.display_name,
                 "at": _now().isoformat(),
             },
         )

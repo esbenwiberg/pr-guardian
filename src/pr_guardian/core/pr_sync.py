@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-import os
+import uuid
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import structlog
 
@@ -177,15 +178,22 @@ def _normalize_ado_pr(pr: dict, org_url: str, project: str, repo_name: str) -> d
     }
 
 
-async def _sync_github(token: str, pat_label: str = "env") -> None:
-    from pr_guardian.platform.github import GitHubAdapter
+def _connection_uuid(connection: dict[str, Any]) -> uuid.UUID:
+    return uuid.UUID(str(connection["id"]))
 
-    rules = await storage.list_exclusion_rules()
+
+async def _sync_github(token: str, connection: dict[str, Any]) -> None:
+    from pr_guardian.platform.github import GitHubAdapter
 
     adapter = GitHubAdapter(token=token)
     try:
         repos = await adapter.list_accessible_repos()
-        log.info("github_sync_repos_discovered", count=len(repos), pat=pat_label)
+        log.info(
+            "github_sync_repos_discovered",
+            count=len(repos),
+            connection_id=connection["id"],
+            connection_name=connection.get("name", ""),
+        )
 
         since = (datetime.now(timezone.utc) - timedelta(days=_MERGED_RETENTION_DAYS)).isoformat()
         for repo_data in repos:
@@ -193,9 +201,6 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
             if not repo:
                 continue
             org = repo_data.get("owner", {}).get("login", "")
-            if storage.repo_matches_rules(rules, "github", org, "", repo):
-                log.debug("github_repo_skipped_by_rule", repo=repo)
-                continue
             try:
                 prs = await adapter.list_repo_open_prs(repo)
                 default_branch = repo_data.get("default_branch") or "main"
@@ -215,12 +220,20 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
                         project="",
                         repo=repo,
                         repo_url=repo_data.get("clone_url", ""),
+                        connection_id=_connection_uuid(connection),
+                        connection_snapshot=connection,
                     )
                     for pr in prs:
-                        await storage.upsert_synced_pr(_normalize_github_pr(pr, repo))
+                        data = _normalize_github_pr(pr, repo)
+                        data["connection_id"] = _connection_uuid(connection)
+                        data["connection_snapshot"] = connection
+                        await storage.upsert_synced_pr(data)
                         keep_pr_ids.append(str(pr["number"]))
                     for pr in merged_prs:
-                        await storage.upsert_synced_pr(_normalize_github_merged_pr(pr, repo))
+                        data = _normalize_github_merged_pr(pr, repo)
+                        data["connection_id"] = _connection_uuid(connection)
+                        data["connection_snapshot"] = connection
+                        await storage.upsert_synced_pr(data)
                         keep_pr_ids.append(str(pr["number"]))
                     await storage.mark_sync_source_synced("github", repo)
                 await storage.delete_closed_prs("github", repo, "", keep_pr_ids)
@@ -236,15 +249,20 @@ async def _sync_github(token: str, pat_label: str = "env") -> None:
         await adapter.close()
 
 
-async def _sync_ado(pat: str, org_url: str) -> None:
+async def _sync_ado(pat: str, connection: dict[str, Any]) -> None:
     from pr_guardian.platform.ado import ADOAdapter
 
-    rules = await storage.list_exclusion_rules()
+    org_url = connection.get("org_url") or ""
 
     adapter = ADOAdapter(pat=pat, org_url=org_url)
     try:
         projects = await adapter.list_projects()
-        log.info("ado_sync_projects_discovered", count=len(projects))
+        log.info(
+            "ado_sync_projects_discovered",
+            count=len(projects),
+            connection_id=connection["id"],
+            connection_name=connection.get("name", ""),
+        )
 
         since = (datetime.now(timezone.utc) - timedelta(days=_MERGED_RETENTION_DAYS)).isoformat()
         for proj in projects:
@@ -256,9 +274,6 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                 for repo_data in repos:
                     repo_name = repo_data.get("name", "")
                     if not repo_name:
-                        continue
-                    if storage.repo_matches_rules(rules, "ado", org_url, project_name, repo_name):
-                        log.debug("ado_repo_skipped_by_rule", project=project_name, repo=repo_name)
                         continue
                     try:
                         prs = await adapter.list_repo_open_prs(project_name, repo_name)
@@ -288,16 +303,22 @@ async def _sync_ado(pat: str, org_url: str) -> None:
                                 project=project_name,
                                 repo=repo_name,
                                 repo_url=repo_data.get("remoteUrl", ""),
+                                connection_id=_connection_uuid(connection),
+                                connection_snapshot=connection,
                             )
                             for pr in prs:
-                                await storage.upsert_synced_pr(
-                                    _normalize_ado_pr(pr, org_url, project_name, repo_name)
-                                )
+                                data = _normalize_ado_pr(pr, org_url, project_name, repo_name)
+                                data["connection_id"] = _connection_uuid(connection)
+                                data["connection_snapshot"] = connection
+                                await storage.upsert_synced_pr(data)
                                 keep_pr_ids.append(str(pr.get("pullRequestId", "")))
                             for pr in merged_prs:
-                                await storage.upsert_synced_pr(
-                                    _normalize_ado_merged_pr(pr, org_url, project_name, repo_name)
+                                data = _normalize_ado_merged_pr(
+                                    pr, org_url, project_name, repo_name
                                 )
+                                data["connection_id"] = _connection_uuid(connection)
+                                data["connection_snapshot"] = connection
+                                await storage.upsert_synced_pr(data)
                                 keep_pr_ids.append(str(pr.get("number", "")))
                             await storage.mark_sync_source_synced(
                                 "ado", repo_name, project=project_name
@@ -325,39 +346,40 @@ async def _sync_ado(pat: str, org_url: str) -> None:
         await adapter.close()
 
 
-async def _resolve_github_sync_tokens() -> list[tuple[str, str]]:
-    """Return list of (label, token) pairs for every GitHub PAT to sync.
-
-    Iterates all PATs in the DB so each org's repos are reachable. Falls back to
-    GITHUB_TOKEN env var only when the DB list is empty (legacy single-PAT installs).
-    """
-    pats = await storage.list_github_pats()
-    pairs: list[tuple[str, str]] = []
-    for pat in pats:
-        try:
-            token = await storage.resolve_github_token(pat["name"])
-        except LookupError as exc:
-            log.warning("github_pat_resolve_failed", pat=pat["name"], error=str(exc))
-            continue
-        if token:
-            pairs.append((pat["name"], token))
-    if not pairs:
-        env_token = os.environ.get("GITHUB_TOKEN", "")
-        if env_token:
-            pairs.append(("env", env_token))
-    return pairs
-
-
 async def run_pr_sync() -> None:
     """Single sync pass across all configured platforms."""
-    ado_pat = os.environ.get("ADO_PAT", "")
-    ado_org_url = os.environ.get("ADO_ORG_URL", "")
-
     tasks = []
-    for label, token in await _resolve_github_sync_tokens():
-        tasks.append(_sync_github(token, pat_label=label))
-    if ado_pat and ado_org_url:
-        tasks.append(_sync_ado(ado_pat, ado_org_url))
+    for connection in await storage.list_broad_sync_connections():
+        try:
+            token = await storage.get_connection_token(_connection_uuid(connection))
+        except Exception as exc:
+            log.warning(
+                "pr_sync_connection_token_resolve_failed",
+                connection_id=connection.get("id", ""),
+                connection_name=connection.get("name", ""),
+                platform=connection.get("platform", ""),
+                error=str(exc),
+            )
+            continue
+        if not token:
+            log.warning(
+                "pr_sync_connection_missing_token",
+                connection_id=connection["id"],
+                connection_name=connection.get("name", ""),
+                platform=connection.get("platform", ""),
+            )
+            continue
+        if connection["platform"] == "github":
+            tasks.append(_sync_github(token, connection))
+        elif connection["platform"] == "ado":
+            if not connection.get("org_url"):
+                log.warning(
+                    "pr_sync_ado_connection_missing_org",
+                    connection_id=connection["id"],
+                    connection_name=connection.get("name", ""),
+                )
+                continue
+            tasks.append(_sync_ado(token, connection))
 
     if not tasks:
         log.debug("pr_sync_no_sources_configured")

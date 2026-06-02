@@ -41,7 +41,7 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
 
     # ── Header ──────────────────────────────────────────────────────
     decision_display = {
-        "auto_approve": ("\u2705", "Auto-Approved"),
+        "auto_approve": ("\u2705", "Guardian Cleared"),
         "human_review": ("\U0001f440", "Human Review Required"),
         "reject": ("\u274c", "Changes Requested"),
         "hard_block": ("\U0001f6ab", "Blocked"),

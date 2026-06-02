@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import tempfile
 import uuid
 from datetime import datetime, timezone
@@ -14,7 +15,11 @@ from pr_guardian.agents.hotspot import HotspotAgent
 from pr_guardian.agents.performance import PerformanceAgent
 from pr_guardian.agents.security_privacy import SecurityPrivacyAgent
 from pr_guardian.agents.test_quality import TestQualityAgent
-from pr_guardian.config.loader import apply_global_settings, load_repo_config
+from pr_guardian.config.loader import apply_global_settings
+from pr_guardian.config.profile_resolver import (
+    resolve_default_profile_config,
+    resolve_profile_snapshot_config,
+)
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import (
@@ -107,6 +112,7 @@ async def run_review(
     skip_platform_side_effects: bool = False,
     comment_mode: str = "summary",
     pat_name: str | None = None,
+    manual_comment_override: bool = False,
 ) -> ReviewResult:
     """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
@@ -156,10 +162,14 @@ async def run_review(
             except Exception as e:
                 log.warning("db_stage_update_failed", stage=stage, error=str(e))
 
-    # Set pending status (skip for synthetic PRs like repo reviews)
-    if not skip_platform_side_effects:
+    side_effects_skipped = skip_platform_side_effects or await _is_stale_automatic_review(
+        adapter, pr, storage=storage, review_id=review_db_id
+    )
+
+    # Set pending review status (skip for synthetic PRs like repo reviews or stale automatic runs)
+    if not side_effects_skipped:
         try:
-            await adapter.set_status(pr, "pending", "PR Guardian review in progress")
+            await _post_review_status(adapter, pr, "pending", "Guardian review in progress")
         except Exception as e:
             log.warning("set_status_failed", error=str(e))
 
@@ -178,8 +188,9 @@ async def run_review(
             base_url=base_url,
             dismissals=dismissals,
             diff_override=diff_override,
-            skip_platform_side_effects=skip_platform_side_effects,
+            skip_platform_side_effects=side_effects_skipped,
             comment_mode=comment_mode,
+            manual_comment_override=manual_comment_override,
         )
     except Exception as exc:
         if storage and review_db_id:
@@ -208,6 +219,7 @@ async def _run_pipeline(
     diff_override=None,
     skip_platform_side_effects: bool = False,
     comment_mode: str = "summary",
+    manual_comment_override: bool = False,
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
@@ -238,8 +250,10 @@ async def _run_pipeline(
 
     # Stage 0: Discovery
     await _update_stage("discovery", "Parsing diff and building context")
-    config = service_config or load_repo_config(repo_path)
-    config = await apply_global_settings(config)
+    if service_config is None:
+        config = (await resolve_default_profile_config()).config
+    else:
+        config = await apply_global_settings(service_config)
 
     language_map = detect_languages(changed_files)
     security_surface = build_security_surface(config.security_surface, changed_files)
@@ -351,7 +365,10 @@ async def _run_pipeline(
             summary="Mechanical checks failed — PR blocked.",
             pipeline_log=pipeline_log,
         )
-        if post_comment:
+        side_effects_skipped = skip_platform_side_effects or await _is_stale_automatic_review(
+            adapter, pr, storage=storage, review_id=review_db_id
+        )
+        if post_comment and not side_effects_skipped:
             await _post_results(
                 adapter,
                 pr,
@@ -361,6 +378,7 @@ async def _run_pipeline(
                 comment_mode=comment_mode,
                 review_id=review_db_id,
                 storage=storage,
+                manual_comment_override=manual_comment_override,
             )
         await _save_result(storage, review_db_id, result, _emit)
         return result
@@ -659,7 +677,10 @@ async def _run_pipeline(
     result.pipeline_log = pipeline_log
 
     # Post results
-    if post_comment:
+    side_effects_skipped = skip_platform_side_effects or await _is_stale_automatic_review(
+        adapter, pr, storage=storage, review_id=review_db_id
+    )
+    if post_comment and not side_effects_skipped:
         await _post_results(
             adapter,
             pr,
@@ -669,6 +690,7 @@ async def _run_pipeline(
             comment_mode=comment_mode,
             review_id=review_db_id,
             storage=storage,
+            manual_comment_override=manual_comment_override,
         )
 
     # Persist to DB
@@ -711,6 +733,16 @@ async def run_re_review(
                 pr,
                 comment_mode=original_review.get("comment_mode", "summary"),
             )
+            await storage.set_review_provenance(
+                review_db_id,
+                profile_id=_uuid_or_none(original_review.get("profile_id")),
+                profile_snapshot=original_review.get("profile_snapshot"),
+                connection_id=_uuid_or_none(original_review.get("connection_id")),
+                connection_snapshot=original_review.get("connection_snapshot"),
+                repo_link_id=_uuid_or_none(original_review.get("repo_link_id")),
+                candidate_id=_uuid_or_none(original_review.get("candidate_id")),
+                review_source="re_review",
+            )
         except Exception as e:
             log.warning("db_create_failed", error=str(e))
 
@@ -747,7 +779,8 @@ async def run_re_review(
             except Exception:
                 pass
 
-    await adapter.set_status(pr, "pending", "PR Guardian re-review in progress")
+    if post_comment:
+        await _post_review_status(adapter, pr, "pending", "Guardian re-review in progress")
 
     try:
         return await _run_re_review_pipeline(
@@ -792,8 +825,15 @@ async def _run_re_review_pipeline(
     """Inner re-review pipeline."""
     from pr_guardian.models.context import RiskTier
 
-    config = service_config or GuardianConfig()
-    config = await apply_global_settings(config)
+    if service_config is None:
+        config = (
+            await resolve_profile_snapshot_config(
+                original_review.get("profile_snapshot"),
+                original_review.get("connection_snapshot"),
+            )
+        ).config
+    else:
+        config = await apply_global_settings(service_config)
 
     # --- Step 1: Fetch incremental diff ---
     await _update_stage("discovery", "Fetching incremental diff since last review")
@@ -1158,6 +1198,14 @@ def _parse_risk_class(value: str | None) -> RepoRiskClass:
     return mapping.get(value or "", RepoRiskClass.STANDARD)
 
 
+def _uuid_or_none(value) -> uuid.UUID | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))
+
+
 async def _save_result(storage, review_db_id, result, _emit) -> None:
     """Persist the review result and emit the 'complete' event."""
     if storage and review_db_id:
@@ -1175,6 +1223,11 @@ async def _save_result(storage, review_db_id, result, _emit) -> None:
                 )
             except Exception as fallback_err:
                 log.error("db_fallback_mark_failed", error=str(fallback_err))
+        else:
+            try:
+                await storage.mark_candidate_reviewed_for_review(review_db_id)
+            except Exception as e:
+                log.warning("candidate_review_completion_update_failed", error=str(e))
     _emit("complete", f"Decision: {result.decision.value}", score=result.combined_score)
 
 
@@ -1203,6 +1256,86 @@ _MECH_SEVERITY_MAP: dict[str, Severity] = {
 }
 
 
+async def _post_review_status(
+    adapter: PlatformAdapter, pr: PlatformPR, state: str, description: str
+) -> None:
+    method = getattr(adapter, "set_review_status", None)
+    if method is not None:
+        result = method(pr, state, description)
+        if inspect.isawaitable(result):
+            await result
+        return
+    try:
+        result = adapter.set_status(pr, state, description, context="guardian/review")
+    except TypeError:
+        result = adapter.set_status(pr, state, description)
+    if inspect.isawaitable(result):
+        await result
+
+
+async def _post_result_status(
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    result: ReviewResult,
+) -> None:
+    if result.decision == Decision.AUTO_APPROVE:
+        await _post_review_status(adapter, pr, "success", "Guardian cleared")
+    elif result.decision == Decision.HUMAN_REVIEW:
+        await _post_review_status(adapter, pr, "success", "Guardian review needs human review")
+    elif result.decision == Decision.REJECT:
+        await _post_review_status(adapter, pr, "failure", "Guardian review requested changes")
+    elif result.decision == Decision.HARD_BLOCK:
+        await _post_review_status(adapter, pr, "failure", "Guardian review blocked this PR")
+
+
+async def _is_stale_automatic_review(
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    *,
+    storage,
+    review_id: uuid.UUID | None,
+) -> bool:
+    if not storage or not review_id:
+        return False
+    try:
+        review = await storage.get_review(review_id)
+    except Exception as exc:
+        log.warning("stale_review_lookup_failed", review_id=str(review_id), error=str(exc))
+        return False
+    if not review or review.get("review_source") != "automatic":
+        return False
+    expected_sha = review.get("head_commit_sha") or pr.head_commit_sha
+    try:
+        metadata = await adapter.fetch_pr_metadata(pr)
+    except Exception as exc:
+        log.warning("stale_sha_metadata_lookup_failed", pr_id=pr.pr_id, error=str(exc))
+        return False
+    if metadata.head_sha and expected_sha and metadata.head_sha != expected_sha:
+        log.info(
+            "stale_automatic_review_side_effects_skipped",
+            review_id=str(review_id),
+            expected_sha=expected_sha,
+            current_sha=metadata.head_sha,
+        )
+        if review.get("candidate_id"):
+            try:
+                await storage.record_candidate_transition(
+                    uuid.UUID(review["candidate_id"]),
+                    to_state="superseded",
+                    source="review_completion",
+                    actor="guardian",
+                    reason="new_commit",
+                    readiness_snapshot={
+                        "expected_head_sha": expected_sha,
+                        "current_head_sha": metadata.head_sha,
+                    },
+                )
+            except Exception as exc:
+                log.warning("candidate_supersede_failed", review_id=str(review_id), error=str(exc))
+        return True
+    return False
+
+
 async def _post_results(
     adapter: PlatformAdapter,
     pr: PlatformPR,
@@ -1214,12 +1347,21 @@ async def _post_results(
     review_id: uuid.UUID | None = None,
     storage=None,
     original_review_id: str | None = None,
+    manual_comment_override: bool = False,
 ) -> None:
     """Post review results back to the platform."""
     comment = build_summary_comment(result, base_url=base_url)
     labels = get_review_labels(result)
+    comments_enabled = config.side_effects.comments or manual_comment_override
+    inline_enabled = comments_enabled and comment_mode == "inline"
+    summary_enabled = comments_enabled and comment_mode == "summary"
 
-    if comment_mode == "inline":
+    try:
+        await _post_result_status(adapter, pr, result)
+    except Exception as e:
+        log.warning("post_review_status_failed", pr_id=pr.pr_id, error=str(e))
+
+    if inline_enabled:
         await _post_inline_and_summary(
             adapter,
             pr,
@@ -1230,23 +1372,18 @@ async def _post_results(
             review_id=review_id,
             storage=storage,
             original_review_id=original_review_id,
+            post_summary=comments_enabled,
+            labels_enabled=config.side_effects.labels,
         )
-        return
-
-    if comment_mode == "none":
-        # No comment — still apply labels and platform status/approval.
-        try:
-            for label in labels:
-                await adapter.add_label(pr, label)
-            await _apply_platform_actions(adapter, pr, result, config, comment)
-        except Exception as e:
-            log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
+        await _apply_platform_actions(adapter, pr, result, config, comment)
         return
 
     try:
-        await adapter.post_comment(pr, comment)
-        for label in labels:
-            await adapter.add_label(pr, label)
+        if summary_enabled:
+            await adapter.post_comment(pr, comment)
+        if config.side_effects.labels:
+            for label in labels:
+                await adapter.add_label(pr, label)
         await _apply_platform_actions(adapter, pr, result, config, comment)
     except Exception as e:
         log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
@@ -1259,21 +1396,31 @@ async def _apply_platform_actions(
     config: GuardianConfig,
     comment: str,
 ) -> None:
-    """Apply approval / status / reviewer-request actions based on decision."""
+    """Apply non-status platform actions based on decision and Profile switches."""
     if result.decision == Decision.AUTO_APPROVE:
-        await adapter.approve_pr(pr)
-        await adapter.set_status(pr, "success", "PR Guardian: Auto-approved")
-        if result.trust_tier and result.trust_tier.value == "spot_check":
+        if config.platform_approval_enabled and config.side_effects.formal_approve:
+            fork: bool | None = None
+            try:
+                fork = (await adapter.fetch_pr_metadata(pr)).fork
+            except Exception as exc:
+                log.warning("fork_metadata_lookup_failed", pr_id=pr.pr_id, error=str(exc))
+            if fork is False:
+                await adapter.approve_pr(pr)
+        if (
+            config.side_effects.reviewers
+            and result.trust_tier
+            and result.trust_tier.value == "spot_check"
+        ):
             await adapter.request_reviewers(pr, config.human_review.reviewer_group)
     elif result.decision == Decision.REJECT:
-        await adapter.request_changes(pr, comment)
-        await adapter.set_status(pr, "failure", "PR Guardian: Changes requested")
+        if config.side_effects.formal_request_changes:
+            await adapter.request_changes(pr, comment)
     elif result.decision == Decision.HUMAN_REVIEW:
-        await adapter.set_status(pr, "success", "PR Guardian: Human review required")
-        reviewer_group = result.reviewer_group_override or config.human_review.reviewer_group
-        await adapter.request_reviewers(pr, reviewer_group)
-    elif result.decision == Decision.HARD_BLOCK:
-        await adapter.set_status(pr, "failure", "PR Guardian: Blocked")
+        if config.side_effects.reviewers:
+            reviewer_group = result.reviewer_group_override or config.human_review.reviewer_group
+            await adapter.request_reviewers(pr, reviewer_group)
+    elif result.decision == Decision.HARD_BLOCK and config.side_effects.formal_request_changes:
+        await adapter.request_changes(pr, comment)
 
 
 async def _post_inline_and_summary(
@@ -1287,6 +1434,8 @@ async def _post_inline_and_summary(
     review_id: uuid.UUID | None,
     storage,
     original_review_id: str | None,
+    post_summary: bool = True,
+    labels_enabled: bool = True,
 ) -> None:
     """Handle inline comment mode: delete old, post inline, then post summary."""
     threshold = config.inline_comments.severity_threshold.lower()
@@ -1345,11 +1494,12 @@ async def _post_inline_and_summary(
         except Exception as e:
             log.error("post_inline_comments_failed", pr_id=pr.pr_id, error=str(e))
 
-    # Summary comment always posted last in inline mode
+    # Summary comment posts last in inline mode when comments are enabled.
     try:
-        await adapter.post_comment(pr, comment)
-        for label in labels:
-            await adapter.add_label(pr, label)
-        await _apply_platform_actions(adapter, pr, result, config, comment)
+        if post_summary:
+            await adapter.post_comment(pr, comment)
+        if labels_enabled:
+            for label in labels:
+                await adapter.add_label(pr, label)
     except Exception as e:
         log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))

@@ -66,8 +66,21 @@ validator:
   dedup_enabled: true
   line_proximity_threshold: 5
 
-feedback:
-  enabled: true
-  log_all_decisions: true
-  override_tracking: true
-  weekly_report: true
+guardian_clearance: false
+platform_approval_enabled: false
+
+side_effects:
+  comments: false
+  labels: false
+  reviewers: false
+  formal_approve: false
+  formal_request_changes: false
+  scan_issues: false
+
+readiness:
+  quiet_period_seconds: 10
+  max_wait_minutes: 30
+  archmap_max_wait_minutes: 10
+  ignored_statuses: []
+  ignored_checks: []
+  archmap_expected: false

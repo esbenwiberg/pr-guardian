@@ -1,0 +1,82 @@
+contract_version: 1
+title: "Build /reviews readiness panel and /pull-requests browse UI"
+depends_on:
+  - 05-move-browse-sync-to-connections
+  - 06-add-readiness-candidate-engine
+  - 07-gate-platform-side-effects
+scenarios:
+  - id: reviews-shows-opted-readiness-candidates
+    given:
+      - "the dashboard has a waiting linked candidate"
+      - "the dashboard has a blocked linked candidate"
+      - "the dashboard has a completed review row"
+    when:
+      - "the user opens /reviews"
+    then:
+      - "waiting and blocked candidates appear in the queue"
+      - "selecting a candidate opens the readiness panel"
+      - "selecting a completed review opens or links to review detail"
+      - "screenshots are saved under .autopod/evidence/fact-reviews-shows-opted-readiness/"
+  - id: pull-requests-is-browse-surface
+    given:
+      - "broad sync has open PRs from linked and unlinked repos"
+    when:
+      - "the user opens /pull-requests and /reviews"
+    then:
+      - "the broad open PRs appear in /pull-requests"
+      - "non-opted PRs do not appear in /reviews"
+      - "/pr-dashboard redirects to /pull-requests"
+      - "screenshots are saved under .autopod/evidence/fact-browse-prs-separated/"
+  - id: readiness-panel-actions-respect-permissions
+    given:
+      - "a waiting or blocked candidate is selected in /reviews"
+    when:
+      - "an ordinary signed-in user views the panel"
+    then:
+      - "Start Review Now is available"
+      - "Override Readiness & Start Review is not available"
+    and_when:
+      - "a Profile Manager views the panel"
+    then_also:
+      - "Override Readiness & Start Review is available and requires a reason"
+  - id: repo-review-copy-is-not-scan-copy
+    given:
+      - "the review trigger surface accepts a repository URL"
+    when:
+      - "the user enters a repo URL"
+    then:
+      - "the preview/action copy says Review repository or equivalent"
+      - "scan-specific copy remains reserved for recent-changes and maintenance scans"
+required_facts:
+  - id: fact-reviews-shows-opted-readiness
+    proves:
+      - reviews-shows-opted-readiness-candidates
+    kind: browser-test
+    artifact:
+      path: tests/browser/reviews_readiness_panel.spec.mjs
+      change: create
+    command: node tests/browser/reviews_readiness_panel.spec.mjs --grep reviews-shows-opted-readiness-candidates
+  - id: fact-browse-prs-separated
+    proves:
+      - pull-requests-is-browse-surface
+    kind: browser-test
+    artifact:
+      path: tests/browser/pull_requests_page.spec.mjs
+      change: update
+    command: node tests/browser/pull_requests_page.spec.mjs
+  - id: fact-readiness-panel-actions
+    proves:
+      - readiness-panel-actions-respect-permissions
+    kind: browser-test
+    artifact:
+      path: tests/browser/reviews_readiness_panel.spec.mjs
+      change: create
+    command: node tests/browser/reviews_readiness_panel.spec.mjs --grep readiness-panel-actions-respect-permissions
+  - id: fact-repo-review-copy-distinct-from-scan
+    proves:
+      - repo-review-copy-is-not-scan-copy
+    kind: browser-test
+    artifact:
+      path: tests/browser/repo_review_copy.spec.mjs
+      change: create
+    command: node tests/browser/repo_review_copy.spec.mjs

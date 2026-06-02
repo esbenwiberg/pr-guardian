@@ -13,6 +13,7 @@ from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
+from pr_guardian.platform.protocol import PlatformPRMetadata, PlatformReadinessSignal
 
 log = structlog.get_logger()
 
@@ -481,6 +482,105 @@ class ADOAdapter:
             params={"api-version": "7.1"},
         )
         resp.raise_for_status()
+
+    async def fetch_pr_metadata(self, pr: PlatformPR) -> PlatformPRMetadata:
+        client = self._get_client()
+        url = (
+            f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+            f"/pullRequests/{pr.pr_id}"
+        )
+        resp = await client.get(url, params={"api-version": "7.1"})
+        resp.raise_for_status()
+        data = resp.json()
+        status = (data.get("status") or "").lower()
+        source_repo = data.get("sourceRepository") or {}
+        target_repo = data.get("repository") or {}
+        source_repo_id = source_repo.get("id") or source_repo.get("name") or ""
+        target_repo_id = target_repo.get("id") or target_repo.get("name") or pr.repo
+        return PlatformPRMetadata(
+            head_sha=data.get("lastMergeSourceCommit", {}).get("commitId") or pr.head_commit_sha,
+            draft=bool(data.get("isDraft")),
+            fork=bool(source_repo_id and source_repo_id != target_repo_id),
+            closed=status in {"completed", "abandoned"},
+            merged=status == "completed",
+        )
+
+    @staticmethod
+    def _is_human_review_signal(signal: dict) -> bool:
+        context = signal.get("context") or {}
+        text = " ".join(
+            str(part).lower()
+            for part in (
+                context.get("name", ""),
+                context.get("genre", ""),
+                signal.get("description", ""),
+                signal.get("targetUrl", ""),
+            )
+        )
+        return any(marker in text for marker in ("reviewer", "approval", "vote", "manual"))
+
+    async def fetch_readiness_signals(self, pr: PlatformPR) -> list[PlatformReadinessSignal]:
+        client = self._get_client()
+        url = (
+            f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
+            f"/pullRequests/{pr.pr_id}/statuses"
+        )
+        resp = await client.get(url, params={"api-version": "7.1"})
+        resp.raise_for_status()
+        signals: list[PlatformReadinessSignal] = []
+        for status in resp.json().get("value", []) or []:
+            if self._is_human_review_signal(status):
+                continue
+            context = status.get("context") or {}
+            name = context.get("name") or status.get("targetUrl") or "ado-status"
+            signals.append(
+                PlatformReadinessSignal(
+                    name=name,
+                    state=status.get("state") or "pending",
+                    source=context.get("genre") or "ado_status",
+                    url=status.get("targetUrl") or "",
+                    description=status.get("description") or "",
+                )
+            )
+        return signals
+
+    async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
+        await self.set_status(pr, state, description, context="guardian/readiness")
+
+    async def set_review_status(self, pr: PlatformPR, state: str, description: str) -> None:
+        await self.set_status(pr, state, description, context="guardian/review")
+
+    async def find_archmap_artifact(self, pr: PlatformPR, head_sha: str) -> bool:
+        client = self._get_client()
+        artifact_name = f"archmap-{head_sha}"
+        builds_url = f"{self._org_url}/{pr.project}/_apis/build/builds"
+        builds_resp = await client.get(
+            builds_url,
+            params={
+                "sourceVersion": head_sha,
+                "queryOrder": "finishTimeDescending",
+                "api-version": "7.1",
+            },
+        )
+        builds_resp.raise_for_status()
+        for build in builds_resp.json().get("value", []) or []:
+            build_id = build.get("id")
+            if build_id is None:
+                continue
+            artifact_resp = await client.get(
+                f"{self._org_url}/{pr.project}/_apis/build/builds/{build_id}/artifacts",
+                params={"artifactName": artifact_name, "api-version": "7.1"},
+            )
+            if artifact_resp.status_code == 404:
+                continue
+            artifact_resp.raise_for_status()
+            value = artifact_resp.json().get("value")
+            if isinstance(value, list):
+                if any(item.get("name") == artifact_name for item in value):
+                    return True
+            elif artifact_resp.json().get("name") == artifact_name:
+                return True
+        return False
 
     async def request_reviewers(self, pr: PlatformPR, group: str) -> None:
         log.info("ado_request_reviewers", pr_id=pr.pr_id, group=group)

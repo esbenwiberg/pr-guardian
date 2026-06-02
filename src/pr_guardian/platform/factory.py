@@ -9,7 +9,12 @@ from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.models.pr import PlatformPR
 
 
-def create_adapter(platform: str, *, token_override: str | None = None) -> PlatformAdapter:
+def create_adapter(
+    platform: str,
+    *,
+    token_override: str | None = None,
+    org_url_override: str | None = None,
+) -> PlatformAdapter:
     """Create the appropriate platform adapter.
 
     For GitHub, pass token_override to use a specific token instead of GITHUB_TOKEN.
@@ -22,8 +27,10 @@ def create_adapter(platform: str, *, token_override: str | None = None) -> Platf
         return GitHubAdapter(token=token)
 
     if platform == "ado":
-        pat = os.environ.get("ADO_PAT", "")
-        org_url = os.environ.get("ADO_ORG_URL", "")
+        pat = token_override if token_override is not None else os.environ.get("ADO_PAT", "")
+        org_url = (
+            org_url_override if org_url_override is not None else os.environ.get("ADO_ORG_URL", "")
+        )
         return ADOAdapter(pat=pat, org_url=org_url)
 
     raise ValueError(f"Unknown platform: {platform}")

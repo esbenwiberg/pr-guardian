@@ -1,0 +1,102 @@
+contract_version: 1
+title: "Gate platform side effects and candidate/review transitions"
+depends_on:
+  - 04-resolve-manual-and-scan-runs-through-profiles
+  - 06-add-readiness-candidate-engine
+scenarios:
+  - id: ready-candidate-enqueues-one-review
+    given:
+      - "a waiting candidate becomes ready"
+      - "webhook and reconciler workers evaluate it at nearly the same time"
+    when:
+      - "both try to start automatic review"
+    then:
+      - "only one transition to reviewing succeeds"
+      - "one review row is created"
+      - "the review row stores candidate, Profile, Connection, repo link, and snapshots"
+  - id: auto-approve-means-clearance-by-default
+    given:
+      - "a review produces Decision.AUTO_APPROVE"
+    when:
+      - "the resolved Profile has platform approval disabled"
+    then:
+      - "the dashboard/API/comment copy says Guardian cleared or equivalent"
+      - "approve_pr is not called"
+    and_when:
+      - "the resolved Profile enables platform approval and the PR is not a fork"
+    then_also:
+      - "approve_pr is called through the stored Connection"
+  - id: stale-automatic-review-skips-side-effects
+    given:
+      - "an automatic review started for head SHA A"
+      - "the PR moved to head SHA B before review completion"
+    when:
+      - "the SHA A review finishes"
+    then:
+      - "the review can be stored internally"
+      - "comments, labels, reviewers, approval, request-changes, and review status side effects are skipped"
+  - id: manual-bypass-and-override-are-distinct
+    given:
+      - "a blocked candidate exists"
+    when:
+      - "a signed-in user clicks Start Review Now"
+    then:
+      - "a manual review starts"
+      - "readiness is not marked success"
+    and_when:
+      - "a Profile Manager uses Override Readiness & Start Review with a reason"
+    then_also:
+      - "readiness is marked success as manual override"
+      - "audit stores actor, timestamp, previous snapshot, and reason"
+  - id: finalization-requires-signed-in-user
+    given:
+      - "a review is ready for human finalization"
+    when:
+      - "an API key attempts to approve, request changes, or submit a human verdict"
+    then:
+      - "the request is rejected"
+    and_when:
+      - "a signed-in user finalizes with an accessible stored Connection"
+    then_also:
+      - "the platform verdict is posted and actor email is logged"
+required_facts:
+  - id: fact-ready-candidate-enqueues-once
+    proves:
+      - ready-candidate-enqueues-one-review
+    kind: integration-test
+    artifact:
+      path: tests/test_candidate_review_lifecycle.py
+      change: create
+    command: python -m pytest tests/test_candidate_review_lifecycle.py::test_ready_candidate_transitions_to_one_review_under_concurrency
+  - id: fact-auto-approve-is-clearance-unless-enabled
+    proves:
+      - auto-approve-means-clearance-by-default
+    kind: integration-test
+    artifact:
+      path: tests/test_profile_side_effects.py
+      change: create
+    command: python -m pytest tests/test_profile_side_effects.py::test_auto_approve_is_guardian_clearance_unless_profile_enables_platform_approval
+  - id: fact-stale-sha-skips-side-effects
+    proves:
+      - stale-automatic-review-skips-side-effects
+    kind: integration-test
+    artifact:
+      path: tests/test_candidate_review_lifecycle.py
+      change: create
+    command: python -m pytest tests/test_candidate_review_lifecycle.py::test_stale_automatic_review_skips_platform_side_effects
+  - id: fact-manual-bypass-and-override-audit
+    proves:
+      - manual-bypass-and-override-are-distinct
+    kind: integration-test
+    artifact:
+      path: tests/test_candidate_review_lifecycle.py
+      change: create
+    command: python -m pytest tests/test_candidate_review_lifecycle.py::test_manual_bypass_and_manager_override_have_distinct_readiness_audit
+  - id: fact-finalization-signed-in-only
+    proves:
+      - finalization-requires-signed-in-user
+    kind: integration-test
+    artifact:
+      path: tests/test_finalize_review.py
+      change: update
+    command: python -m pytest tests/test_finalize_review.py::test_api_keys_cannot_finalize_and_signed_in_user_uses_stored_connection

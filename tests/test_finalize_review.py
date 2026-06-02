@@ -8,7 +8,7 @@ storage and a mocked platform adapter.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -19,7 +19,7 @@ from fastapi.testclient import TestClient
 def client():
     from pr_guardian.main import app
 
-    return TestClient(app)
+    return TestClient(app, headers={"X-MS-CLIENT-PRINCIPAL-NAME": "reviewer@example.test"})
 
 
 def _ado_review() -> dict:
@@ -122,6 +122,69 @@ def _patch(monkeypatch, review, adapter, github_factory=None, active_dismissals=
         github_factory or AsyncMock(return_value=adapter),
     )
     return appended
+
+
+def test_api_keys_cannot_finalize_and_signed_in_user_uses_stored_connection(client, monkeypatch):
+    review = _github_review()
+    connection_id = uuid.uuid4()
+    review["connection_id"] = str(connection_id)
+    adapter = _make_adapter()
+    appended = _patch(monkeypatch, review, adapter)
+
+    from pr_guardian.api import reviews_queue as rq
+    from pr_guardian.platform import factory as factory_mod
+
+    monkeypatch.setenv("GUARDIAN_DB_ENABLED", "1")
+    monkeypatch.setattr(
+        rq.storage,
+        "validate_api_key",
+        AsyncMock(
+            return_value={
+                "id": str(uuid.uuid4()),
+                "name": "agent",
+                "scopes": ["write"],
+                "created_by": "owner@example.test",
+            }
+        ),
+    )
+    monkeypatch.setattr(rq.storage, "is_admin", AsyncMock(return_value=False))
+    monkeypatch.setattr(rq.storage, "is_profile_manager", AsyncMock(return_value=False))
+    monkeypatch.setattr(
+        rq.storage,
+        "get_connection",
+        AsyncMock(
+            return_value={
+                "id": str(connection_id),
+                "platform": "github",
+                "name": "Stored GitHub",
+                "org_url": "",
+                "archived_at": None,
+            }
+        ),
+    )
+    monkeypatch.setattr(rq.storage, "get_connection_token", AsyncMock(return_value="stored-token"))
+    create_adapter = MagicMock(return_value=adapter)
+    monkeypatch.setattr(factory_mod, "create_adapter", create_adapter)
+
+    api_resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        headers={"Authorization": "Bearer prg_fixture"},
+        json={"verdict": "approve", "comment_mode": "summary"},
+    )
+    assert api_resp.status_code == 403
+    adapter.approve_pr.assert_not_awaited()
+
+    user_resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        headers={"X-MS-CLIENT-PRINCIPAL-NAME": "reviewer@example.test"},
+        json={"verdict": "approve", "comment_mode": "summary"},
+    )
+    assert user_resp.status_code == 200
+    adapter.approve_pr.assert_awaited_once()
+    factory_mod.create_adapter.assert_called_once_with(
+        "github", token_override="stored-token", org_url_override=None
+    )
+    assert appended[-1]["actor_email"] == "reviewer@example.test"
 
 
 def _github_reviews_422() -> httpx.HTTPStatusError:

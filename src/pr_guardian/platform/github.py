@@ -9,6 +9,7 @@ from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
+from pr_guardian.platform.protocol import PlatformPRMetadata, PlatformReadinessSignal
 
 log = structlog.get_logger()
 
@@ -152,6 +153,83 @@ class GitHubAdapter:
             },
         )
         resp.raise_for_status()
+
+    async def fetch_pr_metadata(self, pr: PlatformPR) -> PlatformPRMetadata:
+        client = self._get_client()
+        resp = await client.get(f"/repos/{pr.repo}/pulls/{pr.pr_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        head = data.get("head", {}) or {}
+        base = data.get("base", {}) or {}
+        head_repo = head.get("repo") or {}
+        base_repo = base.get("repo") or {}
+        head_full_name = head_repo.get("full_name") or ""
+        base_full_name = base_repo.get("full_name") or pr.repo
+        return PlatformPRMetadata(
+            head_sha=head.get("sha") or pr.head_commit_sha,
+            draft=bool(data.get("draft")),
+            fork=bool(head_repo.get("fork"))
+            or bool(head_full_name and head_full_name != base_full_name),
+            closed=data.get("state") == "closed",
+            merged=bool(data.get("merged")),
+        )
+
+    async def fetch_readiness_signals(self, pr: PlatformPR) -> list[PlatformReadinessSignal]:
+        client = self._get_client()
+        signals: list[PlatformReadinessSignal] = []
+        checks_resp = await client.get(
+            f"/repos/{pr.repo}/commits/{pr.head_commit_sha}/check-runs",
+            params={"per_page": 100},
+        )
+        checks_resp.raise_for_status()
+        for run in checks_resp.json().get("check_runs", []) or []:
+            name = run.get("name") or run.get("app", {}).get("name") or "check"
+            if run.get("status") == "completed":
+                state = run.get("conclusion") or "unknown"
+            else:
+                state = run.get("status") or "pending"
+            signals.append(
+                PlatformReadinessSignal(
+                    name=name,
+                    state=state,
+                    source="check_run",
+                    url=run.get("html_url") or "",
+                    description=run.get("output", {}).get("title") or "",
+                )
+            )
+
+        statuses_resp = await client.get(f"/repos/{pr.repo}/commits/{pr.head_commit_sha}/status")
+        statuses_resp.raise_for_status()
+        for status in statuses_resp.json().get("statuses", []) or []:
+            signals.append(
+                PlatformReadinessSignal(
+                    name=status.get("context") or "status",
+                    state=status.get("state") or "pending",
+                    source="status",
+                    url=status.get("target_url") or "",
+                    description=status.get("description") or "",
+                )
+            )
+        return signals
+
+    async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
+        await self.set_status(pr, state, description, context="guardian/readiness")
+
+    async def set_review_status(self, pr: PlatformPR, state: str, description: str) -> None:
+        await self.set_status(pr, state, description, context="guardian/review")
+
+    async def find_archmap_artifact(self, pr: PlatformPR, head_sha: str) -> bool:
+        client = self._get_client()
+        artifact_name = f"archmap-{head_sha}"
+        resp = await client.get(
+            f"/repos/{pr.repo}/actions/artifacts",
+            params={"name": artifact_name, "per_page": 1},
+        )
+        resp.raise_for_status()
+        artifacts = resp.json().get("artifacts", []) or []
+        return any(
+            a.get("name") == artifact_name and not a.get("expired", False) for a in artifacts
+        )
 
     async def request_reviewers(self, pr: PlatformPR, group: str) -> None:
         client = self._get_client()
