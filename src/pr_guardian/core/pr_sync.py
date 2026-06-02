@@ -9,6 +9,7 @@ from typing import Any
 
 import structlog
 
+from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 
 log = structlog.get_logger()
@@ -182,6 +183,32 @@ def _connection_uuid(connection: dict[str, Any]) -> uuid.UUID:
     return uuid.UUID(str(connection["id"]))
 
 
+async def _trigger_auto_review(pr: PlatformPR) -> None:
+    """Best-effort auto-review kickoff for a synced open PR (webhook-free fallback).
+
+    ``create_or_update_candidate_from_pr`` is self-gating — it no-ops unless the
+    repo has an active, auto-review-enabled link — and dedups on ``head_commit_sha``,
+    so calling it for every open PR on every poll pass is safe and idempotent. The
+    webhook stays the fast path; this just guarantees coverage when no webhook is
+    wired (or can't reach us). Failures here must never break the sync loop.
+    """
+    if not pr.head_commit_sha:
+        # No head SHA means we can't key a candidate; skip rather than guess.
+        log.debug("pr_sync_auto_review_skip_no_sha", repo=pr.repo, pr_id=pr.pr_id)
+        return
+    from pr_guardian.core.readiness import create_or_update_candidate_from_pr
+
+    try:
+        await create_or_update_candidate_from_pr(pr, source=f"poll:{pr.platform.value}")
+    except Exception as exc:
+        log.warning(
+            "pr_sync_auto_review_failed",
+            repo=pr.repo,
+            pr_id=pr.pr_id,
+            error=str(exc),
+        )
+
+
 async def _sync_github(token: str, connection: dict[str, Any]) -> None:
     from pr_guardian.platform.github import GitHubAdapter
 
@@ -229,6 +256,20 @@ async def _sync_github(token: str, connection: dict[str, Any]) -> None:
                         data["connection_snapshot"] = connection
                         await storage.upsert_synced_pr(data)
                         keep_pr_ids.append(str(pr["number"]))
+                        await _trigger_auto_review(
+                            PlatformPR(
+                                platform=Platform.GITHUB,
+                                pr_id=data["pr_id"],
+                                repo=repo,
+                                repo_url=repo_data.get("clone_url", ""),
+                                source_branch=data["source_branch"],
+                                target_branch=data["target_branch"],
+                                author=data["author"],
+                                title=data["title"],
+                                head_commit_sha=pr.get("head", {}).get("sha", ""),
+                                org=org,
+                            )
+                        )
                     for pr in merged_prs:
                         data = _normalize_github_merged_pr(pr, repo)
                         data["connection_id"] = _connection_uuid(connection)
@@ -312,6 +353,23 @@ async def _sync_ado(pat: str, connection: dict[str, Any]) -> None:
                                 data["connection_snapshot"] = connection
                                 await storage.upsert_synced_pr(data)
                                 keep_pr_ids.append(str(pr.get("pullRequestId", "")))
+                                await _trigger_auto_review(
+                                    PlatformPR(
+                                        platform=Platform.ADO,
+                                        pr_id=data["pr_id"],
+                                        repo=repo_name,
+                                        repo_url=repo_data.get("remoteUrl", ""),
+                                        source_branch=data["source_branch"],
+                                        target_branch=data["target_branch"],
+                                        author=data["author"],
+                                        title=data["title"],
+                                        head_commit_sha=pr.get("lastMergeSourceCommit", {}).get(
+                                            "commitId", ""
+                                        ),
+                                        org=org_url,
+                                        project=project_name,
+                                    )
+                                )
                             for pr in merged_prs:
                                 data = _normalize_ado_merged_pr(
                                     pr, org_url, project_name, repo_name

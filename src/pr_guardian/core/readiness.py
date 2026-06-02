@@ -185,6 +185,12 @@ async def create_or_update_candidate_from_pr(
         pr_id=pr.pr_id,
         head_sha=pr.head_commit_sha,
     )
+    # A terminal candidate for this exact SHA is already done — return it without
+    # re-posting a pending status. This is harmless on the webhook path (a rare
+    # re-delivery) but essential for the poll fallback, which would otherwise
+    # flip every reviewed PR's readiness check back to "pending" on each pass.
+    if existing is not None and existing["state"] in TERMINAL_CANDIDATE_STATES:
+        return existing
     if existing is None:
         older = await storage.list_active_readiness_candidates(
             platform=pr.platform.value,

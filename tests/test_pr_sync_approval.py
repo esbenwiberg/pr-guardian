@@ -2,12 +2,61 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
 
 from pr_guardian.core.pr_sync import (
     _ado_approval_status,
     _gh_approval_status,
     _normalize_ado_pr,
+    _trigger_auto_review,
 )
+from pr_guardian.models.pr import Platform, PlatformPR
+
+
+def _platform_pr(head_sha: str) -> PlatformPR:
+    return PlatformPR(
+        platform=Platform.GITHUB,
+        pr_id="7",
+        repo="octo/service",
+        repo_url="https://github.com/octo/service",
+        source_branch="feat",
+        target_branch="main",
+        author="alice",
+        title="t",
+        head_commit_sha=head_sha,
+        org="octo",
+    )
+
+
+class TestTriggerAutoReview:
+    async def test_skips_when_no_head_sha(self):
+        # Without a head SHA we cannot key a candidate; must not call into readiness.
+        with patch("pr_guardian.core.readiness.create_or_update_candidate_from_pr") as mock_create:
+            await _trigger_auto_review(_platform_pr(""))
+        mock_create.assert_not_called()
+
+    async def test_invokes_readiness_for_open_pr(self):
+        async def _ok(pr, *, source):
+            return {"state": "waiting"}
+
+        with patch(
+            "pr_guardian.core.readiness.create_or_update_candidate_from_pr",
+            side_effect=_ok,
+        ) as mock_create:
+            await _trigger_auto_review(_platform_pr("deadbeef"))
+        mock_create.assert_awaited_once()
+        assert mock_create.await_args.kwargs["source"] == "poll:github"
+
+    async def test_swallows_readiness_errors(self):
+        # A failing review trigger must never break the sync loop.
+        async def _boom(pr, *, source):
+            raise RuntimeError("readiness exploded")
+
+        with patch(
+            "pr_guardian.core.readiness.create_or_update_candidate_from_pr",
+            side_effect=_boom,
+        ):
+            await _trigger_auto_review(_platform_pr("deadbeef"))  # must not raise
 
 
 # ---------------------------------------------------------------------------

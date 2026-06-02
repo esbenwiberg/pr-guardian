@@ -138,6 +138,36 @@ async def test_opted_pr_waits_for_checks_then_becomes_reviewable():
         await engine.dispose()
 
 
+async def test_terminal_candidate_at_same_sha_is_not_reposted():
+    # Guards the poll fallback: re-triggering a PR that's already been reviewed at
+    # this exact SHA must return the existing candidate untouched — never re-post a
+    # pending readiness status (which would flip a green check back to pending each
+    # poll pass).
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            existing = await storage.create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="42",
+                head_sha="sha1",
+                state="reviewed",
+                reason="completed",
+            )
+            adapter = FakeReadinessAdapter()
+
+            result = await create_or_update_candidate_from_pr(
+                _pr(), adapter=adapter, source="poll:github"
+            )
+
+            assert result is not None
+            assert result["id"] == existing["id"]
+            assert result["state"] == "reviewed"
+            assert adapter.statuses == []
+    finally:
+        await engine.dispose()
+
+
 async def test_failed_timeout_fork_and_permission_readiness_outcomes():
     engine, factory = await _make_session_factory()
     try:
