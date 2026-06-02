@@ -198,14 +198,16 @@ async def legacy_browse_pr():
     return RedirectResponse(url="/pull-requests", status_code=302)
 
 
-@router.get("/scans")
-async def legacy_scans():
-    return RedirectResponse(url="/reviews?subject=repo", status_code=302)
+@router.get("/scans", response_class=HTMLResponse)
+async def scans_page():
+    """Recent-changes and maintenance scan history."""
+    return _SCANS_HTML.read_text()
 
 
-@router.get("/scans/{scan_id}")
-async def legacy_scan_detail(scan_id: str):
-    return RedirectResponse(url=f"/reviews/{scan_id}", status_code=302)
+@router.get("/scans/{scan_id}", response_class=HTMLResponse)
+async def scan_detail_page(scan_id: str):
+    """Recent-changes and maintenance scan detail."""
+    return _SCANS_HTML.read_text()
 
 
 @router.get("/prompts")

@@ -62,7 +62,71 @@ def _iso(dt: datetime) -> str:
 
 _DEMO_QUEUE = [
     {
+        "id": "demo-candidate-124",
+        "row_key": "candidate:demo-candidate-124",
+        "subject_type": "candidate",
+        "platform": "github",
+        "title": "feat/auth",
+        "repo": "demo/api",
+        "author": "alice",
+        "branch": "feat/auth",
+        "pr_id": "124",
+        "pr_url": "https://github.com/demo/api/pull/124",
+        "state": "waiting",
+        "reason": "checks_pending",
+        "readiness": {
+            "state": "waiting",
+            "reason": "checks_pending",
+            "snapshot": {
+                "checks": {"total": 7, "passed": 4, "pending": 2, "failed": 0},
+                "archmap": {"state": "waiting", "minutes_remaining": 6},
+                "quiet_period": {"satisfied": True},
+            },
+        },
+        "risk_tier": "medium",
+        "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        "estimated_review_minutes": 0,
+        "files_changed": 0,
+        "trigger_origin": "readiness",
+        "triggered_by": None,
+        "stale": False,
+        "started_at": _iso(_now() - timedelta(minutes=3)),
+        "updated_at": _iso(_now() - timedelta(minutes=3)),
+    },
+    {
+        "id": "demo-candidate-88",
+        "row_key": "candidate:demo-candidate-88",
+        "subject_type": "candidate",
+        "platform": "ado",
+        "title": "fix/billing",
+        "repo": "demo/billing",
+        "author": "bob",
+        "branch": "fix/billing",
+        "pr_id": "88",
+        "pr_url": "https://dev.azure.com/demo/project/_git/billing/pullrequest/88",
+        "state": "blocked",
+        "reason": "checks_timeout",
+        "readiness": {
+            "state": "blocked",
+            "reason": "checks_timeout",
+            "snapshot": {
+                "checks": {"total": 4, "passed": 3, "pending": 1, "failed": 0},
+                "quiet_period": {"satisfied": True},
+            },
+        },
+        "risk_tier": "medium",
+        "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        "estimated_review_minutes": 0,
+        "files_changed": 0,
+        "trigger_origin": "readiness",
+        "triggered_by": None,
+        "stale": False,
+        "started_at": _iso(_now() - timedelta(minutes=14)),
+        "updated_at": _iso(_now() - timedelta(minutes=14)),
+    },
+    {
         "id": "demo-pr-482",
+        "row_key": "review:demo-pr-482",
         "subject_type": "pr",
         "platform": "github",
         "title": "feat/auth-refactor",
@@ -81,6 +145,7 @@ _DEMO_QUEUE = [
     },
     {
         "id": "demo-pr-481",
+        "row_key": "review:demo-pr-481",
         "subject_type": "pr",
         "platform": "github",
         "title": "fix/n-plus-one",
@@ -99,6 +164,7 @@ _DEMO_QUEUE = [
     },
     {
         "id": "demo-scan-legacy",
+        "row_key": "review:demo-scan-legacy",
         "subject_type": "scan",
         "platform": "ado",
         "title": "scan/legacy-billing",
@@ -117,6 +183,7 @@ _DEMO_QUEUE = [
     },
     {
         "id": "demo-pr-479",
+        "row_key": "review:demo-pr-479",
         "subject_type": "pr",
         "platform": "github",
         "title": "refactor/billing-job",
@@ -198,6 +265,7 @@ def _shape_review(
     pr_status = cached.get("approval_status")
     return {
         "id": str(row.get("id") or pr_id),
+        "row_key": f"review:{row.get('id') or pr_id}",
         "subject_type": "scan" if row.get("scan_id") else "pr",
         "platform": platform,
         "title": title,
@@ -220,6 +288,106 @@ def _shape_review(
     }
 
 
+_VISIBLE_BLOCKED_CANDIDATE_REASONS = {
+    "checks_failed",
+    "checks_timeout",
+    "fork_requires_manual_start",
+    "repo_link_paused",
+    "auto_review_disabled",
+}
+_HIDDEN_CANDIDATE_REASONS = {
+    "draft",
+    "platform_error",
+    "status_write_failed",
+    "profile_unavailable",
+    "connection_unavailable",
+    "connection_token_unavailable",
+}
+
+
+def _snapshot_bool(snapshot: dict[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value: Any = snapshot
+        for part in key.split("."):
+            if not isinstance(value, dict) or part not in value:
+                value = None
+                break
+            value = value[part]
+        if value is True:
+            return True
+    return False
+
+
+def _candidate_visible(candidate: dict[str, Any]) -> bool:
+    state = candidate.get("state")
+    reason = candidate.get("reason") or ""
+    snapshot = candidate.get("readiness_snapshot") or {}
+    if state == "waiting":
+        if reason == "draft" or _snapshot_bool(snapshot, "draft", "metadata.draft", "pr.draft"):
+            return False
+        return True
+    if state == "blocked":
+        return reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS and reason not in _HIDDEN_CANDIDATE_REASONS
+    return False
+
+
+def _shape_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    snapshot = candidate.get("readiness_snapshot") or {}
+    pr_id = str(candidate.get("pr_id") or "")
+    repo = candidate.get("repo") or candidate.get("repo_name") or ""
+    title = (
+        snapshot.get("title")
+        or snapshot.get("pr", {}).get("title")
+        or snapshot.get("metadata", {}).get("title")
+        or f"PR #{pr_id}"
+    )
+    author = (
+        snapshot.get("author")
+        or snapshot.get("pr", {}).get("author")
+        or snapshot.get("metadata", {}).get("author")
+        or ""
+    )
+    branch = (
+        snapshot.get("source_branch")
+        or snapshot.get("branch")
+        or snapshot.get("pr", {}).get("source_branch")
+        or snapshot.get("metadata", {}).get("source_branch")
+        or ""
+    )
+    updated_at = candidate.get("updated_at") or candidate.get("created_at")
+    state = candidate.get("state") or "waiting"
+    reason = candidate.get("reason") or ""
+    return {
+        "id": str(candidate.get("id")),
+        "row_key": f"candidate:{candidate.get('id')}",
+        "subject_type": "candidate",
+        "platform": candidate.get("platform") or "",
+        "title": title,
+        "repo": repo,
+        "author": author,
+        "branch": branch,
+        "pr_id": pr_id,
+        "pr_url": candidate.get("pr_url") or "",
+        "head_sha": candidate.get("head_sha") or "",
+        "repo_link_id": candidate.get("repo_link_id"),
+        "profile_id": candidate.get("profile_id"),
+        "connection_id": candidate.get("connection_id"),
+        "connection_snapshot": candidate.get("connection_snapshot"),
+        "state": state,
+        "reason": reason,
+        "readiness": {"state": state, "reason": reason, "snapshot": snapshot},
+        "risk_tier": "medium",
+        "findings": {"critical": 0, "high": 0, "medium": 0, "low": 0},
+        "estimated_review_minutes": 0,
+        "files_changed": 0,
+        "trigger_origin": "readiness",
+        "triggered_by": None,
+        "stale": False,
+        "started_at": updated_at,
+        "updated_at": updated_at,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Queue endpoint
 # ---------------------------------------------------------------------------
@@ -233,7 +401,15 @@ async def reviews_queue(request: Request):
     except Exception:
         reviews = []
 
-    if not reviews:
+    try:
+        candidates = await storage.list_active_readiness_candidates(
+            states=["waiting", "blocked"],
+            limit=100,
+        )
+    except Exception:
+        candidates = []
+
+    if not reviews and not candidates:
         return JSONResponse(content={"items": _DEMO_QUEUE, "source": "demo"})
 
     # Bulk-fetch the synced_prs cache so we can (a) show platform-side state
@@ -250,7 +426,17 @@ async def reviews_queue(request: Request):
         pr_lookup = {}
 
     items = [_shape_review(r, pr_lookup) for r in reviews]
-    items.sort(key=lambda r: (not r["stale"], r["started_at"] or ""), reverse=True)
+    items.extend(_shape_candidate(c) for c in candidates if _candidate_visible(c))
+    state_rank = {"blocked": 3, "waiting": 2}
+    items.sort(
+        key=lambda r: (
+            state_rank.get(r.get("state") or "", 1),
+            bool(r.get("stale")),
+            r.get("updated_at") or r.get("started_at") or "",
+            r.get("row_key") or r.get("id") or "",
+        ),
+        reverse=True,
+    )
     return {"items": items, "source": "db"}
 
 

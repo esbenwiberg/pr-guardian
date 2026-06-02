@@ -17,30 +17,75 @@
     <h1 class="text-sm font-semibold text-slate-50">Pull Requests</h1>
     <div class="flex items-center gap-3 text-xs text-slate-400">
       <span id="pr-count">Loading</span>
+      <button id="refresh-button" class="btn btn-secondary btn-sm" type="button">Sync</button>
     </div>
   </header>
 
-  <main class="max-w-[1200px] mx-auto px-6 py-6">
+  <main class="max-w-[1280px] mx-auto px-6 py-6">
     <div class="flex flex-wrap items-center gap-2 mb-4">
-      <input id="search-input" type="search" placeholder="Search PRs"
-             class="form-input max-w-sm" autocomplete="off">
+      <input id="search-input" type="search" placeholder="Search PRs..."
+             class="form-input min-w-[220px] max-w-sm" autocomplete="off">
       <select id="platform-filter" class="form-select w-44">
         <option value="">All platforms</option>
         <option value="github">GitHub</option>
         <option value="ado">Azure DevOps</option>
       </select>
-      <button id="refresh-button" class="btn btn-secondary btn-sm" type="button">Refresh</button>
+      <select id="repo-filter" class="form-select w-48"><option value="">All repos</option></select>
+      <select id="author-filter" class="form-select w-44"><option value="">All authors</option></select>
+      <select id="status-filter" class="form-select w-44">
+        <option value="">All statuses</option>
+        <option value="success">CI passing</option>
+        <option value="pending">CI pending</option>
+        <option value="failure">CI failing</option>
+        <option value="draft">Draft</option>
+      </select>
     </div>
 
-    <section class="card p-0 overflow-hidden">
-      <div id="pr-list" class="divide-y divide-slate-800"></div>
-      <div id="empty-state" class="hidden p-8 text-center text-sm text-slate-500">
-        No synced pull requests match this view.
-      </div>
-      <div id="loading-state" class="p-8 text-center text-sm text-slate-500">Loading pull requests...</div>
-    </section>
+    <div class="flex flex-wrap items-center gap-1 mb-3" id="view-tabs">
+      <button class="browse-tab browse-tab-active" data-view="mine">Mine</button>
+      <button class="browse-tab" data-view="ready">Ready-ish</button>
+      <button class="browse-tab" data-view="attention">Needs attention</button>
+      <button class="browse-tab" data-view="stale">Stale</button>
+      <button class="browse-tab" data-view="all">All open</button>
+    </div>
+
+    <div class="browse-grid">
+      <section class="rounded-lg border border-slate-800 bg-slate-900/40 overflow-hidden">
+        <div id="pr-list" class="divide-y divide-slate-800"></div>
+        <div id="empty-state" class="hidden p-8 text-center text-sm text-slate-500">
+          No synced pull requests match this view.
+        </div>
+        <div id="loading-state" class="p-8 text-center text-sm text-slate-500">Loading pull requests...</div>
+      </section>
+      <aside id="pr-panel" class="pr-panel" aria-live="polite">
+        <div class="text-sm font-semibold text-slate-200">Pull Request</div>
+        <p class="mt-2 text-xs text-slate-500">Select a synced pull request.</p>
+      </aside>
+    </div>
   </main>
 </div>
+
+<style>
+  .browse-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+  .browse-tab { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgb(30 41 59); color: rgb(148 163 184); background: transparent; }
+  .browse-tab:hover { color: rgb(241 245 249); border-color: rgb(71 85 105); }
+  .browse-tab-active { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.5); background: rgb(99 102 241 / 0.08); }
+  .pr-row { display: block; padding: 16px 18px; cursor: pointer; transition: background 120ms; }
+  .pr-row:hover { background: rgb(15 23 42 / 0.65); }
+  .pr-row.selected { background: rgb(30 41 59 / 0.58); box-shadow: inset 2px 0 0 rgb(129 140 248); }
+  .status-pill { display: inline-flex; border-radius: 999px; border: 1px solid rgb(51 65 85); padding: 2px 8px; font-size: 11px; color: rgb(203 213 225); }
+  .status-pill.success, .status-pill.linked { border-color: rgb(16 185 129 / 0.45); color: rgb(110 231 183); }
+  .status-pill.failure, .status-pill.unlinked { border-color: rgb(248 113 113 / 0.45); color: rgb(252 165 165); }
+  .status-pill.pending { border-color: rgb(251 191 36 / 0.45); color: rgb(253 230 138); }
+  .pr-panel { position: sticky; top: 72px; min-height: 360px; border: 1px solid rgb(30 41 59); border-radius: 8px; background: rgb(15 23 42 / 0.55); padding: 18px; }
+  .detail-line { display: flex; justify-content: space-between; gap: 16px; padding: 8px 0; border-bottom: 1px solid rgb(30 41 59 / 0.7); font-size: 12px; }
+  .detail-line span:first-child { color: rgb(148 163 184); }
+  .detail-line span:last-child { color: rgb(226 232 240); text-align: right; }
+  @media (max-width: 920px) {
+    .browse-grid { grid-template-columns: minmax(0, 1fr); }
+    .pr-panel { position: static; min-height: 0; }
+  }
+</style>
 
 <script>
 const listEl = document.getElementById('pr-list');
@@ -49,15 +94,23 @@ const loadingEl = document.getElementById('loading-state');
 const countEl = document.getElementById('pr-count');
 const searchEl = document.getElementById('search-input');
 const platformEl = document.getElementById('platform-filter');
+const repoEl = document.getElementById('repo-filter');
+const authorEl = document.getElementById('author-filter');
+const statusEl = document.getElementById('status-filter');
 const refreshEl = document.getElementById('refresh-button');
+const panelEl = document.getElementById('pr-panel');
+
+let PRS = [];
+let SELECTED_ID = null;
+let VIEW = 'mine';
 
 function platformLabel(platform) {
   return platform === 'ado' ? 'ADO' : 'GH';
 }
 
 function statusLabel(pr) {
-  if (pr.ci_status && pr.ci_status !== 'unknown') return `CI ${pr.ci_status}`;
   if (pr.approval_status === 'draft' || pr.is_draft) return 'draft';
+  if (pr.ci_status && pr.ci_status !== 'unknown') return `CI ${pr.ci_status}`;
   return pr.approval_status || 'pending';
 }
 
@@ -80,41 +133,192 @@ function safePrUrl(value) {
   }
 }
 
-function render(items, total) {
-  countEl.textContent = `${total} open PR${total === 1 ? '' : 's'}`;
+function timeAgo(iso) {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  const dt = (Date.now() - t) / 1000;
+  if (dt < 60) return `${Math.max(1, Math.floor(dt))}s ago`;
+  if (dt < 3600) return `${Math.floor(dt / 60)}m ago`;
+  if (dt < 86400) return `${Math.floor(dt / 3600)}h ago`;
+  return `${Math.floor(dt / 86400)}d ago`;
+}
+
+function guardianStatus(pr) {
+  if (pr.has_guardian_review && pr.guardian_decision) {
+    return String(pr.guardian_decision).replace(/_/g, ' ');
+  }
+  if (pr.has_guardian_review) return 'reviewed';
+  return 'not run';
+}
+
+function linkedStatus(pr) {
+  return pr.repo_link_id ? 'yes' : 'no';
+}
+
+function viewMatches(pr) {
+  if (VIEW === 'all') return true;
+  if (VIEW === 'mine') return true; // server applies identity when available; mock fallback keeps rows visible.
+  if (VIEW === 'ready') return !pr.is_draft && pr.ci_status !== 'failure';
+  if (VIEW === 'attention') return pr.is_draft || pr.ci_status === 'failure' || pr.approval_status === 'changes_requested';
+  if (VIEW === 'stale') {
+    const updated = new Date(pr.pr_updated_at || pr.synced_at || 0).getTime();
+    return updated && Date.now() - updated > 7 * 24 * 60 * 60 * 1000;
+  }
+  return true;
+}
+
+function clientFiltered(items) {
+  return items.filter(pr => {
+    if (!viewMatches(pr)) return false;
+    if (repoEl.value && pr.repo !== repoEl.value) return false;
+    if (authorEl.value && pr.author !== authorEl.value && pr.author_display !== authorEl.value) return false;
+    if (statusEl.value === 'draft' && !(pr.approval_status === 'draft' || pr.is_draft)) return false;
+    if (statusEl.value && statusEl.value !== 'draft' && pr.ci_status !== statusEl.value) return false;
+    return true;
+  });
+}
+
+function rebuildFacets(items) {
+  const selectedRepo = repoEl.value;
+  const selectedAuthor = authorEl.value;
+  const repos = [...new Set(items.map(pr => pr.repo).filter(Boolean))].sort();
+  const authors = [...new Set(items.map(pr => pr.author_display || pr.author).filter(Boolean))].sort();
+  repoEl.innerHTML = '<option value="">All repos</option>' + repos.map(repo => `<option value="${escapeHtml(repo)}">${escapeHtml(repo)}</option>`).join('');
+  authorEl.innerHTML = '<option value="">All authors</option>' + authors.map(author => `<option value="${escapeHtml(author)}">${escapeHtml(author)}</option>`).join('');
+  repoEl.value = selectedRepo;
+  authorEl.value = selectedAuthor;
+}
+
+function render(items = PRS, total = PRS.length) {
+  const filtered = clientFiltered(items);
+  countEl.textContent = `${filtered.length} open PR${filtered.length === 1 ? '' : 's'}`;
   loadingEl.classList.add('hidden');
-  emptyEl.classList.toggle('hidden', items.length > 0);
-  listEl.innerHTML = items.map(pr => {
-    const href = safePrUrl(pr.pr_url);
+  emptyEl.classList.toggle('hidden', filtered.length > 0);
+  listEl.innerHTML = filtered.map(pr => {
     const repo = escapeHtml(pr.repo || 'unknown repo');
     const title = escapeHtml(pr.title || 'Untitled pull request');
     const author = escapeHtml(pr.author_display || pr.author || 'unknown author');
     const sourceBranch = escapeHtml(pr.source_branch || 'unknown branch');
-    const targetBranch = escapeHtml(pr.target_branch || 'target');
     const status = escapeHtml(statusLabel(pr));
     const connectionName = escapeHtml(pr.connection_snapshot?.name || 'synced connection');
+    const selected = pr.id === SELECTED_ID ? ' selected' : '';
     return `
-    <a class="block px-5 py-4 hover:bg-slate-800/40 transition-colors" href="${href}" target="_blank" rel="noopener">
+    <button class="pr-row${selected} text-left w-full" type="button" data-id="${escapeHtml(pr.id)}">
       <div class="flex items-start justify-between gap-4">
         <div class="min-w-0">
           <div class="flex items-center gap-2 text-xs text-slate-500 mb-1">
             <span class="font-semibold text-slate-300">${escapeHtml(platformLabel(pr.platform))}</span>
-            <span>${repo}</span>
             <span>#${escapeHtml(pr.pr_id || '')}</span>
+            <span class="truncate">${title}</span>
           </div>
-          <div class="text-sm font-medium text-slate-100 truncate">${title}</div>
-          <div class="text-xs text-slate-500 mt-1">
-            ${author} &middot; ${sourceBranch} -> ${targetBranch}
+          <div class="text-xs text-slate-500">
+            <span>${repo}</span>
+            <span>&middot;</span>
+            <span>${author}</span>
+            <span>&middot;</span>
+            <span>${escapeHtml(timeAgo(pr.pr_updated_at || pr.synced_at))}</span>
           </div>
+          <div class="text-xs text-slate-400 mt-2">${status} &middot; Guardian ${escapeHtml(guardianStatus(pr))}</div>
         </div>
-        <div class="shrink-0 text-right">
-          <div class="text-xs text-slate-300">${status}</div>
+        <div class="shrink-0 text-right max-w-[140px]">
+          <div><span class="status-pill ${escapeHtml(pr.ci_status || 'pending')}">${status}</span></div>
+          <div class="mt-1"><span class="status-pill ${pr.repo_link_id ? 'linked' : 'unlinked'}">linked: ${escapeHtml(linkedStatus(pr))}</span></div>
           <div class="text-2xs text-slate-600 mt-1">${connectionName}</div>
         </div>
       </div>
-    </a>
+    </button>
   `;
   }).join('');
+  listEl.querySelectorAll('.pr-row').forEach(row => {
+    row.addEventListener('click', () => {
+      SELECTED_ID = row.dataset.id;
+      renderPanel();
+      render();
+    });
+  });
+  if (!SELECTED_ID && filtered.length) SELECTED_ID = filtered[0].id;
+  renderPanel();
+}
+
+function detailLine(label, value) {
+  if (value === undefined || value === null || value === '') return '';
+  return `<div class="detail-line"><span>${escapeHtml(label)}</span><span>${escapeHtml(value)}</span></div>`;
+}
+
+function selectedPr() {
+  return PRS.find(pr => pr.id === SELECTED_ID) || clientFiltered(PRS)[0] || null;
+}
+
+function renderPanel() {
+  const pr = selectedPr();
+  if (!pr) {
+    panelEl.innerHTML = `<div class="text-sm font-semibold text-slate-200">Pull Request</div>
+      <p class="mt-2 text-xs text-slate-500">Select a synced pull request.</p>`;
+    return;
+  }
+  SELECTED_ID = pr.id;
+  const href = safePrUrl(pr.pr_url);
+  panelEl.innerHTML = `
+    <div class="min-w-0">
+      <div class="text-base font-semibold text-slate-100 truncate">${escapeHtml(pr.title || 'Untitled pull request')}</div>
+      <div class="mt-1 text-xs text-slate-500">${escapeHtml(platformLabel(pr.platform))} · ${escapeHtml(pr.repo || '')} · #${escapeHtml(pr.pr_id || '')}</div>
+    </div>
+    <div class="mt-5">
+      ${detailLine('CI', statusLabel(pr))}
+      ${detailLine('Guardian', guardianStatus(pr))}
+      ${detailLine('Linked repo', linkedStatus(pr))}
+      ${detailLine('Connection', pr.connection_snapshot?.name || '')}
+      ${detailLine('Author', pr.author_display || pr.author || '')}
+      ${detailLine('Branch', `${pr.source_branch || ''} -> ${pr.target_branch || ''}`)}
+    </div>
+    <div class="mt-6 flex flex-col gap-2">
+      <button type="button" class="btn btn-primary text-sm justify-center" id="start-review-btn">Start Review Now</button>
+      <a class="btn btn-secondary text-sm justify-center" href="${href}" target="_blank" rel="noopener">Open in GitHub/ADO</a>
+      <button type="button" class="btn btn-secondary text-sm justify-center" id="hide-repo-btn">Hide repo from browse</button>
+    </div>
+    <div id="panel-status" class="mt-3 text-xs text-slate-500"></div>
+  `;
+  document.getElementById('start-review-btn')?.addEventListener('click', () => startReview(pr));
+  document.getElementById('hide-repo-btn')?.addEventListener('click', () => hideRepo(pr));
+}
+
+async function startReview(pr) {
+  const status = document.getElementById('panel-status');
+  if (status) status.textContent = 'Starting review...';
+  const response = await fetch(`/api/prs/${encodeURIComponent(pr.id)}/start-wizard`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ assign_self: false }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (status) status.textContent = data.error || data.detail || 'Failed to start review.';
+    return;
+  }
+  if (data.review_id) window.location.href = `/reviews/${encodeURIComponent(data.review_id)}/live`;
+}
+
+async function hideRepo(pr) {
+  const status = document.getElementById('panel-status');
+  if (status) status.textContent = 'Hiding repo...';
+  const response = await fetch('/api/prs/exclude-repo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      platform: pr.platform,
+      org: pr.org || '',
+      project: pr.project || '',
+      repo: pr.repo || '',
+    }),
+  });
+  if (!response.ok) {
+    if (status) status.textContent = 'Failed to hide repo.';
+    return;
+  }
+  PRS = PRS.filter(item => !(item.platform === pr.platform && item.org === pr.org && item.project === pr.project && item.repo === pr.repo));
+  SELECTED_ID = null;
+  rebuildFacets(PRS);
+  render();
 }
 
 async function loadPullRequests() {
@@ -122,15 +326,35 @@ async function loadPullRequests() {
   const params = new URLSearchParams({ limit: '100' });
   if (searchEl.value.trim()) params.set('search', searchEl.value.trim());
   if (platformEl.value) params.set('platform', platformEl.value);
+  if (VIEW === 'stale') params.set('view', 'stale');
+  if (VIEW === 'ready') params.set('view', 'ready');
+  if (VIEW === 'mine') params.set('view', 'mine');
   const response = await fetch(`/api/prs?${params.toString()}`, { credentials: 'same-origin' });
   if (!response.ok) throw new Error(`Failed to load PRs: ${response.status}`);
   const data = await response.json();
-  render(data.items || [], data.total || 0);
+  PRS = data.items || [];
+  rebuildFacets(PRS);
+  SELECTED_ID = SELECTED_ID || (PRS[0] && PRS[0].id) || null;
+  render(PRS, data.total || 0);
 }
 
 searchEl.addEventListener('input', () => loadPullRequests().catch(() => render([], 0)));
 platformEl.addEventListener('change', () => loadPullRequests().catch(() => render([], 0)));
-refreshEl.addEventListener('click', () => loadPullRequests().catch(() => render([], 0)));
+repoEl.addEventListener('change', () => { SELECTED_ID = null; render(); });
+authorEl.addEventListener('change', () => { SELECTED_ID = null; render(); });
+statusEl.addEventListener('change', () => { SELECTED_ID = null; render(); });
+document.querySelectorAll('#view-tabs .browse-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    VIEW = tab.dataset.view;
+    document.querySelectorAll('#view-tabs .browse-tab').forEach(item => item.classList.toggle('browse-tab-active', item === tab));
+    SELECTED_ID = null;
+    loadPullRequests().catch(() => render([], 0));
+  });
+});
+refreshEl.addEventListener('click', async () => {
+  await fetch('/api/prs/sync', { method: 'POST' }).catch(() => null);
+  loadPullRequests().catch(() => render([], 0));
+});
 loadPullRequests().catch(() => render([], 0));
 </script>
 </body>
