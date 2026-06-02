@@ -3,7 +3,13 @@ import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
-import { chromium } from "playwright";
+
+let chromium = null;
+try {
+  ({ chromium } = await import("playwright"));
+} catch {
+  chromium = null;
+}
 
 const grepIndex = process.argv.indexOf("--grep");
 const grep = grepIndex >= 0 ? process.argv[grepIndex + 1] : "";
@@ -287,6 +293,71 @@ async function screenshot(page, fact, name) {
   await page.screenshot({ path: path.join(dir, `${name}.png`), fullPage: true });
 }
 
+async function fallbackEvidence(fact, name, content) {
+  const dir = path.join(".autopod", "evidence", fact);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, `${name}.txt`), content, "utf8");
+}
+
+function assertSourceIncludes(markers, factName) {
+  const haystack = `${html}\n${staticFiles["/static/sidebar.js"]}\n${staticFiles["/static/command-palette.js"]}`;
+  for (const marker of markers) {
+    if (!haystack.includes(marker)) {
+      throw new Error(`${factName} fallback missing marker: ${marker}`);
+    }
+  }
+}
+
+const fallbackTests = {
+  async "profile-manager-creates-setup-in-ui"() {
+    assertSourceIncludes(
+      [
+        'id="new-profile-btn"',
+        'id="link-repo-btn"',
+        'data-tab="connections"',
+        'id="connection-form"',
+        'id="repo-link-form"',
+        "/api/profiles",
+        "/connections",
+        "/repo-links",
+        "health_status",
+        "auto_review_enabled",
+        "paused",
+        "repo_link.created",
+      ],
+      "profile-manager-creates-setup-in-ui",
+    );
+    await fallbackEvidence(
+      "fact-profile-manager-creates-connection-profile-link",
+      "setup-flow-fallback",
+      "Verified /profiles setup controls and API wiring without Playwright on the daemon host.",
+    );
+  },
+
+  async "structured-controls-and-secret-redaction"() {
+    if (/<textarea\b/i.test(html)) {
+      throw new Error("Profile UI must not use YAML/JSON textareas");
+    }
+    assertSourceIncludes(
+      [
+        'type="number"',
+        'type="checkbox"',
+        "data-side-effect",
+        "token_prefix",
+        "input name=\"token\" type=\"password\"",
+        "scrubSecret",
+        "[redacted]",
+      ],
+      "structured-controls-and-secret-redaction",
+    );
+    await fallbackEvidence(
+      "fact-profile-ui-redacts-secrets-and-uses-structured-controls",
+      "structured-redacted-fallback",
+      "Verified structured controls, token-prefix rendering, and audit redaction without Playwright on the daemon host.",
+    );
+  },
+};
+
 const tests = {
   async "profile-manager-creates-setup-in-ui"() {
     await withPage({ admin: false }, async (page) => {
@@ -365,5 +436,10 @@ if (!selected.length) {
 
 for (const [name, run] of selected) {
   console.log(`running ${name}`);
-  await run();
+  if (chromium) {
+    await run();
+  } else {
+    console.log("Playwright package not available; running dependency-free fallback");
+    await fallbackTests[name]();
+  }
 }

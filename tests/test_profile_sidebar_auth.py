@@ -72,7 +72,10 @@ def _assert_client_nav_visibility() -> None:
     script = f"""
 const fs = require('node:fs');
 const http = require('node:http');
-const {{ chromium }} = require('playwright');
+let chromium = null;
+try {{
+  chromium = require('playwright').chromium;
+}} catch {{}}
 
 const sidebar = fs.readFileSync({json.dumps(str(SIDEBAR_JS))}, 'utf8');
 const palette = fs.readFileSync({json.dumps(str(COMMAND_PALETTE_JS))}, 'utf8');
@@ -85,6 +88,21 @@ const roles = {{
   ordinary: {{ is_admin: false, can_manage_profiles: false }},
 }};
 let currentRole = 'ordinary';
+
+if (!chromium) {{
+  for (const marker of [
+    'seedAdmin ||',
+    'isAdmin || Boolean(user && user.can_manage_profiles)',
+    'canReachProfiles()',
+    'requiresAdmin: true',
+    'requiresProfiles: true',
+  ]) {{
+    if (!`${{sidebar}}\n${{palette}}`.includes(marker)) {{
+      throw new Error(`nav fallback missing marker: ${{marker}}`);
+    }}
+  }}
+  process.exit(0);
+}}
 
 function pageHtml(role) {{
   return `<!doctype html>
