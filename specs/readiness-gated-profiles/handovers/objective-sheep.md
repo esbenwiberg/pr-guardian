@@ -18,6 +18,11 @@
 - Browser facts capture screenshots under:
   - `.autopod/evidence/fact-profile-manager-creates-connection-profile-link/`
   - `.autopod/evidence/fact-profile-ui-redacts-secrets-and-uses-structured-controls/`
+- Rework note: stabilized the dependency-free browser fallback so it verifies
+  static repo-link/audit wiring markers (`target_type`, `target_id`,
+  `canonical_repo_key`) instead of looking for the runtime-only
+  `repo_link.created` audit event. The Playwright path still exercises the full
+  setup flow and waits for `repo_link.created` when a browser is available.
 
 ## Deviations
 
@@ -28,6 +33,9 @@
 - The browser fact script uses the sandbox-provided Chromium executable at
   `/opt/pw-browsers/chromium-1223/chrome-linux/chrome` when present because this container
   had a Playwright browser revision mismatch after `npm install`.
+- When Playwright is unavailable, the browser fact script writes explicit fallback evidence
+  and validates source-level UI/API wiring. It does not claim to have observed runtime audit
+  transitions in that mode.
 
 ## Interfaces downstream pods should know
 

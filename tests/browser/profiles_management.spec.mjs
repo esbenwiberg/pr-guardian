@@ -328,7 +328,9 @@ const fallbackTests = {
         "health_status",
         "auto_review_enabled",
         "paused",
-        "repo_link.created",
+        "target_type",
+        "target_id",
+        "canonical_repo_key",
       ],
       "profile-manager-creates-setup-in-ui",
     );
