@@ -48,8 +48,7 @@ def _can_manage_profiles(request: Request) -> bool:
     return bool(
         getattr(identity, "kind", "anonymous") != "api_key"
         and (
-            getattr(identity, "is_admin", False)
-            or getattr(identity, "can_manage_profiles", False)
+            getattr(identity, "is_admin", False) or getattr(identity, "can_manage_profiles", False)
         )
     )
 
