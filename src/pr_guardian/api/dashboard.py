@@ -30,6 +30,7 @@ from pr_guardian.decision.types import StickyTriggerKind
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import _hash16, finding_signature
 from pr_guardian.platform.factory import create_adapter, create_github_adapter
+from pr_guardian.decision.actions import _detail_url
 from pr_guardian.wizard.capability_clusterer import (
     FileSummary,
     FindingSummary,
@@ -770,7 +771,7 @@ def _will_fix_findings(review_dict: dict) -> list[dict]:
 
 
 def _build_verdict_body(
-    verdict: str, reviewer_comment: str, decision_counts: dict[str, int]
+    verdict: str, reviewer_comment: str, decision_counts: dict[str, int], review_url: str | None = None
 ) -> str:
     """Compose the comment body posted to the platform alongside the verdict."""
     accepted = decision_counts.get("acknowledged", 0)
@@ -797,7 +798,10 @@ def _build_verdict_body(
     if summary_bits:
         parts.append("---")
         parts.append("Per-concern decisions: " + " · ".join(summary_bits) + ".")
-    parts.append("_Posted from PR Guardian wizard review._")
+    if review_url:
+        parts.append(f"_Posted from [PR Guardian wizard review]({review_url})._")
+    else:
+        parts.append("_Posted from PR Guardian wizard review._")
     return "\n\n".join(parts)
 
 
@@ -805,6 +809,7 @@ def _build_verdict_body(
 async def submit_verdict(
     review_id: uuid.UUID,
     body: SubmitVerdictRequest,
+    request: Request,
     identity=Depends(require_human_signed_in),
 ):
     """Post the reviewer's final verdict back to the platform (GitHub / ADO)
@@ -876,7 +881,9 @@ async def submit_verdict(
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     decision_counts = _summarise_decisions(review)
-    comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts)
+    base_url = str(request.base_url).rstrip("/")
+    review_url = _detail_url(str(review_id), base_url)
+    comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts, review_url)
 
     actions: list[str] = []
     posted = True
