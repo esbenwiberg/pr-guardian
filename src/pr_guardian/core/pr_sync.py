@@ -250,10 +250,16 @@ async def _sync_github(token: str, connection: dict[str, Any]) -> None:
                         connection_id=_connection_uuid(connection),
                         connection_snapshot=connection,
                     )
+                    repo_link = await storage.get_active_repo_link_for_repo(
+                        platform="github",
+                        repo=repo,
+                    )
+                    repo_link_id = repo_link["id"] if repo_link else None
                     for pr in prs:
                         data = _normalize_github_pr(pr, repo)
                         data["connection_id"] = _connection_uuid(connection)
                         data["connection_snapshot"] = connection
+                        data["repo_link_id"] = repo_link_id
                         await storage.upsert_synced_pr(data)
                         keep_pr_ids.append(str(pr["number"]))
                         await _trigger_auto_review(
@@ -274,6 +280,7 @@ async def _sync_github(token: str, connection: dict[str, Any]) -> None:
                         data = _normalize_github_merged_pr(pr, repo)
                         data["connection_id"] = _connection_uuid(connection)
                         data["connection_snapshot"] = connection
+                        data["repo_link_id"] = repo_link_id
                         await storage.upsert_synced_pr(data)
                         keep_pr_ids.append(str(pr["number"]))
                     await storage.mark_sync_source_synced("github", repo)
@@ -347,10 +354,18 @@ async def _sync_ado(pat: str, connection: dict[str, Any]) -> None:
                                 connection_id=_connection_uuid(connection),
                                 connection_snapshot=connection,
                             )
+                            ado_repo_link = await storage.get_active_repo_link_for_repo(
+                                platform="ado",
+                                repo=repo_name,
+                                org_url=org_url,
+                                project=project_name,
+                            )
+                            ado_repo_link_id = ado_repo_link["id"] if ado_repo_link else None
                             for pr in prs:
                                 data = _normalize_ado_pr(pr, org_url, project_name, repo_name)
                                 data["connection_id"] = _connection_uuid(connection)
                                 data["connection_snapshot"] = connection
+                                data["repo_link_id"] = ado_repo_link_id
                                 await storage.upsert_synced_pr(data)
                                 keep_pr_ids.append(str(pr.get("pullRequestId", "")))
                                 await _trigger_auto_review(
@@ -376,6 +391,7 @@ async def _sync_ado(pat: str, connection: dict[str, Any]) -> None:
                                 )
                                 data["connection_id"] = _connection_uuid(connection)
                                 data["connection_snapshot"] = connection
+                                data["repo_link_id"] = ado_repo_link_id
                                 await storage.upsert_synced_pr(data)
                                 keep_pr_ids.append(str(pr.get("number", "")))
                             await storage.mark_sync_source_synced(
