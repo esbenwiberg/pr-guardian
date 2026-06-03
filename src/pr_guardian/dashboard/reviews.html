@@ -139,12 +139,6 @@
             <input type="number" id="repo-review-max-files" value="300" min="10" max="1000" class="form-input w-full">
             <p class="text-2xs text-slate-500 mt-1">Hard cap; review rejected if the repo exceeds this.</p>
           </div>
-          <div id="repo-review-pat-row" style="display:none">
-            <label class="form-label" for="repo-review-pat-name">GitHub PAT <span class="text-slate-500 font-normal text-xs">(optional)</span></label>
-            <select id="repo-review-pat-name" class="form-input w-full">
-              <option value="">Default (env var or configured default)</option>
-            </select>
-          </div>
         </div>
         <div class="dialog-footer">
           <div id="repo-review-status" class="text-sm hidden mr-auto"></div>
@@ -177,12 +171,6 @@
               <option value="none" selected>No comment</option>
               <option value="summary">Summary comment</option>
               <option value="inline">Inline comments</option>
-            </select>
-          </div>
-          <div id="review-pat-row">
-            <label class="form-label" for="review-pat-name">GitHub PAT <span class="text-slate-500 font-normal text-xs">(optional)</span></label>
-            <select id="review-pat-name" class="form-input w-full">
-              <option value="">Default (env var or configured default)</option>
             </select>
           </div>
         </div>
@@ -332,90 +320,24 @@ function renderReviewRow(r, idx) {
 }
 
 // ---- Review Modal ----
-let _loadedPats = [];
-
-function _isGithubUrl(url) {
-  return /https?:\/\/github\.com\//i.test(url);
-}
-
-function _updatePatRowVisibility() {
-  const url = document.getElementById('review-pr-url').value.trim();
-  const isGitHub = _isGithubUrl(url) || url === '';
-  document.getElementById('review-pat-row').style.display =
-    (isGitHub && _loadedPats.length) ? '' : 'none';
-}
-
-async function loadPatOptions() {
-  const sel = document.getElementById('review-pat-name');
-  _loadedPats = [];
-  try {
-    const r = await fetch('/api/admin/github-pats');
-    if (r.ok) {
-      const pats = await r.json();
-      _loadedPats = pats;
-      sel.innerHTML = '<option value="">Default (env var or configured default)</option>';
-      pats.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.name;
-        opt.textContent = p.name + (p.description ? ` — ${p.description}` : '') + (p.is_default ? ' ★' : '');
-        if (p.is_default) opt.selected = true;
-        sel.appendChild(opt);
-      });
-    }
-  } catch (_) {
-    // Non-admin or no DB — PAT row stays hidden
-  }
-  _updatePatRowVisibility();
-}
-
 function openReviewModal() {
   document.getElementById('review-modal-overlay').classList.remove('hidden');
   document.getElementById('review-pr-url').focus();
-  loadPatOptions();
-  document.getElementById('review-pr-url').addEventListener('input', _updatePatRowVisibility);
 }
 function closeReviewModal() {
   document.getElementById('review-modal-overlay').classList.add('hidden');
   document.getElementById('review-status').style.display = 'none';
   document.getElementById('review-submit-btn').disabled = false;
   document.getElementById('review-submit-btn').textContent = 'Start Review';
-  document.getElementById('review-pr-url').removeEventListener('input', _updatePatRowVisibility);
 }
 document.getElementById('review-modal-overlay').addEventListener('click', (e) => {
   if (e.target === document.getElementById('review-modal-overlay')) closeReviewModal();
 });
 
 // ---- Repo Review Modal ----
-function _updateRepoPatRowVisibility() {
-  const platform = document.getElementById('repo-review-platform').value;
-  const row = document.getElementById('repo-review-pat-row');
-  row.style.display = (platform === 'github' && _loadedPats.length) ? '' : 'none';
-}
-
-async function loadRepoPatOptions() {
-  const sel = document.getElementById('repo-review-pat-name');
-  try {
-    const r = await fetch('/api/admin/github-pats');
-    if (r.ok) {
-      const pats = await r.json();
-      _loadedPats = pats;
-      sel.innerHTML = '<option value="">Default (env var or configured default)</option>';
-      pats.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.name;
-        opt.textContent = p.name + (p.description ? ` — ${p.description}` : '') + (p.is_default ? ' ★' : '');
-        if (p.is_default) opt.selected = true;
-        sel.appendChild(opt);
-      });
-    }
-  } catch (_) {}
-  _updateRepoPatRowVisibility();
-}
-
 function openRepoReviewModal() {
   document.getElementById('repo-review-modal-overlay').classList.remove('hidden');
   document.getElementById('repo-review-repo').focus();
-  loadRepoPatOptions();
 }
 function closeRepoReviewModal() {
   document.getElementById('repo-review-modal-overlay').classList.add('hidden');
@@ -444,7 +366,6 @@ async function submitRepoReview(e) {
   const platform = document.getElementById('repo-review-platform').value;
   const ref = document.getElementById('repo-review-ref').value.trim() || 'HEAD';
   const maxFiles = parseInt(document.getElementById('repo-review-max-files').value) || 300;
-  const patName = document.getElementById('repo-review-pat-name').value || null;
   const btn = document.getElementById('repo-review-submit-btn');
   const status = document.getElementById('repo-review-status');
 
@@ -455,7 +376,6 @@ async function submitRepoReview(e) {
   status.textContent = 'Queueing repo review...';
 
   const body = { repo, platform, ref, max_files: maxFiles };
-  if (patName) body.pat_name = patName;
 
   try {
     const resp = await fetch('/api/review/repo', {
@@ -489,7 +409,6 @@ async function submitReview(e) {
   e.preventDefault();
   const url = document.getElementById('review-pr-url').value.trim();
   const commentMode = document.getElementById('review-comment-mode').value;
-  const patName = document.getElementById('review-pat-name').value || null;
   const btn = document.getElementById('review-submit-btn');
   const status = document.getElementById('review-status');
 
@@ -501,7 +420,6 @@ async function submitReview(e) {
 
   try {
     const body = { pr_url: url, comment_mode: commentMode };
-    if (patName) body.pat_name = patName;
     const resp = await fetch('/api/review', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

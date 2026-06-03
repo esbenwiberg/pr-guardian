@@ -119,54 +119,6 @@
       </table>
     </div>
 
-    <!-- GitHub PATs Card -->
-    <div id="pats" class="card p-6" style="scroll-margin-top: 16px">
-      <h2 class="text-[15px] font-semibold mb-1">GitHub PATs</h2>
-      <p class="text-xs text-slate-400 mb-5">Store named GitHub Personal Access Tokens for use when triggering reviews. Tokens are encrypted at rest. One PAT can be marked as default and will be used when no specific PAT is selected.</p>
-
-      <!-- Add Form -->
-      <div class="space-y-3 mb-5">
-        <div class="flex flex-wrap gap-3 items-end">
-          <div class="flex-1 min-w-[160px]">
-            <label class="text-xs font-medium text-slate-300 block mb-1">Name</label>
-            <input type="text" id="pat-name" class="form-input w-full" placeholder="e.g. org-a, personal, ci-org">
-          </div>
-          <div class="flex-1 min-w-[200px]">
-            <label class="text-xs font-medium text-slate-300 block mb-1">Description <span class="text-slate-500 font-normal">(optional)</span></label>
-            <input type="text" id="pat-description" class="form-input w-full" placeholder="e.g. Acme org read access">
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-3 items-end">
-          <div class="flex-1 min-w-[240px]">
-            <label class="text-xs font-medium text-slate-300 block mb-1">Token</label>
-            <input type="password" id="pat-token" class="form-input w-full font-mono" placeholder="ghp_xxxx...">
-          </div>
-          <div class="flex items-center gap-2 h-[38px]">
-            <input type="checkbox" id="pat-is-default" class="form-checkbox">
-            <label for="pat-is-default" class="text-xs text-slate-300 cursor-pointer">Set as default</label>
-          </div>
-          <button class="btn btn-primary btn-sm h-[38px]" onclick="createPat()">Add PAT</button>
-        </div>
-      </div>
-
-      <!-- PATs Table -->
-      <div id="pats-loading" class="text-xs text-slate-400 py-4">Loading...</div>
-      <div id="pats-empty" class="hidden text-xs text-slate-400 py-4">No PATs configured. The GITHUB_TOKEN environment variable will be used as fallback.</div>
-      <table id="pats-table" class="hidden w-full text-xs">
-        <thead>
-          <tr class="text-left text-slate-400 border-b border-slate-700/50">
-            <th class="pb-2 font-medium">Name</th>
-            <th class="pb-2 font-medium">Description</th>
-            <th class="pb-2 font-medium">Token</th>
-            <th class="pb-2 font-medium">Default</th>
-            <th class="pb-2 font-medium">Added</th>
-            <th class="pb-2 font-medium"></th>
-          </tr>
-        </thead>
-        <tbody id="pats-body"></tbody>
-      </table>
-    </div>
-
     <!-- Exclusion Rules -->
     <div id="exclusions" class="card p-6 mt-6" style="scroll-margin-top: 16px">
       <div class="flex items-center justify-between mb-4">
@@ -241,28 +193,6 @@
   </div>
 </div>
 
-<!-- Edit PAT Modal -->
-<div id="edit-pat-overlay" class="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm hidden flex items-center justify-center">
-  <div class="bg-slate-900 border border-slate-700 rounded-xl p-6 w-full max-w-md mx-4 shadow-xl">
-    <h3 class="text-sm font-semibold mb-4">Edit PAT: <span id="edit-pat-name-label" class="text-slate-300 font-mono"></span></h3>
-    <input type="hidden" id="edit-pat-id">
-    <div class="space-y-4">
-      <div>
-        <label class="text-xs font-medium text-slate-300 block mb-1">Description <span class="text-slate-500 font-normal">(optional)</span></label>
-        <input type="text" id="edit-pat-description" class="form-input w-full" placeholder="e.g. Acme org read access">
-      </div>
-      <div>
-        <label class="text-xs font-medium text-slate-300 block mb-1">New Token <span class="text-slate-500 font-normal">(leave blank to keep existing)</span></label>
-        <input type="password" id="edit-pat-token" class="form-input w-full font-mono" placeholder="ghp_xxxx...">
-      </div>
-    </div>
-    <div class="flex gap-3 justify-end mt-6">
-      <button class="btn btn-secondary btn-sm" onclick="closeEditPatModal()">Cancel</button>
-      <button class="btn btn-primary btn-sm" onclick="saveEditPat()">Save</button>
-    </div>
-  </div>
-</div>
-
 <!-- Toast -->
 <div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
   <div class="px-4 py-2 rounded-lg text-sm shadow-lg" id="toast-inner"></div>
@@ -301,7 +231,6 @@ async function loadIdentity() {
     document.getElementById('identity-badge').textContent = `Signed in as ${me.display_name}`;
     loadKeys();
     loadAdmins();
-    loadPats();
   } catch (e) {
     showToast(`Auth error: ${e.message}`, 'error');
   }
@@ -463,149 +392,6 @@ async function removeAdmin(email) {
     }
     showToast(`${email} removed`);
     loadAdmins();
-  } catch (e) {
-    showToast(`Failed: ${e.message}`, 'error');
-  }
-}
-
-// --- GitHub PATs ---
-// Use event delegation so dynamically rendered rows work without inline handlers.
-// data-id / data-name attributes are HTML-escaped, so any character in a PAT name is safe.
-document.addEventListener('click', e => {
-  const delBtn = e.target.closest('.pat-delete');
-  if (delBtn) { deletePat(delBtn.dataset.id, delBtn.dataset.name); return; }
-  const defBtn = e.target.closest('.pat-set-default');
-  if (defBtn) { setPatDefault(defBtn.dataset.id, defBtn.dataset.name); return; }
-  const editBtn = e.target.closest('.pat-edit');
-  if (editBtn) { showEditPatModal(editBtn.dataset.id, editBtn.dataset.name, editBtn.dataset.description); return; }
-});
-
-async function loadPats() {
-  try {
-    const r = await fetch(`${API}/github-pats`);
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const pats = await r.json();
-    document.getElementById('pats-loading').classList.add('hidden');
-
-    if (!pats.length) {
-      document.getElementById('pats-empty').classList.remove('hidden');
-      document.getElementById('pats-table').classList.add('hidden');
-      return;
-    }
-    document.getElementById('pats-empty').classList.add('hidden');
-    document.getElementById('pats-table').classList.remove('hidden');
-
-    document.getElementById('pats-body').innerHTML = pats.map(p => `
-      <tr class="border-b border-slate-700/30">
-        <td class="py-2 font-medium text-slate-200">${esc(p.name)}</td>
-        <td class="py-2 text-slate-400">${esc(p.description || '—')}</td>
-        <td class="py-2 font-mono text-slate-400">${esc(p.token_prefix)}</td>
-        <td class="py-2">${p.is_default ? '<span class="text-emerald-400 font-semibold">default</span>' : `<button class="pat-set-default text-slate-400 hover:text-slate-200 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Set default</button>`}</td>
-        <td class="py-2 text-slate-400">${fmtDate(p.created_at)}</td>
-        <td class="py-2 text-right space-x-3">
-          <button class="pat-edit text-slate-400 hover:text-slate-200 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}" data-description="${esc(p.description || '')}">Edit</button>
-          <button class="pat-delete text-red-400 hover:text-red-300 transition-colors" data-id="${esc(p.id)}" data-name="${esc(p.name)}">Delete</button>
-        </td>
-      </tr>`).join('');
-  } catch (e) {
-    document.getElementById('pats-loading').textContent = 'Failed to load PATs.';
-  }
-}
-
-async function createPat() {
-  const name = document.getElementById('pat-name').value.trim();
-  const token = document.getElementById('pat-token').value.trim();
-  const description = document.getElementById('pat-description').value.trim();
-  const is_default = document.getElementById('pat-is-default').checked;
-
-  if (!name) { showToast('PAT name is required', 'error'); return; }
-  if (!token) { showToast('Token is required', 'error'); return; }
-
-  try {
-    const r = await fetch(`${API}/github-pats`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, token, description, is_default }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
-    }
-    document.getElementById('pat-name').value = '';
-    document.getElementById('pat-token').value = '';
-    document.getElementById('pat-description').value = '';
-    document.getElementById('pat-is-default').checked = false;
-    showToast(`PAT "${name}" added`);
-    loadPats();
-  } catch (e) {
-    showToast(`Failed: ${e.message}`, 'error');
-  }
-}
-
-async function setPatDefault(id, name) {
-  try {
-    const r = await fetch(`${API}/github-pats/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ is_default: true }),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
-    }
-    showToast(`"${name}" is now the default PAT`);
-    loadPats();
-  } catch (e) {
-    showToast(`Failed: ${e.message}`, 'error');
-  }
-}
-
-async function deletePat(id, name) {
-  if (!confirm(`Delete PAT "${name}"? This cannot be undone.`)) return;
-  try {
-    const r = await fetch(`${API}/github-pats/${id}`, { method: 'DELETE' });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
-    }
-    showToast(`PAT "${name}" deleted`);
-    loadPats();
-  } catch (e) {
-    showToast(`Failed: ${e.message}`, 'error');
-  }
-}
-
-function showEditPatModal(id, name, description) {
-  document.getElementById('edit-pat-id').value = id;
-  document.getElementById('edit-pat-name-label').textContent = name;
-  document.getElementById('edit-pat-description').value = description;
-  document.getElementById('edit-pat-token').value = '';
-  document.getElementById('edit-pat-overlay').classList.remove('hidden');
-}
-
-function closeEditPatModal() {
-  document.getElementById('edit-pat-overlay').classList.add('hidden');
-}
-
-async function saveEditPat() {
-  const id = document.getElementById('edit-pat-id').value;
-  const description = document.getElementById('edit-pat-description').value.trim();
-  const token = document.getElementById('edit-pat-token').value.trim();
-  const body = { description };
-  if (token) body.token = token;
-  try {
-    const r = await fetch(`${API}/github-pats/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    if (!r.ok) {
-      const err = await r.json().catch(() => ({}));
-      throw new Error(err.detail || `HTTP ${r.status}`);
-    }
-    closeEditPatModal();
-    showToast('PAT updated');
-    loadPats();
   } catch (e) {
     showToast(`Failed: ${e.message}`, 'error');
   }
