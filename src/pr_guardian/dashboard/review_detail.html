@@ -186,6 +186,21 @@
   </div>
 </div>
 
+<style>
+  .ipt-row { display: grid; grid-template-columns: 9px 140px 1fr; align-items: center; gap: 8px; padding: 3px 2px; border-radius: 4px; }
+  .ipt-row-child { padding-left: 17px; }
+  .ipt-name { color: rgb(148 163 184); font-size: 0.8125rem; }
+  .ipt-detail { color: rgb(100 116 139); font-size: 0.75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ipt-dot { width: 7px; height: 7px; border-radius: 999px; background: rgb(51 65 85); flex-shrink: 0; }
+  .ipt-dot.queued { background: rgb(51 65 85); }
+  .ipt-dot.running { background: rgb(129 140 248); animation: ipt-pulse 1.2s infinite; }
+  .ipt-dot.complete { background: rgb(110 231 183); }
+  .ipt-dot.error { background: rgb(248 113 113); }
+  .ipt-row.complete .ipt-name { color: rgb(203 213 225); }
+  .ipt-row.error .ipt-name, .ipt-row.error .ipt-detail { color: rgb(252 165 165); }
+  @keyframes ipt-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+</style>
+
 <script>
 const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
 const DECISION_EMOJI = { auto_approve: '\u2705', human_review: '\ud83d\udc40', reject: '\u274c', hard_block: '\ud83d\udeab' };
@@ -393,9 +408,14 @@ function render(d) {
           </div>
         </div>`;
     }).join('');
+  } else if (d.decision === 'pending') {
+    startProgressTracker(d);
   } else {
     document.getElementById('agents-container').innerHTML = '<div class="empty-state"><div class="empty-state-text">No agent results available.</div></div>';
   }
+
+  // When agents are already rendered but decision still pending (final scoring phase), subscribe for auto-reload
+  if (d.decision === 'pending' && agents.length) _iptConnect();
 
   // Show dismissal count and review action buttons
   const dCount = d.dismissal_count || 0;
@@ -991,6 +1011,132 @@ function formatTimeShort(iso) {
   if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
   if (diff < 604800000) return `${Math.floor(diff / 86400000)}d ago`;
   return d.toLocaleDateString();
+}
+
+// ---- In-progress pipeline tracker ----
+
+const _IPT_DEF = [
+  { key: 'discovery',  name: 'Discovery',  children: [] },
+  { key: 'mechanical', name: 'Mechanical', children: [] },
+  { key: 'triage',     name: 'Triage',     children: [] },
+  { key: 'agents',     name: 'Agents',     children: ['security', 'performance', 'architecture', 'hotspot', 'code_quality', 'test_quality'] },
+  { key: 'decision',   name: 'Decision',   children: [] },
+];
+const _IPT_ORDER = _IPT_DEF.map(s => s.key);
+
+let _iptState = {};
+let _iptEs = null;
+let _iptTimer = null;
+let _iptStartTs = 0;
+let _iptActive = false;
+
+function _iptInit() {
+  _iptState = {};
+  _IPT_DEF.forEach(s => {
+    _iptState[s.key] = { status: 'queued', detail: '' };
+    s.children.forEach(c => { _iptState[`agents.${c}`] = { status: 'queued', detail: '' }; });
+  });
+}
+
+function _iptSeed(stage, detail) {
+  if (!stage || stage === 'queued') return;
+  const key = stage.toLowerCase();
+  const parent = key.startsWith('agents.') ? 'agents' : key;
+  const idx = _IPT_ORDER.indexOf(parent);
+  if (idx < 0) return;
+  _IPT_ORDER.slice(0, idx).forEach(k => { if (_iptState[k]) _iptState[k] = { status: 'complete', detail: 'done' }; });
+  if (_iptState[parent]) _iptState[parent] = { status: 'running', detail: parent === key ? (detail || '') : '' };
+  if (key !== parent && _iptState[key]) _iptState[key] = { status: 'running', detail: detail || '' };
+}
+
+function _iptSym(s) { return { complete: '✓', error: '✗', running: '●', queued: '·' }[s] || '·'; }
+
+function _iptDraw() {
+  const el = document.getElementById('ipt-pipeline');
+  if (!el) return;
+  const rows = [];
+  for (const s of _IPT_DEF) {
+    const st = _iptState[s.key];
+    rows.push(`<div class="ipt-row ${st.status}"><span class="ipt-dot ${st.status}"></span><span class="ipt-name">${_iptSym(st.status)} ${s.name}</span><span class="ipt-detail">${esc(st.detail)}</span></div>`);
+    if (s.key === 'agents') {
+      for (const c of s.children) {
+        const cs = _iptState[`agents.${c}`];
+        rows.push(`<div class="ipt-row ipt-row-child ${cs.status}"><span class="ipt-dot ${cs.status}"></span><span class="ipt-name">${_iptSym(cs.status)} ${c.replace(/_/g,' ')}</span><span class="ipt-detail">${esc(cs.detail || (cs.status === 'queued' ? 'queued' : ''))}</span></div>`);
+      }
+    }
+  }
+  el.innerHTML = rows.join('');
+}
+
+function _iptApply(ev) {
+  if (!ev || ev.review_id !== REVIEW_ID) return;
+  const stage = (ev.stage || '').toLowerCase();
+  if (!stage || stage === 'repo_diff_built') return;
+
+  if (stage === 'complete' || stage === 'finished') {
+    setTimeout(() => window.location.reload(), 900);
+    return;
+  }
+
+  if (!_iptActive) return;
+
+  if (stage === 'error' || stage === 'failed') {
+    Object.keys(_iptState).forEach(k => { if (_iptState[k].status === 'running') _iptState[k] = { status: 'error', detail: ev.detail || 'failed' }; });
+    const errEl = document.getElementById('ipt-error');
+    if (errEl) { errEl.textContent = ev.detail || 'Review failed.'; errEl.style.display = ''; }
+  } else if (stage in _iptState) {
+    const done = /done|complet/.test((ev.detail || '').toLowerCase());
+    _iptState[stage] = { status: done ? 'complete' : 'running', detail: ev.detail || '' };
+    const idx = _IPT_ORDER.indexOf(stage);
+    _IPT_ORDER.slice(0, idx).forEach(k => { if (_iptState[k] && _iptState[k].status !== 'complete') _iptState[k] = { status: 'complete', detail: 'done' }; });
+  } else if (stage.startsWith('agents.') && stage in _iptState) {
+    _iptState[stage] = { status: 'running', detail: ev.detail || '' };
+    if (_iptState['agents'].status === 'queued') _iptState['agents'] = { status: 'running', detail: '' };
+  }
+  _iptDraw();
+}
+
+function _iptConnect() {
+  if (_iptEs) return;
+  _iptEs = new EventSource('/api/dashboard/events');
+  _iptEs.onmessage = m => { try { _iptApply(JSON.parse(m.data)); } catch(e) {} };
+}
+
+function startProgressTracker(d) {
+  _iptInit();
+  _iptSeed(d.stage, d.stage_detail);
+  _iptStartTs = Date.now();
+  _iptActive = true;
+
+  document.getElementById('agents-container').innerHTML = `
+    <div class="card p-5 mb-4">
+      <div class="flex items-center gap-3 mb-4">
+        <span class="ipt-dot running"></span>
+        <span class="text-sm font-semibold text-slate-300">Review in progress</span>
+        <span class="text-xs text-slate-500 tabular-nums ml-auto" id="ipt-elapsed">0s</span>
+      </div>
+      <div id="ipt-pipeline" class="font-mono text-sm space-y-0.5"></div>
+      <div id="ipt-error" style="display:none" class="mt-3 p-2 rounded border border-red-500/40 bg-red-500/5 text-xs text-red-300"></div>
+    </div>`;
+
+  _iptDraw();
+
+  _iptTimer = setInterval(() => {
+    const el = document.getElementById('ipt-elapsed');
+    if (!el) { clearInterval(_iptTimer); return; }
+    const s = Math.floor((Date.now() - _iptStartTs) / 1000);
+    el.textContent = s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
+  }, 1000);
+
+  _iptConnect();
+
+  setTimeout(() => {
+    const alive = Object.values(_iptState).some(s => s.status !== 'queued');
+    if (alive) return;
+    const pipe = document.getElementById('ipt-pipeline');
+    if (pipe) pipe.insertAdjacentHTML('afterend', `
+      <p class="mt-3 text-xs text-slate-500">No live events received — review may already be done. <a class="text-indigo-400 hover:text-indigo-300 cursor-pointer" onclick="window.location.reload()">Reload</a></p>`);
+  }, 10000);
 }
 
 // Init
