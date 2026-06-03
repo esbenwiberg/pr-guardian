@@ -460,6 +460,7 @@
       </div>
       <div class="mt-5">
         ${detailLine('Reason', reasonLabel(item.reason))}
+        ${snapshot.error ? detailLine('Error', snapshot.error) : ''}
         ${renderChecks(snapshot)}
         ${detailLine('Archmap', archmap.state ? `${archmap.state}${archmap.minutes_remaining ? ', ' + archmap.minutes_remaining + 'm left' : ''}` : '')}
         ${detailLine('Quiet period', quiet.satisfied === true ? 'satisfied' : quiet.satisfied === false ? 'waiting' : '')}

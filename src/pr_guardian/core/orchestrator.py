@@ -1326,7 +1326,7 @@ async def _post_result_status(
     if result.decision == Decision.AUTO_APPROVE:
         await _post_review_status(adapter, pr, "success", "Guardian cleared")
     elif result.decision == Decision.HUMAN_REVIEW:
-        await _post_review_status(adapter, pr, "success", "Guardian review needs human review")
+        await _post_review_status(adapter, pr, "failure", "Guardian review needs human review")
     elif result.decision == Decision.REJECT:
         await _post_review_status(adapter, pr, "failure", "Guardian review requested changes")
     elif result.decision == Decision.HARD_BLOCK:

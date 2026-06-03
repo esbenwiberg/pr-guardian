@@ -160,6 +160,18 @@ async def _post_readiness_status(
         return False
 
 
+async def _post_review_pending(adapter: PlatformAdapter, pr: PlatformPR) -> None:
+    """Post guardian/review = pending immediately so merge is blocked from PR open."""
+    try:
+        method = getattr(adapter, "set_review_status", None)
+        if method is not None:
+            await method(pr, "pending", "Guardian review pending")
+        else:
+            await adapter.set_status(pr, "pending", "Guardian review pending", context="guardian/review")
+    except Exception as exc:
+        log.warning("review_pending_status_write_failed", pr_id=pr.pr_id, error=str(exc))
+
+
 async def create_or_update_candidate_from_pr(
     pr: PlatformPR,
     *,
@@ -191,7 +203,8 @@ async def create_or_update_candidate_from_pr(
     # flip every reviewed PR's readiness check back to "pending" on each pass.
     if existing is not None and existing["state"] in TERMINAL_CANDIDATE_STATES:
         return existing
-    if existing is None:
+    is_new = existing is None
+    if is_new:
         older = await storage.list_active_readiness_candidates(
             platform=pr.platform.value,
             repo=pr.repo,
@@ -218,6 +231,8 @@ async def create_or_update_candidate_from_pr(
 
     adapter = adapter or await _adapter_for_candidate(existing)
     await _post_readiness_status(adapter, pr, "pending", "Guardian readiness waiting")
+    if is_new:
+        await _post_review_pending(adapter, pr)
     return await evaluate_candidate(
         uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr
     )
