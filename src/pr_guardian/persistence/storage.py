@@ -184,6 +184,25 @@ def _default_profile_settings() -> dict[str, Any]:
     }
 
 
+def _normalize_ado_project(project: str, org_url: str = "") -> str:
+    """Extract the short project name from a full ADO project URL if needed.
+
+    Users sometimes paste the browser URL (https://dev.azure.com/org/ProjectName)
+    into the project field instead of just "ProjectName". The ADO REST API always
+    returns the short name, so we normalise here so both forms hash to the same key.
+    """
+    from urllib.parse import unquote
+
+    stripped = project.strip()
+    if not stripped.lower().startswith(("http://", "https://")):
+        return stripped
+    decoded = unquote(stripped)
+    clean_org = org_url.lower().rstrip("/")
+    if clean_org and decoded.lower().startswith(clean_org + "/"):
+        return decoded[len(clean_org) + 1 :].strip("/")
+    return decoded.rstrip("/").split("/")[-1]
+
+
 def _canonical_repo_key(
     platform: str,
     *,
@@ -196,10 +215,11 @@ def _canonical_repo_key(
     if normalized_platform == "github":
         return f"github:{repo_owner.lower().strip()}/{repo_name.lower().strip()}"
     if normalized_platform == "ado":
+        norm_project = _normalize_ado_project(project, org_url)
         return (
             "ado:"
             f"{org_url.lower().rstrip('/')}:"
-            f"{project.lower().strip()}/{repo_name.lower().strip()}"
+            f"{norm_project.lower().strip()}/{repo_name.lower().strip()}"
         )
     return f"{normalized_platform}:{repo_owner.lower().strip()}/{repo_name.lower().strip()}"
 
