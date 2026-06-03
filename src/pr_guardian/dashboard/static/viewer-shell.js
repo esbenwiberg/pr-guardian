@@ -292,6 +292,7 @@
           <label><input type="radio" name="prg-wrap-mode" value="none"> None</label>
         </div>
 
+        <div id="prg-wrap-info"  style="display:none; margin-top:12px; padding:10px; border-radius:6px; border:1px solid rgba(251,191,36,0.4); background:rgba(251,191,36,0.08); color:rgb(253,224,71); font-size:12px;"></div>
         <div id="prg-wrap-error" style="display:none; margin-top:12px; padding:10px; border-radius:6px; border:1px solid rgba(248,113,113,0.4); background:rgba(248,113,113,0.08); color:rgb(252,165,165); font-size:12px;"></div>
 
         <div style="display:flex; justify-content:flex-end; gap:8px; margin-top:18px;">
@@ -379,10 +380,26 @@
           throw new Error(data.error || data.detail || `HTTP ${r.status}`);
         }
         window.ReviewState.merge({ finalized: true, verdict, posted_at: new Date().toISOString() });
-        if (data.next_id) {
-          window.location.href = `/reviews/${encodeURIComponent(data.next_id)}`;
+        const actions = data.actions || [];
+        const allSkipped = actions.includes('post_inline_comments_skipped');
+        const partial   = actions.includes('post_inline_comments_partial');
+        const redirect  = () => {
+          if (data.next_id) {
+            window.location.href = `/reviews/${encodeURIComponent(data.next_id)}`;
+          } else {
+            window.location.href = '/reviews';
+          }
+        };
+        if (allSkipped || partial) {
+          const infoEl = overlay.querySelector('#prg-wrap-info');
+          infoEl.textContent = allSkipped
+            ? 'Inline comments skipped — findings have no line anchor. Included in the summary comment instead.'
+            : 'Some findings had no line anchor and were included in the summary comment instead of posted inline.';
+          infoEl.style.display = '';
+          btn.textContent = 'Done';
+          setTimeout(redirect, 3000);
         } else {
-          window.location.href = '/reviews';
+          redirect();
         }
       } catch (exc) {
         errEl.textContent = String(exc.message || exc);
