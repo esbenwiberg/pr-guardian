@@ -316,11 +316,14 @@ async def evaluate_candidate(
         f"Guardian readiness: {decision.reason or decision.state}",
     )
     if not status_written and decision.state != "superseded":
-        decision = ReadinessDecision(
-            "error",
-            "status_write_failed",
-            {**decision.snapshot, "status_write": {"state": status_state, "ok": False}},
-        )
+        augmented = {**decision.snapshot, "status_write": {"state": status_state, "ok": False}}
+        if decision.ready:
+            # Commit status write failed (e.g. token missing repo:status scope) but the
+            # PR is ready to review — proceed with the review rather than silently killing
+            # the pipeline. The status check is informational; the review is the product.
+            decision = ReadinessDecision("reviewing", decision.reason, augmented)
+        else:
+            decision = ReadinessDecision("error", "status_write_failed", augmented)
     if decision.ready and start_review:
         started = await _start_automatic_review(candidate_id, pr, adapter, source, decision)
         if started is not None:
