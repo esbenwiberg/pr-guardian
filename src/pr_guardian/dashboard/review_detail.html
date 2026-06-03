@@ -897,20 +897,41 @@ async function triggerReReview() {
 }
 
 async function triggerFullReview() {
-  if (!reviewData || !reviewData.pr_url) {
-    showToast('No PR URL available for this review', 'error');
+  if (!reviewData) {
+    showToast('No review data available', 'error');
     return;
   }
   const btn = document.getElementById('full-review-btn');
   btn.disabled = true;
   btn.textContent = 'Queuing...';
 
+  const isRepoReview = reviewData.review_source === 'repo_review';
+
   try {
-    const resp = await fetch('/api/review', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pr_url: reviewData.pr_url, comment_mode: reviewData.comment_mode ?? "summary" }),
-    });
+    let resp;
+    if (isRepoReview) {
+      if (!reviewData.repo) {
+        throw new Error('No repo available for this review');
+      }
+      resp = await fetch('/api/review/repo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          repo: reviewData.repo,
+          platform: reviewData.platform || 'github',
+          ref: reviewData.source_branch || 'HEAD',
+        }),
+      });
+    } else {
+      if (!reviewData.pr_url) {
+        throw new Error('No PR URL available for this review');
+      }
+      resp = await fetch('/api/review', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pr_url: reviewData.pr_url, comment_mode: reviewData.comment_mode ?? "summary" }),
+      });
+    }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       throw new Error(err.detail || `HTTP ${resp.status}`);
