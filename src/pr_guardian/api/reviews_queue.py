@@ -1126,10 +1126,17 @@ async def finalize_review(
                         )
                     )
                 if inline_findings:
-                    posted_inline_ids = await adapter.post_inline_comments(pr, inline_findings)
+                    inline_result = await adapter.post_inline_comments(pr, inline_findings)
+                    posted_inline_ids = inline_result.posted_ids
                     if posted_inline_ids:
                         actions.append("post_inline_comments")
-                    else:
+                    if inline_result.skipped:
+                        # Some findings couldn't be anchored (no line or not in diff) —
+                        # fall back to including all fix findings in the summary so
+                        # the author still sees them.
+                        include_fix_findings_in_summary = True
+                        actions.append("post_inline_comments_partial")
+                    elif not posted_inline_ids:
                         include_fix_findings_in_summary = True
                         actions.append("post_inline_comments_skipped")
 

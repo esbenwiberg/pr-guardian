@@ -29,6 +29,14 @@ class PlatformReadinessSignal:
     description: str = ""
 
 
+@dataclass
+class InlinePostResult:
+    """Result of a post_inline_comments call."""
+
+    posted_ids: list[str]
+    skipped: list[Finding]
+
+
 class PlatformAdapter(Protocol):
     """Interface for platform operations (ADO + GitHub)."""
 
@@ -92,8 +100,13 @@ class PlatformAdapter(Protocol):
         findings: list[Finding],
         *,
         threshold: str = "MEDIUM",
-    ) -> list[str]:
-        """Post one inline comment per unique file+line group; return posted comment IDs."""
+    ) -> InlinePostResult:
+        """Post one inline comment per unique file+line group.
+
+        Returns posted IDs and findings that could not be anchored (no line or
+        line not present in the diff).  Callers must handle skipped findings —
+        typically by falling back to the summary comment.
+        """
         ...
 
     async def delete_inline_comments(

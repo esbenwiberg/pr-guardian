@@ -11,6 +11,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
+from pr_guardian.platform.protocol import InlinePostResult
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -92,7 +94,9 @@ def _make_mock_adapter():
     adapter.approve_pr = AsyncMock(return_value=None)
     adapter.request_changes = AsyncMock(return_value=None)
     adapter.post_comment = AsyncMock(return_value=None)
-    adapter.post_inline_comments = AsyncMock(return_value=["thread-1"])
+    adapter.post_inline_comments = AsyncMock(
+        return_value=InlinePostResult(posted_ids=["thread-1"], skipped=[])
+    )
     return adapter
 
 
@@ -232,7 +236,9 @@ def test_decline_posts_inline_comments_for_each_will_fix_finding(client, monkeyp
         ],
     }
     adapter = _make_mock_adapter()
-    adapter.post_inline_comments = AsyncMock(return_value=["t1", "t2", "t3"])
+    adapter.post_inline_comments = AsyncMock(
+        return_value=InlinePostResult(posted_ids=["t1", "t2", "t3"], skipped=[])
+    )
     _patch_endpoint_deps(monkeypatch, review, adapter)
 
     resp = client.post(

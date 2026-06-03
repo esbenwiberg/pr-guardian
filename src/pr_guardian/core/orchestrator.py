@@ -1527,14 +1527,20 @@ async def _post_inline_and_summary(
     # Post new inline comments
     if qualifying:
         try:
-            posted_ids = await adapter.post_inline_comments(pr, qualifying)
-            if posted_ids and storage and review_id:
+            inline_result = await adapter.post_inline_comments(pr, qualifying)
+            if inline_result.posted_ids and storage and review_id:
                 await storage.save_inline_comment_ids(
                     review_id,
-                    posted_ids,
+                    inline_result.posted_ids,
                     pr.platform.value,
                     pr.pr_id,
                     pr.repo,
+                )
+            if inline_result.skipped:
+                log.warning(
+                    "inline_comments_not_anchored",
+                    pr_id=pr.pr_id,
+                    count=len(inline_result.skipped),
                 )
         except Exception as e:
             log.error("post_inline_comments_failed", pr_id=pr.pr_id, error=str(e))

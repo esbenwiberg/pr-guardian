@@ -11,6 +11,7 @@ from pr_guardian.models.findings import Certainty, Finding, Severity
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.ado import ADOAdapter
 from pr_guardian.platform.github import GitHubAdapter
+from pr_guardian.platform.protocol import InlinePostResult
 
 
 def _make_github_pr() -> PlatformPR:
@@ -88,9 +89,10 @@ async def test_github_post_inline_returns_ids():
     mock_client.post = AsyncMock(return_value=review_resp)
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
-        ids = await adapter.post_inline_comments(pr, findings)
+        result = await adapter.post_inline_comments(pr, findings)
 
-    assert ids == ["999"]
+    assert result.posted_ids == ["999"]
+    assert result.skipped == []
     mock_client.post.assert_called_once()
     call_args, call_kwargs = mock_client.post.call_args
     assert call_args[0] == "/repos/org/repo/pulls/42/comments"
@@ -113,9 +115,11 @@ async def test_github_post_inline_skips_422():
     mock_client.post = AsyncMock(side_effect=[resp_422, resp_ok])
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
-        ids = await adapter.post_inline_comments(pr, [f1, f2])
+        result = await adapter.post_inline_comments(pr, [f1, f2])
 
-    assert ids == ["777"]
+    assert result.posted_ids == ["777"]
+    assert len(result.skipped) == 1
+    assert result.skipped[0].file == "src/foo.py"
     assert mock_client.post.call_count == 2
 
 
@@ -136,9 +140,10 @@ async def test_github_post_inline_skips_none_line():
     mock_client.post = AsyncMock()
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
-        ids = await adapter.post_inline_comments(pr, [f])
+        result = await adapter.post_inline_comments(pr, [f])
 
-    assert ids == []
+    assert result.posted_ids == []
+    assert len(result.skipped) == 1
     mock_client.post.assert_not_called()
 
 
@@ -155,9 +160,10 @@ async def test_github_post_inline_groups_same_file_line():
     mock_client.post = AsyncMock(return_value=review_resp)
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
-        ids = await adapter.post_inline_comments(pr, [f1, f2])
+        result = await adapter.post_inline_comments(pr, [f1, f2])
 
-    assert ids == ["100"]
+    assert result.posted_ids == ["100"]
+    assert result.skipped == []
     assert mock_client.post.call_count == 1
 
 
@@ -199,9 +205,10 @@ async def test_ado_post_inline_returns_ids():
     mock_client.post = AsyncMock(return_value=thread_resp)
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
-        ids = await adapter.post_inline_comments(pr, findings)
+        result = await adapter.post_inline_comments(pr, findings)
 
-    assert ids == ["42"]
+    assert result.posted_ids == ["42"]
+    assert result.skipped == []
     call_kwargs = mock_client.post.call_args
     body = call_kwargs[1]["json"]
     assert body["threadContext"]["filePath"] == "/src/foo.py"
@@ -221,9 +228,11 @@ async def test_ado_post_inline_skips_422():
     mock_client.post = AsyncMock(side_effect=[resp_422, resp_ok])
 
     with patch.object(adapter, "_get_client", return_value=mock_client):
-        ids = await adapter.post_inline_comments(pr, [f1, f2])
+        result = await adapter.post_inline_comments(pr, [f1, f2])
 
-    assert ids == ["55"]
+    assert result.posted_ids == ["55"]
+    assert len(result.skipped) == 1
+    assert result.skipped[0].file == "src/outside.py"
     assert mock_client.post.call_count == 2
 
 
@@ -440,7 +449,9 @@ def _inline_finding(severity: Severity, line: int | None = 10) -> Finding:
 def _mock_adapter() -> MagicMock:
     adapter = MagicMock()
     adapter.post_comment = AsyncMock()
-    adapter.post_inline_comments = AsyncMock(return_value=["id-1", "id-2"])
+    adapter.post_inline_comments = AsyncMock(
+        return_value=InlinePostResult(posted_ids=["id-1", "id-2"], skipped=[])
+    )
     adapter.delete_inline_comments = AsyncMock()
     adapter.add_label = AsyncMock()
     adapter.set_status = AsyncMock()
@@ -498,7 +509,8 @@ async def test_inline_mode_posts_summary_after_inline():
     adapter = _mock_adapter()
     call_order: list[str] = []
     adapter.post_inline_comments = AsyncMock(
-        side_effect=lambda *a, **kw: call_order.append("inline") or ["id-1"]
+        side_effect=lambda *a, **kw: call_order.append("inline")
+        or InlinePostResult(posted_ids=["id-1"], skipped=[])
     )
     adapter.post_comment = AsyncMock(side_effect=lambda *a, **kw: call_order.append("summary"))
     storage = _mock_storage()
@@ -557,7 +569,8 @@ async def test_inline_rereview_deletes_before_posting():
         side_effect=lambda *a, **kw: call_order.append("delete")
     )
     adapter.post_inline_comments = AsyncMock(
-        side_effect=lambda *a, **kw: call_order.append("post") or ["new-1"]
+        side_effect=lambda *a, **kw: call_order.append("post")
+        or InlinePostResult(posted_ids=["new-1"], skipped=[])
     )
 
     original_review_id = str(_uuid.uuid4())

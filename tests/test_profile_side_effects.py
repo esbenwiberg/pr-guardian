@@ -7,7 +7,7 @@ from pr_guardian.core.orchestrator import _post_results
 from pr_guardian.models.context import RepoRiskClass, RiskTier
 from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.models.pr import Platform, PlatformPR
-from pr_guardian.platform.protocol import PlatformPRMetadata
+from pr_guardian.platform.protocol import InlinePostResult, PlatformPRMetadata
 
 
 def _pr() -> PlatformPR:
@@ -39,7 +39,9 @@ def _result() -> ReviewResult:
 def _adapter() -> MagicMock:
     adapter = MagicMock()
     adapter.post_comment = AsyncMock()
-    adapter.post_inline_comments = AsyncMock(return_value=[])
+    adapter.post_inline_comments = AsyncMock(
+        return_value=InlinePostResult(posted_ids=[], skipped=[])
+    )
     adapter.delete_inline_comments = AsyncMock()
     adapter.add_label = AsyncMock()
     adapter.request_reviewers = AsyncMock()

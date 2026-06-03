@@ -10,6 +10,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock, MagicMock
 
+from pr_guardian.platform.protocol import InlinePostResult
+
 import httpx
 import pytest
 from fastapi.testclient import TestClient
@@ -88,7 +90,9 @@ def _make_adapter(*, inline_ids=None):
     a.approve_pr = AsyncMock(return_value=None)
     a.request_changes = AsyncMock(return_value=None)
     a.post_comment = AsyncMock(return_value=None)
-    a.post_inline_comments = AsyncMock(return_value=inline_ids)
+    a.post_inline_comments = AsyncMock(
+        return_value=InlinePostResult(posted_ids=inline_ids or [], skipped=[])
+    )
     return a
 
 

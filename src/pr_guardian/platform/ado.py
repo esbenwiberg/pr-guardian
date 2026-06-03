@@ -13,7 +13,7 @@ from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
-from pr_guardian.platform.protocol import PlatformPRMetadata, PlatformReadinessSignal
+from pr_guardian.platform.protocol import InlinePostResult, PlatformPRMetadata, PlatformReadinessSignal
 
 log = structlog.get_logger()
 
@@ -597,11 +597,13 @@ class ADOAdapter:
         findings: list[Finding],
         *,
         threshold: str = "MEDIUM",
-    ) -> list[str]:
+    ) -> InlinePostResult:
         client = self._get_client()
         grouped: dict[tuple[str, int], list[Finding]] = {}
+        skipped: list[Finding] = []
         for f in findings:
             if f.line is None:
+                skipped.append(f)
                 continue
             grouped.setdefault((f.file, f.line), []).append(f)
 
@@ -633,15 +635,16 @@ class ADOAdapter:
                     ids.append(str(thread_id))
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 422:
-                    log.debug(
+                    log.warning(
                         "ado_inline_comment_skipped",
                         file=file,
                         line=line,
                         reason="line_not_in_diff",
                     )
+                    skipped.extend(group)
                 else:
                     raise
-        return ids
+        return InlinePostResult(posted_ids=ids, skipped=skipped)
 
     async def delete_inline_comments(
         self,
