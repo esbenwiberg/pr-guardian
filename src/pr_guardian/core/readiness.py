@@ -386,7 +386,7 @@ async def _start_automatic_review(
         actor=source,
         reason=decision.reason,
         readiness_snapshot=decision.snapshot,
-        comment_mode="summary",
+        comment_mode="inline",
         review_source="automatic",
     )
     if started is None:
@@ -407,8 +407,8 @@ async def _start_automatic_review(
                 adapter,
                 service_config=resolved.config,
                 existing_review_db_id=review_id,
-                comment_mode="summary",
-                manual_comment_override=False,
+                comment_mode="inline",
+                manual_comment_override=True,
             )
         except Exception as exc:  # noqa: BLE001
             log.error(
