@@ -1,4 +1,4 @@
-"""Unit tests for GitHubAdapter.fetch_pr_body_and_commits."""
+"""Unit tests for GitHubAdapter."""
 
 from __future__ import annotations
 
@@ -191,3 +191,69 @@ async def test_empty_body_already_hydrated_skips_pr_get():
     body, commits = await _adapter(_resp(commits_json)).fetch_pr_body_and_commits(pr_empty_body)
     assert body == ""
     assert commits == ["feat: no-desc commit"]
+
+
+# ---------------------------------------------------------------------------
+# fetch_pr_metadata — fork detection
+# ---------------------------------------------------------------------------
+
+
+def _pr_api_response(
+    *,
+    head_full_name: str = "owner/repo",
+    base_full_name: str = "owner/repo",
+    head_repo_fork: bool = False,
+    draft: bool = False,
+    state: str = "open",
+    merged: bool = False,
+    sha: str = "abc123",
+) -> dict:
+    return {
+        "state": state,
+        "draft": draft,
+        "merged": merged,
+        "head": {
+            "sha": sha,
+            "repo": {"full_name": head_full_name, "fork": head_repo_fork},
+        },
+        "base": {
+            "repo": {"full_name": base_full_name},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_branch_pr_in_forked_repo_is_not_fork():
+    """A branch PR within a repo that is itself a GitHub fork must not be
+    treated as a cross-fork PR.  head_repo.fork=True but full_names match."""
+    data = _pr_api_response(
+        head_full_name="org/portfolio-simulation",
+        base_full_name="org/portfolio-simulation",
+        head_repo_fork=True,  # the repo is a fork, but this is a branch PR
+    )
+    metadata = await _adapter(_resp(data)).fetch_pr_metadata(_pr())
+    assert metadata.fork is False
+
+
+@pytest.mark.asyncio
+async def test_cross_fork_pr_is_fork():
+    """A PR from a contributor's personal fork to the upstream repo is a fork PR."""
+    data = _pr_api_response(
+        head_full_name="alice/portfolio-simulation",
+        base_full_name="org/portfolio-simulation",
+        head_repo_fork=True,
+    )
+    metadata = await _adapter(_resp(data)).fetch_pr_metadata(_pr())
+    assert metadata.fork is True
+
+
+@pytest.mark.asyncio
+async def test_same_repo_non_fork_pr_is_not_fork():
+    """Normal branch PR, repo is not a fork at all — fork must be False."""
+    data = _pr_api_response(
+        head_full_name="org/repo",
+        base_full_name="org/repo",
+        head_repo_fork=False,
+    )
+    metadata = await _adapter(_resp(data)).fetch_pr_metadata(_pr())
+    assert metadata.fork is False

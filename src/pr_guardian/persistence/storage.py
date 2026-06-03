@@ -1146,7 +1146,7 @@ async def list_active_readiness_candidates(
 
 
 async def list_recoverable_readiness_candidates(*, limit: int = 100) -> list[dict[str, Any]]:
-    recoverable_reasons = ("", "checks_pending", "checks_failed", "checks_timeout", "archmap_wait")
+    recoverable_reasons = ("", "quiet_period", "draft", "checks_pending", "checks_failed", "checks_timeout", "archmap_wait")
     async with async_session() as session:
         rows = (
             await session.scalars(

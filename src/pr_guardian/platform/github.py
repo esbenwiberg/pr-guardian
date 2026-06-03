@@ -229,8 +229,7 @@ class GitHubAdapter:
         return PlatformPRMetadata(
             head_sha=head.get("sha") or pr.head_commit_sha,
             draft=bool(data.get("draft")),
-            fork=bool(head_repo.get("fork"))
-            or bool(head_full_name and head_full_name != base_full_name),
+            fork=bool(head_full_name and head_full_name != base_full_name),
             closed=data.get("state") == "closed",
             merged=bool(data.get("merged")),
         )
