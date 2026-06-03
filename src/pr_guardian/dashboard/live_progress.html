@@ -26,12 +26,12 @@
     </div>
   </header>
 
-  <div class="max-w-[720px] mx-auto px-6 pt-[80px]">
-    <div id="lp-meta-banner" class="hidden mb-4 p-3 rounded border border-slate-700 bg-slate-800/40 text-xs text-slate-300 font-mono"></div>
-    <div id="lp-pipeline" class="space-y-1.5 font-mono text-sm">
+  <div class="max-w-[640px] mx-auto px-6 pt-14 pb-16">
+    <div id="lp-meta-banner" class="hidden mb-6 p-3 rounded-lg border border-slate-700 bg-slate-800/40 text-xs text-slate-300 font-mono"></div>
+    <div id="lp-pipeline" class="py-6">
       <!-- rendered by JS -->
     </div>
-    <div id="lp-error" class="hidden mt-6 p-3 rounded border border-red-500/40 bg-red-500/5 text-xs text-red-300"></div>
+    <div id="lp-error" class="hidden mt-6 p-4 rounded-xl border border-red-500/30 bg-red-500/5 text-xs text-red-300"></div>
     <div id="lp-actions" class="hidden mt-4 flex gap-2">
       <button id="lp-rerun" class="btn btn-primary text-xs">Re-run</button>
       <a href="/reviews" class="btn btn-secondary text-xs">Back to queue</a>
@@ -40,20 +40,252 @@
 </div>
 
 <style>
-  .stage { display: grid; grid-template-columns: 14px 110px 1fr 60px; align-items: center; gap: 10px; padding: 6px 4px; border-radius: 4px; }
-  .stage.indent { padding-left: 24px; }
-  .stage-name { color: rgb(148 163 184); }
-  .stage-detail { color: rgb(100 116 139); }
-  .stage-time { text-align: right; color: rgb(100 116 139); font-variant-numeric: tabular-nums; }
-  .dot { width: 8px; height: 8px; border-radius: 999px; background: rgb(51 65 85); }
-  .dot.queued { background: rgb(51 65 85); }
-  .dot.running { background: rgb(129 140 248); animation: pulse 1.2s infinite; }
-  .dot.complete { background: rgb(110 231 183); }
-  .dot.error { background: rgb(248 113 113); }
-  .stage.complete .stage-name { color: rgb(203 213 225); }
-  .stage.error .stage-name { color: rgb(252 165 165); }
-  .stage.error .stage-detail { color: rgb(252 165 165); }
-  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.4; } }
+/* ── Status color tokens ── */
+:root {
+  --c-queued:   rgb(51 65 85);
+  --c-running:  rgb(129 140 248);
+  --c-complete: rgb(52 211 153);
+  --c-error:    rgb(248 113 113);
+  --c-running-glow: rgba(129, 140, 248, 0.15);
+  --c-complete-glow: rgba(52, 211, 153, 0.08);
+}
+
+/* ── Phase card ── */
+.phase-card {
+  position: relative;
+  background: rgba(15, 23, 42, 0.55);
+  border: 1px solid rgba(51, 65, 85, 0.45);
+  border-left: 3px solid var(--c-queued);
+  border-radius: 12px;
+  padding: 16px 18px;
+  transition: border-left-color 0.35s ease, box-shadow 0.35s ease, background 0.35s ease;
+}
+.phase-card.running {
+  border-left-color: var(--c-running);
+  background: rgba(15, 23, 42, 0.7);
+  box-shadow: -3px 0 16px rgba(129, 140, 248, 0.18), 0 0 0 1px rgba(129,140,248,0.06);
+}
+.phase-card.complete {
+  border-left-color: var(--c-complete);
+  background: rgba(15, 23, 42, 0.45);
+  box-shadow: -2px 0 10px rgba(52, 211, 153, 0.08);
+}
+.phase-card.error {
+  border-left-color: var(--c-error);
+  background: rgba(248, 113, 113, 0.04);
+  box-shadow: -2px 0 10px rgba(248, 113, 113, 0.1);
+}
+
+/* ── Phase header row ── */
+.phase-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.phase-icon {
+  font-size: 15px;
+  width: 22px;
+  text-align: center;
+  flex-shrink: 0;
+  opacity: 0.9;
+}
+.phase-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: rgb(100 116 139);
+  transition: color 0.3s;
+}
+.phase-card.running  .phase-name { color: rgb(224 231 255); }
+.phase-card.complete .phase-name { color: rgb(167 243 208); }
+.phase-card.error    .phase-name { color: rgb(254 202 202); }
+
+.phase-detail {
+  font-size: 11px;
+  color: rgb(71 85 105);
+  font-family: ui-monospace, monospace;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.phase-card.running  .phase-detail { color: rgb(129 140 248); }
+.phase-card.complete .phase-detail { color: rgb(52 211 153); }
+
+.phase-time {
+  font-size: 11px;
+  color: rgb(71 85 105);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+  white-space: nowrap;
+}
+.phase-card.complete .phase-time { color: rgb(100 116 139); }
+
+.phase-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-family: ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+.phase-badge.queued   { background: rgba(51,65,85,0.45); color: rgb(71 85 105); }
+.phase-badge.running  { background: rgba(99,102,241,0.18); color: rgb(165 180 252); }
+.phase-badge.complete { background: rgba(52,211,153,0.12); color: rgb(52 211 153); }
+.phase-badge.error    { background: rgba(248,113,113,0.12); color: rgb(248 113 113); }
+
+/* ── Connector spine ── */
+.phase-connector {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 28px;
+  gap: 0;
+  position: relative;
+}
+.phase-connector-line {
+  width: 1.5px;
+  flex: 1;
+  background: rgba(51, 65, 85, 0.5);
+  transition: background 0.4s ease;
+}
+.phase-connector.complete .phase-connector-line {
+  background: rgba(52, 211, 153, 0.3);
+}
+.phase-connector-arrow {
+  width: 0;
+  height: 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid rgba(51, 65, 85, 0.4);
+  transition: border-top-color 0.4s ease;
+}
+.phase-connector.complete .phase-connector-arrow {
+  border-top-color: rgba(52, 211, 153, 0.25);
+}
+
+/* ── Agent grid ── */
+.agents-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(51, 65, 85, 0.3);
+}
+
+/* ── Agent card ── */
+.agent-card {
+  background: rgba(2, 6, 23, 0.45);
+  border: 1px solid rgba(51, 65, 85, 0.35);
+  border-top: 2px solid var(--c-queued);
+  border-radius: 9px;
+  padding: 11px 12px;
+  transition: border-top-color 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+}
+.agent-card.running {
+  border-top-color: var(--c-running);
+  background: rgba(15, 23, 42, 0.6);
+  box-shadow: 0 -3px 10px rgba(129, 140, 248, 0.12);
+}
+.agent-card.complete {
+  border-top-color: var(--c-complete);
+  box-shadow: 0 -2px 8px rgba(52, 211, 153, 0.07);
+}
+.agent-card.error {
+  border-top-color: var(--c-error);
+  background: rgba(248,113,113,0.04);
+}
+
+.agent-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.agent-icon { font-size: 14px; line-height: 1; }
+
+.agent-indicator {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--c-queued);
+  transition: background 0.3s ease;
+  flex-shrink: 0;
+}
+.agent-card.running  .agent-indicator { background: var(--c-running); animation: status-pulse 1.2s ease-in-out infinite; }
+.agent-card.complete .agent-indicator { background: var(--c-complete); }
+.agent-card.error    .agent-indicator { background: var(--c-error); }
+
+.agent-name {
+  font-size: 11px;
+  font-weight: 600;
+  color: rgb(71 85 105);
+  letter-spacing: 0.01em;
+  transition: color 0.3s;
+}
+.agent-card.running  .agent-name { color: rgb(199 210 254); }
+.agent-card.complete .agent-name { color: rgb(134 239 172); }
+.agent-card.error    .agent-name { color: rgb(252 165 165); }
+
+.agent-status {
+  font-size: 9px;
+  color: rgb(30 41 59);
+  font-family: ui-monospace, monospace;
+  margin-top: 2px;
+  letter-spacing: 0.03em;
+  transition: color 0.3s;
+}
+.agent-card.queued   .agent-status { color: rgb(30 41 59); }
+.agent-card.running  .agent-status { color: rgb(99 102 241); }
+.agent-card.complete .agent-status { color: rgb(52 211 153); }
+.agent-card.error    .agent-status { color: rgb(248 113 113); }
+
+.agent-time {
+  font-size: 9px;
+  color: rgb(51 65 85);
+  font-variant-numeric: tabular-nums;
+  font-family: ui-monospace, monospace;
+  margin-top: 1px;
+}
+.agent-card.complete .agent-time { color: rgb(71 85 105); }
+
+/* ── Animations ── */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
+
+@keyframes phase-running-shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.phase-card.running .phase-name {
+  background: linear-gradient(90deg, rgb(199 210 254) 0%, rgb(255 255 255) 40%, rgb(199 210 254) 80%);
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: phase-running-shimmer 2.5s linear infinite;
+}
+
+/* ── Running spinner (inline after agent name) ── */
+@keyframes spin { to { transform: rotate(360deg); } }
+.agent-spinner {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid rgba(129, 140, 248, 0.25);
+  border-top-color: rgb(129 140 248);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  margin-left: 4px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
 </style>
 
 <script>
@@ -62,15 +294,31 @@
 
   const REVIEW_ID = (window.location.pathname.match(/^\/reviews\/([^/]+)\/live/) || [])[1] || '';
 
+  const PHASE_META = {
+    discovery:   { icon: '◎', label: 'Discovery' },
+    mechanical:  { icon: '⚙', label: 'Mechanical' },
+    triage:      { icon: '⬡', label: 'Triage' },
+    agents:      { icon: '⬟', label: 'Agents' },
+    decision:    { icon: '◈', label: 'Decision' },
+  };
+
+  const AGENT_META = {
+    security:     { icon: '🛡', label: 'Security' },
+    performance:  { icon: '⚡', label: 'Performance' },
+    architecture: { icon: '⬡', label: 'Architecture' },
+    hotspot:      { icon: '◉', label: 'Hotspot' },
+    code_quality: { icon: '◈', label: 'Code Quality' },
+    test_quality: { icon: '◎', label: 'Test Quality' },
+  };
+
   const PIPELINE_DEF = [
-    { key: 'discovery',   name: 'Discovery',    children: [] },
-    { key: 'mechanical',  name: 'Mechanical',   children: [] },
-    { key: 'triage',      name: 'Triage',       children: [] },
-    { key: 'agents',      name: 'Agents',       children: ['security','performance','architecture','hotspot','code_quality','test_quality'] },
-    { key: 'decision',    name: 'Decision',     children: [] },
+    { key: 'discovery',  children: [] },
+    { key: 'mechanical', children: [] },
+    { key: 'triage',     children: [] },
+    { key: 'agents',     children: ['security','performance','architecture','hotspot','code_quality','test_quality'] },
+    { key: 'decision',   children: [] },
   ];
 
-  // state: stages and agents keyed by name, holding {status, detail, durationMs}
   const STATE = {};
   PIPELINE_DEF.forEach(s => {
     STATE[s.key] = { status: 'queued', detail: '', duration: null };
@@ -78,53 +326,77 @@
   });
 
   const startTs = Date.now();
-  const pipeEl = document.getElementById('lp-pipeline');
-  const titleEl = document.getElementById('lp-title');
+  const pipeEl   = document.getElementById('lp-pipeline');
+  const titleEl  = document.getElementById('lp-title');
   const statusEl = document.getElementById('lp-status');
   const elapsedEl = document.getElementById('lp-elapsed');
-  const errorEl = document.getElementById('lp-error');
+  const errorEl  = document.getElementById('lp-error');
   const actionsEl = document.getElementById('lp-actions');
 
   function fmtDuration(ms) {
     if (ms == null) return '';
     if (ms < 1000) return `${ms}ms`;
-    return `${(ms/1000).toFixed(ms < 10000 ? 1 : 0)}s`;
+    return `${(ms / 1000).toFixed(ms < 10000 ? 1 : 0)}s`;
   }
-  function symbol(status) {
-    switch (status) {
-      case 'complete': return '✓';
-      case 'error':    return '✗';
-      case 'running':  return '●';
-      default:         return '·';
-    }
+
+  function badgeLabel(status) {
+    if (status === 'running')  return 'running';
+    if (status === 'complete') return '✓ done';
+    if (status === 'error')    return '✗ error';
+    return 'queued';
   }
 
   function render() {
     const html = [];
-    for (const s of PIPELINE_DEF) {
-      const st = STATE[s.key];
-      const row = `
-        <div class="stage ${st.status}">
-          <span class="dot ${st.status}"></span>
-          <span class="stage-name">${symbol(st.status)} ${s.name}</span>
-          <span class="stage-detail">${st.detail || ''}</span>
-          <span class="stage-time">${fmtDuration(st.duration)}</span>
-        </div>`;
-      html.push(row);
-      if (s.key === 'agents') {
-        for (const child of s.children) {
-          const c = STATE[`agents.${child}`];
-          html.push(`
-            <div class="stage indent ${c.status}">
-              <span class="dot ${c.status}"></span>
-              <span class="stage-name">${symbol(c.status)} ${child.replace('_',' ')}</span>
-              <span class="stage-detail">${c.detail || (c.status === 'queued' ? 'queued' : '')}</span>
-              <span class="stage-time">${fmtDuration(c.duration)}</span>
-            </div>`);
-        }
+
+    PIPELINE_DEF.forEach((s, i) => {
+      const st   = STATE[s.key];
+      const meta = PHASE_META[s.key];
+      const time = fmtDuration(st.duration);
+
+      html.push(`<div class="phase-card ${st.status}">`);
+      html.push(`  <div class="phase-header">`);
+      html.push(`    <span class="phase-icon">${meta.icon}</span>`);
+      html.push(`    <span class="phase-name">${meta.label}</span>`);
+      if (st.detail) {
+        html.push(`    <span class="phase-detail">${st.detail}</span>`);
       }
-    }
-    pipeEl.innerHTML = html.join('');
+      html.push(`    <span class="phase-badge ${st.status}">${badgeLabel(st.status)}</span>`);
+      if (time) html.push(`    <span class="phase-time">${time}</span>`);
+      html.push(`  </div>`);
+
+      if (s.key === 'agents' && s.children.length) {
+        html.push(`  <div class="agents-grid">`);
+        for (const child of s.children) {
+          const cs = STATE[`agents.${child}`];
+          const cm = AGENT_META[child];
+          const ct = fmtDuration(cs.duration);
+          const spinner = cs.status === 'running' ? '<span class="agent-spinner"></span>' : '';
+          html.push(`    <div class="agent-card ${cs.status}">`);
+          html.push(`      <div class="agent-top">`);
+          html.push(`        <span class="agent-icon">${cm.icon}</span>`);
+          html.push(`        <span class="agent-indicator"></span>`);
+          html.push(`      </div>`);
+          html.push(`      <div class="agent-name">${cm.label}${spinner}</div>`);
+          html.push(`      <div class="agent-status">${badgeLabel(cs.status)}</div>`);
+          if (ct) html.push(`      <div class="agent-time">${ct}</div>`);
+          html.push(`    </div>`);
+        }
+        html.push(`  </div>`);
+      }
+
+      html.push(`</div>`);
+
+      if (i < PIPELINE_DEF.length - 1) {
+        const connClass = st.status === 'complete' ? 'complete' : '';
+        html.push(`<div class="phase-connector ${connClass}">
+          <div class="phase-connector-line"></div>
+          <div class="phase-connector-arrow"></div>
+        </div>`);
+      }
+    });
+
+    pipeEl.innerHTML = html.join('\n');
   }
 
   function setOverallStatus() {
@@ -135,16 +407,16 @@
     return null;
   }
 
-  function renderMetaBanner(extra, detail) {
+  function renderMetaBanner(extra) {
     const el = document.getElementById('lp-meta-banner');
     if (!el || !extra) return;
     const parts = [];
-    if (extra.selection) parts.push(`selection: <span class="text-slate-100">${extra.selection}</span>`);
+    if (extra.selection)           parts.push(`selection: <span class="text-slate-100">${extra.selection}</span>`);
     if (extra.files_included != null) parts.push(`included: <span class="text-slate-100">${extra.files_included}</span>`);
-    if (extra.files_truncated) parts.push(`<span class="text-amber-400">truncated: ${extra.files_truncated}</span>`);
+    if (extra.files_truncated)     parts.push(`<span class="text-amber-400">truncated: ${extra.files_truncated}</span>`);
     if (extra.files_skipped_binary) parts.push(`skipped: ${extra.files_skipped_binary}`);
-    if (extra.files_read_errors) parts.push(`<span class="text-red-400">read errors: ${extra.files_read_errors}</span>`);
-    if (extra.selection_capped) parts.push(`<span class="text-amber-400">capped at ${extra.requested_max_files}</span>`);
+    if (extra.files_read_errors)   parts.push(`<span class="text-red-400">read errors: ${extra.files_read_errors}</span>`);
+    if (extra.selection_capped)    parts.push(`<span class="text-amber-400">capped at ${extra.requested_max_files}</span>`);
     if (extra.total_bytes != null) parts.push(`bytes: ${extra.total_bytes.toLocaleString()}`);
     el.innerHTML = `<span class="text-slate-500">repo diff · </span>${parts.join(' · ')}`;
     el.classList.remove('hidden');
@@ -152,11 +424,15 @@
 
   function applyEvent(ev) {
     if (!ev || ev.review_id !== REVIEW_ID) return;
-    titleEl.textContent = ev.repo ? `${ev.repo} · ${ev.pr_id || ''}`.trim() : (titleEl.textContent || 'running…');
+    titleEl.textContent = ev.repo
+      ? `${ev.repo} · ${ev.pr_id || ''}`.trim()
+      : (titleEl.textContent || 'running…');
+
     const stage = (ev.stage || '').toLowerCase();
     if (!stage) return;
+
     if (stage === 'repo_diff_built') {
-      renderMetaBanner(ev.extra, ev.detail);
+      renderMetaBanner(ev.extra);
       return;
     }
     if (stage in STATE) {
@@ -166,7 +442,9 @@
       const key = stage;
       if (key in STATE) STATE[key] = { status: 'running', detail: ev.detail || '', duration: null };
     } else if (stage === 'error' || stage === 'failed') {
-      Object.keys(STATE).forEach(k => { if (STATE[k].status === 'running') STATE[k] = { status: 'error', detail: ev.detail || 'failed', duration: null }; });
+      Object.keys(STATE).forEach(k => {
+        if (STATE[k].status === 'running') STATE[k] = { status: 'error', detail: ev.detail || 'failed', duration: null };
+      });
       showError(ev.detail || 'A stage failed.');
     } else if (stage === 'complete' || stage === 'finished') {
       STATE['decision'] = { status: 'complete', detail: ev.detail || 'done', duration: null };
@@ -192,54 +470,47 @@
   }
 
   document.getElementById('lp-share').addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(window.location.href); }
-    catch (e) {}
+    try { await navigator.clipboard.writeText(window.location.href); } catch (e) {}
     const btn = document.getElementById('lp-share');
-    const t = btn.textContent; btn.textContent = 'Copied'; setTimeout(() => { btn.textContent = t; }, 1500);
+    const t = btn.textContent;
+    btn.textContent = 'Copied';
+    setTimeout(() => { btn.textContent = t; }, 1500);
   });
 
   document.getElementById('lp-cancel').addEventListener('click', async () => {
     if (!confirm('Cancel this review?')) return;
-    try { await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}`, { method: 'DELETE' }); }
-    catch (e) {}
+    try { await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}`, { method: 'DELETE' }); } catch (e) {}
     window.location.href = '/reviews';
   });
 
   document.getElementById('lp-rerun').addEventListener('click', async () => {
-    try { await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}/re-review`, { method: 'POST' }); }
-    catch (e) {}
+    try { await fetch(`/api/dashboard/reviews/${encodeURIComponent(REVIEW_ID)}/re-review`, { method: 'POST' }); } catch (e) {}
     window.location.reload();
   });
 
-  // Tick elapsed time every second.
   setInterval(() => {
     const s = Math.floor((Date.now() - startTs) / 1000);
-    elapsedEl.textContent = s < 60 ? `${s}s elapsed` : `${Math.floor(s/60)}m ${s%60}s elapsed`;
+    elapsedEl.textContent = s < 60 ? `${s}s elapsed` : `${Math.floor(s / 60)}m ${s % 60}s elapsed`;
   }, 1000);
 
-  // Subscribe to SSE.
   let es = null;
   function connect() {
     try {
       es = new EventSource('/api/dashboard/events');
       es.onmessage = (m) => { try { applyEvent(JSON.parse(m.data)); } catch (e) {} };
-      es.onerror = () => { /* fallback: poll briefly later */ };
-    } catch (e) {
-      // fall through
-    }
+      es.onerror = () => {};
+    } catch (e) {}
   }
   connect();
-
   render();
 
-  // If no events arrive in 8s, hint that the review may already be done — offer to open it.
   setTimeout(() => {
     const noActivity = Object.values(STATE).every(s => s.status === 'queued');
     if (!noActivity) return;
     pipeEl.insertAdjacentHTML('beforeend', `
-      <div class="mt-4 p-3 rounded border border-slate-700 bg-slate-900/60 text-xs text-slate-400">
+      <div class="mt-6 p-4 rounded-xl border border-slate-700/50 bg-slate-900/60 text-xs text-slate-400">
         No live events yet. The review may already be complete —
-        <a class="text-indigo-400 hover:text-indigo-300" href="/reviews/${REVIEW_ID}">open the review →</a>
+        <a class="text-indigo-400 hover:text-indigo-300 transition-colors" href="/reviews/${REVIEW_ID}">open the review →</a>
       </div>`);
   }, 8000);
 
