@@ -144,6 +144,12 @@
         <button class="btn btn-ghost btn-sm" onclick="closeExport()">&times;</button>
       </div>
       <div class="dialog-body">
+        <div id="export-dismissed-notice" class="hidden mb-3 flex items-center gap-2.5 text-sm text-amber-400/80">
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <input type="checkbox" id="export-include-dismissed" class="form-checkbox" onchange="refreshExportText()">
+            <span id="export-dismissed-label">Also include dismissed findings</span>
+          </label>
+        </div>
         <textarea id="export-text" class="form-textarea font-mono text-xs min-h-[300px]" readonly></textarea>
       </div>
       <div class="dialog-footer">
@@ -607,7 +613,17 @@ function syncCheckboxes() {
 
 function updateSelectionCount() {
   const n = selectedFindings.size;
-  document.getElementById('selection-count').textContent = `${n} selected`;
+  const agents = reviewData?.agent_results || [];
+  const totalFindings = agents.reduce((sum, a) => sum + (a.findings || []).length, 0);
+  const dismissedCount = agents.reduce(
+    (sum, a) => sum + (a.findings || []).filter(f => f.dismissal).length, 0
+  );
+  const selectable = totalFindings - dismissedCount;
+  let label = `${n} selected`;
+  if (dismissedCount > 0 && n < totalFindings) {
+    label += ` · ${dismissedCount} dismissed (excluded)`;
+  }
+  document.getElementById('selection-count').textContent = label;
   document.getElementById('export-btn').disabled = n === 0;
   document.getElementById('batch-dismiss-btn').disabled = n === 0;
 }
@@ -688,9 +704,27 @@ async function toggleSnippet(btn) {
 
 function openExport() {
   if (!selectedFindings.size) return;
-  const text = buildExportText();
-  document.getElementById('export-text').value = text;
+  const agents = reviewData?.agent_results || [];
+  const dismissedCount = agents.reduce(
+    (sum, a) => sum + (a.findings || []).filter(f => f.dismissal).length, 0
+  );
+  const notice = document.getElementById('export-dismissed-notice');
+  const cb = document.getElementById('export-include-dismissed');
+  cb.checked = false;
+  if (dismissedCount > 0) {
+    document.getElementById('export-dismissed-label').textContent =
+      `Also include ${dismissedCount} dismissed finding${dismissedCount !== 1 ? 's' : ''}`;
+    notice.classList.remove('hidden');
+  } else {
+    notice.classList.add('hidden');
+  }
+  document.getElementById('export-text').value = buildExportText(false);
   document.getElementById('export-modal').classList.remove('hidden');
+}
+
+function refreshExportText() {
+  const includeDismissed = document.getElementById('export-include-dismissed').checked;
+  document.getElementById('export-text').value = buildExportText(includeDismissed);
 }
 
 function closeExport() {
@@ -787,7 +821,7 @@ function showToast(msg, type = 'success') {
   }, 3500);
 }
 
-function buildExportText() {
+function buildExportText(includeDismissed = false) {
   const d = reviewData;
   const lines = [];
   lines.push(`# PR Guardian Findings — ${d.repo} #${d.pr_id}`);
@@ -805,17 +839,20 @@ function buildExportText() {
   agents.forEach((agent, ai) => {
     const agentFindings = [];
     (agent.findings || []).forEach((f, fi) => {
-      if (selectedFindings.has(`${ai}-${fi}`)) agentFindings.push(f);
+      const selected = selectedFindings.has(`${ai}-${fi}`);
+      const dismissed = !!f.dismissal;
+      if (selected || (includeDismissed && dismissed)) agentFindings.push({ f, dismissed });
     });
     if (!agentFindings.length) return;
 
     const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
     lines.push(`### ${label}`);
     lines.push('');
-    agentFindings.forEach(f => {
+    agentFindings.forEach(({ f, dismissed }) => {
       idx++;
       const loc = f.file ? `${f.file}${f.line ? ':' + f.line : ''}` : 'unknown location';
-      lines.push(`**${idx}. [${f.severity.toUpperCase()}] ${f.category || 'Issue'}** — \`${loc}\``);
+      const dismissedNote = dismissed ? ' ~~dismissed~~' : '';
+      lines.push(`**${idx}. [${f.severity.toUpperCase()}] ${f.category || 'Issue'}**${dismissedNote} — \`${loc}\``);
       if (f.description) lines.push(`   ${f.description}`);
       if (f.suggestion) lines.push(`   Suggestion: ${f.suggestion}`);
       if (f.cwe) lines.push(`   CWE: ${f.cwe}`);
