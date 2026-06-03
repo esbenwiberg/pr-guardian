@@ -261,7 +261,12 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
         }
 
     # Parse the PR URL once — works for both GitHub and ADO URLs.
-    from pr_guardian.api.review import _parse_pr_url, _run_review_background
+    from pr_guardian.api.review import (
+        _create_adapter_for_resolution,
+        _parse_pr_url,
+        _run_review_background,
+        _resolve_review_profile,
+    )
     from pr_guardian.platform.factory import create_adapter
 
     try:
@@ -269,6 +274,16 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
     except Exception as exc:
         log.warning("start_wizard_parse_failed", error=str(exc))
         return JSONResponse({"error": "unsupported PR URL"}, status_code=400)
+
+    # Resolve the linked connection so the review uses the right token and
+    # profile — the same path the paste-URL flow takes. Without this the
+    # wizard falls back to the bare global token, which may not have access
+    # to private repos.
+    resolved_profile = None
+    try:
+        resolved_profile = await _resolve_review_profile(stub, platform_name)
+    except Exception as exc:
+        log.warning("start_wizard_profile_resolve_failed", error=str(exc))
 
     # Pre-create the review record so we can return the review_id immediately.
     # If DB is unavailable we fall back to a transient UUID so the wizard
@@ -283,9 +298,7 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
 
     # Start a new review in the background
     try:
-        from pr_guardian.platform.protocol import PlatformAdapter
-
-        bg_adapter: PlatformAdapter = create_adapter(platform_name)
+        bg_adapter = await _create_adapter_for_resolution(platform_name, resolved_profile) if resolved_profile else create_adapter(platform_name)
         base_url = str(request.base_url)
         asyncio.create_task(
             _run_review_background(
@@ -295,6 +308,7 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
                 base_url,
                 platform_name=platform_name,
                 review_db_id=review_db_id,
+                resolved_profile=resolved_profile,
             )
         )
     except Exception as exc:
