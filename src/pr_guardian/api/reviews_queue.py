@@ -464,6 +464,7 @@ class TriggerRequest(BaseModel):
     platform: str | None = None  # "github" | "ado" — overrides auto-detect for ambiguous shorthand
     selection: str = "all"  # "all" | "recent" — only used in scan mode
     max_files: int | None = None  # only used in scan mode; server-clamped
+    connection_name: str | None = None  # explicit connection to use for unlinked repos
 
 
 def _resolve_repo_scan_target(url: str, requested_platform: str | None) -> tuple[str, str]:
@@ -518,7 +519,7 @@ async def trigger_review(req: TriggerRequest, request: Request):
 
         try:
             resp = await manual_review(
-                ReviewRequest(pr_url=url, comment_mode="none"),
+                ReviewRequest(pr_url=url, comment_mode="none", pat_name=req.connection_name),
                 request,
             )
             return {

@@ -40,6 +40,15 @@
           </div>
           <button type="submit" id="trigger-btn" class="btn btn-primary text-sm">Review</button>
         </div>
+        <div id="conn-opts" class="hidden flex flex-wrap items-center gap-3 text-xs text-slate-400 pl-1">
+          <span class="text-amber-400">No linked connection — pick one:</span>
+          <label class="flex items-center gap-1">
+            connection
+            <select id="conn-select" class="form-select text-xs py-0.5 px-1.5 bg-slate-900 border-slate-700">
+              <option value="">loading…</option>
+            </select>
+          </label>
+        </div>
         <div id="scan-opts" class="hidden flex flex-wrap items-center gap-3 text-xs text-slate-400 pl-1">
           <span class="text-slate-500">repository review options:</span>
           <label class="flex items-center gap-1">
@@ -552,6 +561,28 @@
   const scanOptsEl = document.getElementById('scan-opts');
   const platformSelect = document.getElementById('scan-platform');
   const scanPreviewEl = document.getElementById('scan-preview');
+  const connOptsEl = document.getElementById('conn-opts');
+  const connSelect = document.getElementById('conn-select');
+
+  async function showConnectionSelector(platform) {
+    connOptsEl.classList.remove('hidden');
+    connSelect.innerHTML = '<option value="">loading…</option>';
+    try {
+      const r = await fetch('/api/profiles/connections');
+      if (!r.ok) throw new Error('failed');
+      const conns = await r.json();
+      const filtered = platform ? conns.filter(c => c.platform === platform) : conns;
+      if (filtered.length === 0) {
+        connSelect.innerHTML = '<option value="">no connections configured</option>';
+      } else {
+        connSelect.innerHTML = filtered.map(c =>
+          `<option value="${c.name}">${c.name} (${c.platform})</option>`
+        ).join('');
+      }
+    } catch {
+      connSelect.innerHTML = '<option value="">could not load connections</option>';
+    }
+  }
 
   function resolveRepoScanPreview(url, platform) {
     let m = /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i.exec(url);
@@ -594,6 +625,8 @@
     if (isScan) {
       platformSelect.value = detectPlatformDefault(url);
     }
+    connOptsEl.classList.add('hidden');
+    errEl.classList.add('hidden');
     updateScanPreview();
   });
 
@@ -613,6 +646,9 @@
       body.max_files = parseInt(document.getElementById('scan-max-files').value, 10);
       body.selection = document.getElementById('scan-selection').value;
     }
+    if (!connOptsEl.classList.contains('hidden') && connSelect.value) {
+      body.connection_name = connSelect.value;
+    }
     const btn = document.getElementById('trigger-btn');
     btn.disabled = true; btn.textContent = 'Starting...';
     try {
@@ -622,6 +658,11 @@
       });
       const data = await r.json();
       if (!r.ok) {
+        if (r.status === 409 && data.detail && data.detail.includes('Connection selection')) {
+          const platform = /dev\.azure\.com/.test(url) ? 'ado' : /github\.com/.test(url) ? 'github' : null;
+          await showConnectionSelector(platform);
+          return;
+        }
         errEl.textContent = data.detail || 'Failed to trigger review.';
         errEl.classList.remove('hidden');
         return;
