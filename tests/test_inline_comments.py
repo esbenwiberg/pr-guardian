@@ -597,6 +597,76 @@ async def test_inline_rereview_deletes_before_posting():
     assert call_order.index("delete") < call_order.index("post")
 
 
+@pytest.mark.asyncio
+async def test_run_review_links_prior_finished_review(monkeypatch):
+    """run_review must resolve the PR's previous *finished* review and thread its id
+    into the pipeline so inline-comment cleanup runs on the autoreview/poll/manual
+    paths — not only the explicit re-review button. Otherwise every push orphans the
+    prior commit's comments and 'All comments must be resolved' stays red forever."""
+    from pr_guardian.core import orchestrator
+
+    pr = _make_github_pr()
+    prior_id = str(_uuid.uuid4())
+    current_id = _uuid.uuid4()
+
+    fake_storage = MagicMock()
+    # _is_stale_automatic_review -> get_review None -> not stale
+    fake_storage.get_review = AsyncMock(return_value=None)
+    fake_storage.find_review_by_pr_url = AsyncMock(return_value={"id": prior_id})
+    monkeypatch.setattr(orchestrator, "_try_import_storage", lambda: fake_storage)
+
+    captured: dict = {}
+
+    async def _fake_pipeline(*args, original_review_id=None, **kwargs):
+        captured["original_review_id"] = original_review_id
+        return _make_result([])
+
+    monkeypatch.setattr(orchestrator, "_run_pipeline", _fake_pipeline)
+
+    await orchestrator.run_review(
+        pr,
+        _mock_adapter(),
+        existing_review_db_id=current_id,
+        comment_mode="inline",
+    )
+
+    assert captured["original_review_id"] == prior_id
+    fake_storage.find_review_by_pr_url.assert_awaited_once_with(pr.pr_url)
+
+
+@pytest.mark.asyncio
+async def test_run_review_excludes_current_review_from_prior_linkage(monkeypatch):
+    """If the only review on record for this PR is the in-flight one, there is no
+    predecessor to clean up — original_review_id must stay None rather than pointing
+    the cleanup at the review we're currently writing."""
+    from pr_guardian.core import orchestrator
+
+    pr = _make_github_pr()
+    current_id = _uuid.uuid4()
+
+    fake_storage = MagicMock()
+    fake_storage.get_review = AsyncMock(return_value=None)
+    fake_storage.find_review_by_pr_url = AsyncMock(return_value={"id": str(current_id)})
+    monkeypatch.setattr(orchestrator, "_try_import_storage", lambda: fake_storage)
+
+    captured: dict = {}
+
+    async def _fake_pipeline(*args, original_review_id=None, **kwargs):
+        captured["original_review_id"] = original_review_id
+        return _make_result([])
+
+    monkeypatch.setattr(orchestrator, "_run_pipeline", _fake_pipeline)
+
+    await orchestrator.run_review(
+        pr,
+        _mock_adapter(),
+        existing_review_db_id=current_id,
+        comment_mode="inline",
+    )
+
+    assert captured["original_review_id"] is None
+
+
 # ---------------------------------------------------------------------------
 # build_inline_comment_body — format contract
 # ---------------------------------------------------------------------------

@@ -2,15 +2,31 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
-from pr_guardian.core.readiness import create_or_update_candidate_from_pr, evaluate_candidate
+import pytest
+
+from pr_guardian.core.readiness import (
+    create_or_update_candidate_from_pr,
+    evaluate_candidate,
+    evaluate_candidates_for_sha,
+)
 from pr_guardian.core.readiness_reconciler import reconcile_readiness_once
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.platform.ado import ADOAdapter
 from pr_guardian.platform.protocol import PlatformPRMetadata, PlatformReadinessSignal
 from tests.test_readiness_storage import _make_session_factory
+
+
+@pytest.fixture(autouse=True)
+def _stub_background_review(monkeypatch):
+    """These tests assert readiness candidate *state transitions*, not the review
+    pipeline. The 'ready' path fires a fire-and-forget ``run_review`` background
+    task; with a FakeReadinessAdapter that has no ``fetch_diff`` it errors, and
+    worse, races the shared in-memory SQLite connection. Stub it to a no-op so the
+    readiness engine is tested in isolation."""
+    monkeypatch.setattr("pr_guardian.core.orchestrator.run_review", AsyncMock())
 
 
 class FakeReadinessAdapter:
@@ -238,6 +254,70 @@ async def test_failed_timeout_fork_and_permission_readiness_outcomes():
             assert permission is not None
             assert permission["state"] == "error"
             assert permission["reason"] == "platform_error"
+    finally:
+        await engine.dispose()
+
+
+async def test_platform_error_posts_pending_not_failing_readiness_status():
+    """A platform_error is Guardian's own infra problem, not a PR failure. It must
+    surface as a neutral 'pending' on guardian/readiness (the candidate is
+    recoverable and the reconciler will flip it to success), never a red 'failure'
+    that alarms on every PR."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo({"readiness": {"quiet_period_seconds": 0, "max_wait_minutes": 30}})
+            adapter = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="boom"),
+                metadata_error=RuntimeError("github unreachable"),
+            )
+            candidate = await create_or_update_candidate_from_pr(_pr("boom"), adapter=adapter)
+
+            assert candidate is not None
+            assert candidate["state"] == "error"
+            assert candidate["reason"] == "platform_error"
+            readiness_statuses = [s for s in adapter.statuses if s[0] == "guardian/readiness"]
+            assert readiness_statuses, "expected guardian/readiness to be posted"
+            assert all(state != "failure" for _, state, _ in readiness_statuses)
+            assert readiness_statuses[-1][1] == "pending"
+    finally:
+        await engine.dispose()
+
+
+async def test_check_event_recovers_errored_candidate():
+    """An errored candidate must self-heal on the next CI-completion (by-SHA) event,
+    not stay wedged until a new commit. evaluate_candidates_for_sha must therefore
+    re-evaluate 'error' candidates, matching the reconciler."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo({"readiness": {"quiet_period_seconds": 0, "max_wait_minutes": 30}})
+            errored = await create_or_update_candidate_from_pr(
+                _pr("sha1"),
+                adapter=FakeReadinessAdapter(
+                    metadata=PlatformPRMetadata(head_sha="sha1"),
+                    metadata_error=RuntimeError("github unreachable"),
+                ),
+            )
+            assert errored is not None
+            assert errored["state"] == "error"
+
+            healthy = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="sha1"),
+                signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+            )
+            with patch(
+                "pr_guardian.core.readiness._adapter_for_candidate", return_value=healthy
+            ):
+                evaluated = await evaluate_candidates_for_sha(
+                    platform="github",
+                    repo="octo/service",
+                    head_sha="sha1",
+                    source="github:check_run",
+                )
+
+            assert len(evaluated) == 1
+            assert evaluated[0]["state"] == "reviewing"
     finally:
         await engine.dispose()
 
