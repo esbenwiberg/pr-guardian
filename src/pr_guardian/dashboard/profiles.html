@@ -681,13 +681,13 @@
               <option value="ado">Azure DevOps</option>
             </select>
           </label>
-          <label class="field">Repo owner<input name="repo_owner" class="form-input" autocomplete="off" placeholder="github owner"></label>
-          <label class="field">ADO org URL<input name="org_url" class="form-input" autocomplete="off" placeholder="https://dev.azure.com/org"></label>
-          <label class="field">ADO project<input name="project" class="form-input" autocomplete="off"></label>
+          <label id="repo-link-field-owner" class="field">Repo owner<input name="repo_owner" class="form-input" autocomplete="off" placeholder="github owner"></label>
+          <label id="repo-link-field-org-url" class="field">ADO org URL<input name="org_url" class="form-input" autocomplete="off" placeholder="https://dev.azure.com/org"></label>
+          <label id="repo-link-field-project" class="field">ADO project<input name="project" class="form-input" autocomplete="off"></label>
           <label class="field">Repo name<input name="repo_name" class="form-input" autocomplete="off" required></label>
           <label class="field">Repo URL<input name="repo_url" class="form-input" autocomplete="off"></label>
           <label class="field">Profile<select name="profile_id" class="form-select" required>${profileOptions(state.selectedProfileId)}</select></label>
-          <label class="field">Connection<select name="connection_id" class="form-select" required>${connectionOptions('')}</select></label>
+          <label class="field">Connection<select id="repo-link-connection-select" name="connection_id" class="form-select" required>${connectionOptions('')}</select></label>
         </div>
         <div class="flex flex-wrap gap-4">
           <label class="toggle-line"><input name="auto_review_enabled" type="checkbox" checked> <span>Auto-review enabled</span></label>
@@ -806,9 +806,22 @@
     });
   }
 
+  function applyRepoLinkPlatform(platform) {
+    const isGitHub = platform === 'github';
+    document.getElementById('repo-link-field-owner').style.display = isGitHub ? '' : 'none';
+    document.getElementById('repo-link-field-org-url').style.display = isGitHub ? 'none' : '';
+    document.getElementById('repo-link-field-project').style.display = isGitHub ? 'none' : '';
+    const connSelect = document.getElementById('repo-link-connection-select');
+    const currentConn = connSelect.value;
+    connSelect.innerHTML = connectionOptions(currentConn, platform);
+  }
+
   function openRepoLinkModal() {
     openModal('Link Repository', repoLinkForm());
     const form = document.getElementById('repo-link-form');
+    const platformSelect = form.querySelector('[name="platform"]');
+    applyRepoLinkPlatform(platformSelect.value);
+    platformSelect.addEventListener('change', () => applyRepoLinkPlatform(platformSelect.value));
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const data = new FormData(form);
