@@ -18,6 +18,7 @@ from pr_guardian.persistence.storage import (
     create_readiness_candidate,
     create_repo_link,
     list_synced_prs,
+    purge_prs_from_inactive_connections,
     upsert_synced_pr,
 )
 
@@ -213,6 +214,63 @@ async def test_exclusions_hide_browse_rows_but_not_linked_candidates():
             assert browse_items == []
             assert candidate["repo_link_id"] == link["id"]
             assert candidate["repo"] == "octo/hidden"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_purge_prs_from_inactive_connections():
+    """PRs from archived or sync-disabled connections are removed; active ones stay."""
+    engine, factory = await _make_session_factory()
+    try:
+        with (
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch("pr_guardian.persistence.exclusions.async_session", lambda: factory()),
+        ):
+            active_conn = await create_connection(
+                "Active Sync",
+                platform="github",
+                token="tok-active",
+                sync_enabled=True,
+                health_status="healthy",
+            )
+            inactive_conn = await create_connection(
+                "Disabled Sync",
+                platform="github",
+                token="tok-inactive",
+                sync_enabled=False,
+                health_status="healthy",
+            )
+
+            def _pr(pr_id: str, connection: dict, status: str = "pending") -> dict:
+                return {
+                    "platform": "github",
+                    "pr_id": pr_id,
+                    "org": "org",
+                    "project": "",
+                    "repo": "org/repo",
+                    "title": f"PR {pr_id}",
+                    "author": "alice",
+                    "pr_url": f"https://github.com/org/repo/pull/{pr_id}",
+                    "source_branch": "feat",
+                    "target_branch": "main",
+                    "approval_status": status,
+                    "connection_id": uuid.UUID(connection["id"]),
+                    "connection_snapshot": connection,
+                    "pr_created_at": datetime.now(timezone.utc),
+                    "pr_updated_at": datetime.now(timezone.utc),
+                }
+
+            await upsert_synced_pr(_pr("1", active_conn))
+            await upsert_synced_pr(_pr("2", inactive_conn))
+            await upsert_synced_pr(_pr("3", inactive_conn, status="merged"))
+
+            purged = await purge_prs_from_inactive_connections()
+            items, total = await list_synced_prs()
+
+            assert purged == 1, "only the inactive-connection pending PR should be removed"
+            assert total == 1
+            assert items[0]["pr_id"] == "1"
     finally:
         await engine.dispose()
 

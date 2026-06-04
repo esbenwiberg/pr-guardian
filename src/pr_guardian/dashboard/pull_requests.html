@@ -388,8 +388,21 @@ document.querySelectorAll('#view-tabs .browse-tab').forEach(tab => {
   });
 });
 refreshEl.addEventListener('click', async () => {
-  await fetch('/api/prs/sync', { method: 'POST' }).catch(() => null);
-  loadPullRequests().catch(() => render([], 0));
+  refreshEl.disabled = true;
+  refreshEl.textContent = 'Syncing…';
+  try {
+    await fetch('/api/prs/sync', { method: 'POST' }).catch(() => null);
+  } finally {
+    // Reload immediately for any local-cache changes, then again once the
+    // background sync has had time to finish (typically 5-15s for ADO/GitHub).
+    loadPullRequests().catch(() => render([], 0));
+    setTimeout(() => loadPullRequests().catch(() => render([], 0)), 6000);
+    setTimeout(() => {
+      loadPullRequests().catch(() => render([], 0));
+      refreshEl.disabled = false;
+      refreshEl.textContent = 'Sync';
+    }, 15000);
+  }
 });
 loadPullRequests().catch(() => render([], 0));
 loadIdentity();

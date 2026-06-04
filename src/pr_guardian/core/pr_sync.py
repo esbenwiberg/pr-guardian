@@ -470,6 +470,12 @@ async def run_pr_sync() -> None:
             log.info("pr_sync_purged_merged", count=purged)
     except Exception as exc:
         log.warning("pr_sync_purge_failed", error=str(exc))
+    try:
+        purged_inactive = await storage.purge_prs_from_inactive_connections()
+        if purged_inactive:
+            log.info("pr_sync_purged_inactive_connections", count=purged_inactive)
+    except Exception as exc:
+        log.warning("pr_sync_inactive_purge_failed", error=str(exc))
     log.info("pr_sync_done")
 
 

@@ -3006,6 +3006,30 @@ async def purge_old_merged_prs(retention_days: int) -> int:
         return result.rowcount or 0
 
 
+async def purge_prs_from_inactive_connections() -> int:
+    """Delete open PRs linked to connections that are archived or sync-disabled.
+
+    These connections are permanently excluded from sync so their PRs would
+    accumulate forever without this cleanup pass.
+    """
+    from sqlalchemy import delete
+
+    active_conn_subq = (
+        select(ConnectionRow.id)
+        .where(ConnectionRow.archived_at.is_(None))
+        .where(ConnectionRow.sync_enabled.is_(True))
+    )
+    async with async_session() as session:
+        result = await session.execute(
+            delete(SyncedPRRow)
+            .where(SyncedPRRow.connection_id.isnot(None))
+            .where(SyncedPRRow.connection_id.notin_(active_conn_subq))
+            .where(SyncedPRRow.approval_status != "merged")
+        )
+        await session.commit()
+        return result.rowcount or 0
+
+
 async def get_synced_pr(pr_uuid: str) -> dict[str, Any] | None:
     """Fetch a single synced PR by its UUID."""
     async with async_session() as session:
