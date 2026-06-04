@@ -20,6 +20,7 @@ from pr_guardian.persistence.storage import (
     get_readiness_candidate,
     get_review,
     get_scan,
+    get_synced_pr,
     list_synced_prs,
     list_candidate_transitions,
     record_candidate_transition,
@@ -501,5 +502,89 @@ async def test_profile_link_candidate_and_provenance_persistence():
             assert synced_prs[0]["profile_snapshot"]["name"] == "Standard Service"
             assert synced_prs[0]["connection_id"] == connection["id"]
             assert synced_prs[0]["repo_link_id"] == link["id"]
+    finally:
+        await engine.dispose()
+
+
+async def test_list_synced_prs_surfaces_readiness_state():
+    """list_synced_prs and get_synced_pr enrich with active readiness candidate state."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            profile = await create_profile("Svc", settings={})
+            connection = await create_connection(
+                "GH",
+                platform="github",
+                token="tok",
+                health_status="healthy",
+                sync_enabled=True,
+            )
+            link = await create_repo_link(
+                platform="github",
+                repo_owner="acme",
+                repo_name="api",
+                repo_url="https://github.com/acme/api",
+                profile_id=uuid.UUID(profile["id"]),
+                connection_id=uuid.UUID(connection["id"]),
+                auto_review_enabled=True,
+            )
+            await upsert_synced_pr(
+                {
+                    "platform": "github",
+                    "pr_id": "7",
+                    "org": "acme",
+                    "repo": "acme/api",
+                    "title": "Add feature",
+                    "author": "bob",
+                    "pr_url": "https://github.com/acme/api/pull/7",
+                    "connection_id": uuid.UUID(connection["id"]),
+                    "repo_link_id": uuid.UUID(link["id"]),
+                    "sync_source": "sync",
+                }
+            )
+            # No candidate yet — should default to None
+            items, _ = await list_synced_prs(platform="github", repo="acme/api")
+            synced_id = items[0]["id"]
+            assert items[0]["guardian_readiness_state"] is None
+            assert items[0]["guardian_readiness_reason"] is None
+
+            # Create a waiting candidate
+            candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="7",
+                pr_url="https://github.com/acme/api/pull/7",
+                head_sha="sha777",
+            )
+            await record_candidate_transition(
+                uuid.UUID(candidate["id"]),
+                to_state="waiting",
+                source="webhook",
+                actor="github",
+                reason="checks_pending",
+                readiness_snapshot={"checks": {"pending": 1}},
+            )
+
+            items, _ = await list_synced_prs(platform="github", repo="acme/api")
+            assert items[0]["guardian_readiness_state"] == "waiting"
+            assert items[0]["guardian_readiness_reason"] == "checks_pending"
+            assert items[0]["has_guardian_review"] is False
+
+            # get_synced_pr (side panel) must also enrich
+            fetched = await get_synced_pr(synced_id)
+            assert fetched is not None
+            assert fetched["guardian_readiness_state"] == "waiting"
+            assert fetched["guardian_readiness_reason"] == "checks_pending"
+
+            # Superseded candidates should be ignored
+            await record_candidate_transition(
+                uuid.UUID(candidate["id"]),
+                to_state="superseded",
+                source="webhook",
+                actor="github",
+                reason="new_commit",
+                readiness_snapshot={},
+            )
+            items2, _ = await list_synced_prs(platform="github", repo="acme/api")
+            assert items2[0]["guardian_readiness_state"] is None
     finally:
         await engine.dispose()

@@ -814,6 +814,10 @@ async def update_repo_link(
     *,
     profile_id: uuid.UUID | None = None,
     connection_id: uuid.UUID | None = None,
+    repo_owner: str | None = None,
+    org_url: str | None = None,
+    project: str | None = None,
+    repo_name: str | None = None,
     repo_url: str | None = None,
     auto_review_enabled: bool | None = None,
     paused: bool | None = None,
@@ -847,6 +851,22 @@ async def update_repo_link(
                     f"({row.platform!r} != {connection.platform!r})"
                 )
             row.connection_id = connection_id
+        if repo_owner is not None:
+            row.repo_owner = repo_owner.strip()
+        if org_url is not None:
+            row.org_url = org_url.strip().rstrip("/")
+        if project is not None:
+            row.project = project.strip()
+        if repo_name is not None:
+            row.repo_name = repo_name.strip()
+        if any(f is not None for f in [repo_owner, org_url, project, repo_name]):
+            row.canonical_repo_key = _canonical_repo_key(
+                row.platform,
+                org_url=row.org_url,
+                project=row.project,
+                repo_owner=row.repo_owner,
+                repo_name=row.repo_name,
+            )
         if repo_url is not None:
             row.repo_url = repo_url
         if auto_review_enabled is not None:
@@ -3039,7 +3059,33 @@ async def get_synced_pr(pr_uuid: str) -> dict[str, Any] | None:
             return None
         if not row:
             return None
-        return _synced_pr_to_dict(row)
+        d = _synced_pr_to_dict(row)
+        # Enrich with completed review info
+        review_row = await session.scalar(
+            select(ReviewRow)
+            .where(ReviewRow.pr_url == row.pr_url)
+            .where(ReviewRow.finished_at.isnot(None))
+            .order_by(ReviewRow.finished_at.desc())
+            .limit(1)
+        )
+        if review_row:
+            d["has_guardian_review"] = True
+            d["guardian_review_id"] = str(review_row.id)
+            d["guardian_decision"] = review_row.decision
+        # Enrich with active readiness candidate state
+        cand_row = await session.scalar(
+            select(ReadinessCandidateRow)
+            .where(ReadinessCandidateRow.platform == row.platform)
+            .where(ReadinessCandidateRow.repo == row.repo)
+            .where(ReadinessCandidateRow.pr_id == row.pr_id)
+            .where(ReadinessCandidateRow.state != "superseded")
+            .order_by(ReadinessCandidateRow.updated_at.desc())
+            .limit(1)
+        )
+        if cand_row:
+            d["guardian_readiness_state"] = cand_row.state
+            d["guardian_readiness_reason"] = cand_row.reason
+        return d
 
 
 async def get_synced_pr_lookup(
@@ -3243,6 +3289,41 @@ async def list_synced_prs(
                     d["guardian_review_id"] = info["guardian_review_id"]
                     d["guardian_decision"] = info["guardian_decision"]
 
+        # Batch-fetch active readiness candidate state (waiting/reviewing/blocked/error)
+        # so the browse view can distinguish "Guardian waiting for CI" from "never run".
+        if pr_dicts:
+            from sqlalchemy import tuple_
+
+            pr_keys = [(d["platform"], d["repo"], d["pr_id"]) for d in pr_dicts]
+            cand_rows = await session.execute(
+                select(
+                    ReadinessCandidateRow.platform,
+                    ReadinessCandidateRow.repo,
+                    ReadinessCandidateRow.pr_id,
+                    ReadinessCandidateRow.state,
+                    ReadinessCandidateRow.reason,
+                )
+                .where(
+                    tuple_(
+                        ReadinessCandidateRow.platform,
+                        ReadinessCandidateRow.repo,
+                        ReadinessCandidateRow.pr_id,
+                    ).in_(pr_keys)
+                )
+                .where(ReadinessCandidateRow.state != "superseded")
+                .order_by(ReadinessCandidateRow.updated_at.desc())
+            )
+            candidates_map: dict[tuple, dict] = {}
+            for c_platform, c_repo, c_pr_id, c_state, c_reason in cand_rows.fetchall():
+                key = (c_platform, c_repo, c_pr_id)
+                if key not in candidates_map:  # first = latest (ORDER BY updated_at DESC)
+                    candidates_map[key] = {"state": c_state, "reason": c_reason}
+            for d in pr_dicts:
+                cand = candidates_map.get((d["platform"], d["repo"], d["pr_id"]))
+                if cand:
+                    d["guardian_readiness_state"] = cand["state"]
+                    d["guardian_readiness_reason"] = cand["reason"]
+
         return pr_dicts, int(total or 0)
 
 
@@ -3388,10 +3469,12 @@ def _synced_pr_to_dict(row: SyncedPRRow) -> dict[str, Any]:
         "connection_snapshot": row.connection_snapshot,
         "repo_link_id": str(row.repo_link_id) if row.repo_link_id else None,
         "sync_source": row.sync_source,
-        # Guardian review fields populated by list_synced_prs batch lookup
+        # Guardian review fields populated by list_synced_prs / get_synced_pr lookups
         "has_guardian_review": False,
         "guardian_review_id": None,
         "guardian_decision": None,
+        "guardian_readiness_state": None,
+        "guardian_readiness_reason": None,
         "pr_created_at": row.pr_created_at.isoformat() if row.pr_created_at else None,
         "pr_updated_at": row.pr_updated_at.isoformat() if row.pr_updated_at else None,
         "synced_at": row.synced_at.isoformat() if row.synced_at else None,

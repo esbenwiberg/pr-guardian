@@ -246,6 +246,10 @@ class RepoLinkUpdatePayload(BaseModel):
 
     profile_id: uuid.UUID | None = None
     connection_id: uuid.UUID | None = None
+    repo_owner: str | None = None
+    org_url: str | None = None
+    project: str | None = None
+    repo_name: str | None = None
     repo_url: str | None = None
     auto_review_enabled: bool | None = None
     paused: bool | None = None
@@ -579,6 +583,10 @@ async def update_repo_link(
             repo_link_id,
             profile_id=body.profile_id,
             connection_id=body.connection_id,
+            repo_owner=body.repo_owner,
+            org_url=body.org_url,
+            project=body.project,
+            repo_name=body.repo_name,
             repo_url=body.repo_url,
             auto_review_enabled=body.auto_review_enabled,
             paused=body.paused,

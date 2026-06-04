@@ -149,6 +149,24 @@ function guardianStatus(pr) {
     return String(pr.guardian_decision).replace(/_/g, ' ');
   }
   if (pr.has_guardian_review) return 'reviewed';
+  const rs = pr.guardian_readiness_state;
+  if (rs === 'reviewing') return 'reviewing';
+  if (rs === 'waiting') {
+    const reason = pr.guardian_readiness_reason;
+    if (reason === 'checks_pending') return 'waiting for CI';
+    if (reason === 'quiet_period') return 'quiet period';
+    if (reason === 'archmap_wait') return 'waiting for archmap';
+    return 'waiting';
+  }
+  if (rs === 'blocked') {
+    const reason = pr.guardian_readiness_reason;
+    if (reason === 'checks_failed') return 'blocked: CI failed';
+    if (reason === 'checks_timeout') return 'blocked: CI timeout';
+    if (reason === 'fork_requires_manual_start') return 'blocked: fork';
+    if (reason === 'repo_link_disabled') return 'blocked: link disabled';
+    return 'blocked';
+  }
+  if (rs === 'error') return 'error';
   return 'not run';
 }
 

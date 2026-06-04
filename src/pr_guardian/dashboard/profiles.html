@@ -545,6 +545,7 @@
           <td><input type="checkbox" data-link-field="auto_review_enabled" ${link.auto_review_enabled ? 'checked' : ''}></td>
           <td><input type="checkbox" data-link-field="paused" ${link.paused ? 'checked' : ''}></td>
           <td><span class="text-slate-500">No candidate yet</span></td>
+          <td class="whitespace-nowrap"><button class="link-btn" data-edit-repo-link>Edit</button></td>
         </tr>`;
     }).join('') || '<tr><td colspan="8" class="text-center text-slate-500 py-10">No linked repositories</td></tr>';
   }
@@ -671,31 +672,33 @@
       </form>`;
   }
 
-  function repoLinkForm() {
+  function repoLinkForm(link = null) {
+    const isEdit = Boolean(link);
+    const platform = link?.platform || 'github';
     return `
       <form id="repo-link-form" class="space-y-3">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <label class="field">Platform
-            <select name="platform" class="form-select">
-              <option value="github">GitHub</option>
-              <option value="ado">Azure DevOps</option>
+            <select name="platform" class="form-select" ${isEdit ? 'disabled' : ''}>
+              <option value="github" ${platform === 'github' ? 'selected' : ''}>GitHub</option>
+              <option value="ado" ${platform === 'ado' ? 'selected' : ''}>Azure DevOps</option>
             </select>
           </label>
-          <label id="repo-link-field-owner" class="field">Repo owner<input name="repo_owner" class="form-input" autocomplete="off" placeholder="github owner"></label>
-          <label id="repo-link-field-org-url" class="field">ADO org URL<input name="org_url" class="form-input" autocomplete="off" placeholder="https://dev.azure.com/org"></label>
-          <label id="repo-link-field-project" class="field">ADO project<input name="project" class="form-input" autocomplete="off"></label>
-          <label class="field">Repo name<input name="repo_name" class="form-input" autocomplete="off" required></label>
-          <label class="field">Repo URL<input name="repo_url" class="form-input" autocomplete="off"></label>
-          <label class="field">Profile<select name="profile_id" class="form-select" required>${profileOptions(state.selectedProfileId)}</select></label>
-          <label class="field">Connection<select id="repo-link-connection-select" name="connection_id" class="form-select" required>${connectionOptions('')}</select></label>
+          <label id="repo-link-field-owner" class="field">Repo owner<input name="repo_owner" class="form-input" autocomplete="off" placeholder="github owner" value="${escapeHtml(link?.repo_owner || '')}"></label>
+          <label id="repo-link-field-org-url" class="field">ADO org URL<input name="org_url" class="form-input" autocomplete="off" placeholder="https://dev.azure.com/org" value="${escapeHtml(link?.org_url || '')}"></label>
+          <label id="repo-link-field-project" class="field">ADO project<input name="project" class="form-input" autocomplete="off" value="${escapeHtml(link?.project || '')}"></label>
+          <label class="field">Repo name<input name="repo_name" class="form-input" autocomplete="off" required value="${escapeHtml(link?.repo_name || '')}"></label>
+          <label class="field">Repo URL<input name="repo_url" class="form-input" autocomplete="off" value="${escapeHtml(link?.repo_url || '')}"></label>
+          <label class="field">Profile<select name="profile_id" class="form-select" required>${profileOptions(link?.profile_id || state.selectedProfileId)}</select></label>
+          <label class="field">Connection<select id="repo-link-connection-select" name="connection_id" class="form-select" required>${connectionOptions(link?.connection_id || '', platform)}</select></label>
         </div>
         <div class="flex flex-wrap gap-4">
-          <label class="toggle-line"><input name="auto_review_enabled" type="checkbox" checked> <span>Auto-review enabled</span></label>
-          <label class="toggle-line"><input name="paused" type="checkbox"> <span>Paused</span></label>
+          <label class="toggle-line"><input name="auto_review_enabled" type="checkbox" ${link ? (link.auto_review_enabled ? 'checked' : '') : 'checked'}> <span>Auto-review enabled</span></label>
+          <label class="toggle-line"><input name="paused" type="checkbox" ${link?.paused ? 'checked' : ''}> <span>Paused</span></label>
         </div>
         <div class="flex justify-end gap-2 pt-2">
           <button type="button" class="btn btn-secondary text-xs" data-close-modal>Cancel</button>
-          <button type="submit" class="btn btn-primary text-xs">Link Repository</button>
+          <button type="submit" class="btn btn-primary text-xs">${isEdit ? 'Save Changes' : 'Link Repository'}</button>
         </div>
       </form>`;
   }
@@ -760,6 +763,7 @@
     });
     els.connectionRows.addEventListener('click', handleConnectionClick);
     els.connectionRows.addEventListener('change', handleConnectionChange);
+    els.repoRows.addEventListener('click', handleRepoLinkClick);
     els.repoRows.addEventListener('change', handleRepoLinkChange);
     document.getElementById('manager-form').addEventListener('submit', handleManagerSubmit);
     els.managerRows.addEventListener('click', handleManagerClick);
@@ -816,34 +820,53 @@
     connSelect.innerHTML = connectionOptions(currentConn, platform);
   }
 
-  function openRepoLinkModal() {
-    openModal('Link Repository', repoLinkForm());
+  function openRepoLinkModal(link = null) {
+    const isEdit = Boolean(link);
+    openModal(isEdit ? 'Edit Repository Link' : 'Link Repository', repoLinkForm(link));
     const form = document.getElementById('repo-link-form');
     const platformSelect = form.querySelector('[name="platform"]');
     applyRepoLinkPlatform(platformSelect.value);
-    platformSelect.addEventListener('change', () => applyRepoLinkPlatform(platformSelect.value));
+    if (!isEdit) platformSelect.addEventListener('change', () => applyRepoLinkPlatform(platformSelect.value));
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const data = new FormData(form);
-      const payload = {
-        platform: data.get('platform'),
-        repo_owner: data.get('repo_owner') || '',
-        org_url: data.get('org_url') || '',
-        project: data.get('project') || '',
-        repo_name: data.get('repo_name'),
-        repo_url: data.get('repo_url') || '',
-        profile_id: data.get('profile_id'),
-        connection_id: data.get('connection_id'),
-        auto_review_enabled: Boolean(data.get('auto_review_enabled')),
-        paused: Boolean(data.get('paused')),
-      };
-      const saved = await api('/repo-links', { method: 'POST', body: JSON.stringify(payload) });
-      state.repoLinks.push(saved);
+      let saved;
+      if (isEdit) {
+        const payload = {
+          repo_owner: data.get('repo_owner') || '',
+          org_url: data.get('org_url') || '',
+          project: data.get('project') || '',
+          repo_name: data.get('repo_name'),
+          repo_url: data.get('repo_url') || '',
+          profile_id: data.get('profile_id'),
+          connection_id: data.get('connection_id'),
+          auto_review_enabled: Boolean(data.get('auto_review_enabled')),
+          paused: Boolean(data.get('paused')),
+        };
+        saved = await api(`/repo-links/${link.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        state.repoLinks = state.repoLinks.map(item => item.id === saved.id ? saved : item);
+        showToast('Repository link updated');
+      } else {
+        const payload = {
+          platform: data.get('platform'),
+          repo_owner: data.get('repo_owner') || '',
+          org_url: data.get('org_url') || '',
+          project: data.get('project') || '',
+          repo_name: data.get('repo_name'),
+          repo_url: data.get('repo_url') || '',
+          profile_id: data.get('profile_id'),
+          connection_id: data.get('connection_id'),
+          auto_review_enabled: Boolean(data.get('auto_review_enabled')),
+          paused: Boolean(data.get('paused')),
+        };
+        saved = await api('/repo-links', { method: 'POST', body: JSON.stringify(payload) });
+        state.repoLinks.push(saved);
+        showToast('Repository linked');
+      }
       await refreshAudit();
       closeModal();
       state.activeTab = 'repositories';
       renderAll();
-      showToast('Repository linked');
     });
   }
 
@@ -880,6 +903,14 @@
     state.connections = state.connections.map(item => item.id === updated.id ? updated : item);
     await refreshAudit();
     renderAll();
+  }
+
+  function handleRepoLinkClick(event) {
+    if (!event.target.matches('[data-edit-repo-link]')) return;
+    const row = event.target.closest('[data-repo-link-id]');
+    if (!row) return;
+    const link = state.repoLinks.find(item => item.id === row.dataset.repoLinkId);
+    if (link) openRepoLinkModal(link);
   }
 
   async function handleRepoLinkChange(event) {
