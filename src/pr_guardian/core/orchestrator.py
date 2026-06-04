@@ -216,6 +216,20 @@ async def run_review(
         except Exception as e:
             log.warning("set_status_failed", error=str(e))
 
+    # Link the previous completed review for this PR so re-reviews clean up their
+    # predecessor's inline comments instead of orphaning them. Resolved centrally
+    # here so every entry point — webhook autoreview, poll fallback, manual start —
+    # inherits the cleanup. The current review is still in-flight (finished_at is
+    # NULL), so find_review_by_pr_url returns the prior one, not this one.
+    original_review_id: str | None = None
+    if storage and not side_effects_skipped:
+        try:
+            prior = await storage.find_review_by_pr_url(pr.pr_url)
+            if prior and str(prior.get("id")) != str(review_db_id):
+                original_review_id = str(prior["id"])
+        except Exception as e:
+            log.warning("prior_review_lookup_failed", pr_id=pr.pr_id, error=str(e))
+
     try:
         return await _run_pipeline(
             pr,
@@ -234,6 +248,7 @@ async def run_review(
             skip_platform_side_effects=side_effects_skipped,
             comment_mode=comment_mode,
             manual_comment_override=manual_comment_override,
+            original_review_id=original_review_id,
         )
     except Exception as exc:
         if storage and review_db_id:
@@ -263,6 +278,7 @@ async def _run_pipeline(
     skip_platform_side_effects: bool = False,
     comment_mode: str = "summary",
     manual_comment_override: bool = False,
+    original_review_id: str | None = None,
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
@@ -423,6 +439,7 @@ async def _run_pipeline(
                 comment_mode=comment_mode,
                 review_id=review_db_id,
                 storage=storage,
+                original_review_id=original_review_id,
                 manual_comment_override=manual_comment_override,
             )
         await _save_result(storage, review_db_id, result, _emit)
@@ -971,7 +988,9 @@ async def _run_re_review_pipeline(
     )
 
     comment_mode = original_review.get("comment_mode", "summary")
-    original_review_id = original_review.get("review_id", "")
+    # Reviews are serialized with an "id" key (see _review_to_dict); "review_id"
+    # never existed here, so the old lookup silently disabled stale-comment cleanup.
+    original_review_id = original_review.get("id", "")
 
     if active_findings == 0:
         _plog("info", "decision", "No active findings to re-evaluate. Auto-approving.")

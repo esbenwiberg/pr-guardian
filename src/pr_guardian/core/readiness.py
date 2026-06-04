@@ -270,7 +270,7 @@ async def evaluate_candidates_for_sha(
         platform=platform,
         repo=repo,
         head_sha=head_sha,
-        states=("waiting", "blocked"),
+        states=("waiting", "blocked", "error"),
     )
     evaluated: list[dict[str, Any]] = []
     for candidate in candidates:
@@ -317,11 +317,17 @@ async def evaluate_candidate(
         pr=pr,
         now=_now(),
     )
+    # Only a genuine "blocked" decision (e.g. checks_failed) posts a failing
+    # readiness status. An "error" decision is Guardian's own problem to reach
+    # the platform (platform_error / status_write_failed) — surfacing it as a
+    # red X on every PR is noise, and the candidate is recoverable, so the
+    # reconciler retries and flips it to success once the platform recovers.
+    # Posting "pending" keeps the PR neutral while we self-heal.
     status_state = (
         "success"
         if decision.ready
         else "failure"
-        if decision.state in {"blocked", "error"}
+        if decision.state == "blocked"
         else "pending"
     )
     status_written = await _post_readiness_status(
