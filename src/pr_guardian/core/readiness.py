@@ -516,8 +516,30 @@ async def evaluate_readiness(
 
         signals = _filtered_signals(await adapter.fetch_readiness_signals(pr), settings)
     except Exception as exc:
+        # Duck-type the HTTP status off the exception so core/ stays free of httpx.
+        # httpx.HTTPStatusError carries `.response.status_code`.
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+        # 401/403/404 are auth/access/not-found: the credential can't see this repo
+        # or PR. That won't self-heal by retrying — it needs an operator to fix the
+        # connection's access, so it gets a distinct, *visible* reason. Everything
+        # else (5xx, 429, timeouts, network) is a transient Guardian-side blip that
+        # the reconciler quietly retries, and stays hidden as before.
+        persistent = status in (401, 403, 404)
+        reason = "platform_access_error" if persistent else "platform_error"
         snapshot["error"] = str(exc)
-        return ReadinessDecision("error", "platform_error", snapshot)
+        if status is not None:
+            snapshot["error_status"] = status
+        log.warning(
+            "readiness_platform_error",
+            candidate_id=candidate["id"],
+            repo=pr.repo,
+            pr_id=pr.pr_id,
+            connection_id=candidate.get("connection_id"),
+            status=status,
+            reason=reason,
+            error=str(exc),
+        )
+        return ReadinessDecision("error", reason, snapshot)
 
     checks = _checks_snapshot(signals)
     snapshot["checks"] = checks

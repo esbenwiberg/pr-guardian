@@ -237,26 +237,43 @@ class GitHubAdapter:
     async def fetch_readiness_signals(self, pr: PlatformPR) -> list[PlatformReadinessSignal]:
         client = self._get_client()
         signals: list[PlatformReadinessSignal] = []
-        checks_resp = await client.get(
-            f"/repos/{pr.repo}/commits/{pr.head_commit_sha}/check-runs",
-            params={"per_page": 100},
-        )
-        checks_resp.raise_for_status()
-        for run in checks_resp.json().get("check_runs", []) or []:
-            name = run.get("name") or run.get("app", {}).get("name") or "check"
-            if run.get("status") == "completed":
-                state = run.get("conclusion") or "unknown"
-            else:
-                state = run.get("status") or "pending"
-            signals.append(
-                PlatformReadinessSignal(
-                    name=name,
-                    state=state,
-                    source="check_run",
-                    url=run.get("html_url") or "",
-                    description=run.get("output", {}).get("title") or "",
-                )
+        # Check runs (Checks API) give full fidelity — every app's check run, not just
+        # GitHub Actions. But the Checks API is unreadable by fine-grained PATs (GitHub
+        # offers no Checks permission for them). When that read is denied, fall back to
+        # the Actions API, which a fine-grained PAT *can* read with the Actions scope.
+        # The fallback only sees GitHub Actions runs, not third-party app check runs
+        # (e.g. CodeRabbit) — a known gap that disappears under GitHub App auth.
+        try:
+            checks_resp = await client.get(
+                f"/repos/{pr.repo}/commits/{pr.head_commit_sha}/check-runs",
+                params={"per_page": 100},
             )
+            checks_resp.raise_for_status()
+            for run in checks_resp.json().get("check_runs", []) or []:
+                name = run.get("name") or run.get("app", {}).get("name") or "check"
+                if run.get("status") == "completed":
+                    state = run.get("conclusion") or "unknown"
+                else:
+                    state = run.get("status") or "pending"
+                signals.append(
+                    PlatformReadinessSignal(
+                        name=name,
+                        state=state,
+                        source="check_run",
+                        url=run.get("html_url") or "",
+                        description=run.get("output", {}).get("title") or "",
+                    )
+                )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (403, 404):
+                raise
+            log.warning(
+                "github_check_runs_unreadable_using_actions_fallback",
+                repo=pr.repo,
+                head_sha=pr.head_commit_sha,
+                status=exc.response.status_code,
+            )
+            signals.extend(await self._actions_run_signals(client, pr))
 
         statuses_resp = await client.get(f"/repos/{pr.repo}/commits/{pr.head_commit_sha}/status")
         statuses_resp.raise_for_status()
@@ -268,6 +285,48 @@ class GitHubAdapter:
                     source="status",
                     url=status.get("target_url") or "",
                     description=status.get("description") or "",
+                )
+            )
+        return signals
+
+    async def _actions_run_signals(
+        self, client: httpx.AsyncClient, pr: PlatformPR
+    ) -> list[PlatformReadinessSignal]:
+        """Read GitHub Actions workflow runs as a stand-in for check runs when the
+        Checks API is unreadable (fine-grained PAT). Needs only the Actions read scope.
+        Runs are treated as ``check_run`` signals so downstream gating and the
+        ``ignored_checks`` filter handle them identically to real check runs. If the
+        Actions scope is *also* missing, degrade to statuses-only rather than wedge."""
+        try:
+            resp = await client.get(
+                f"/repos/{pr.repo}/actions/runs",
+                params={"head_sha": pr.head_commit_sha, "per_page": 100},
+            )
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code not in (403, 404):
+                raise
+            log.warning(
+                "github_actions_runs_unreadable_statuses_only",
+                repo=pr.repo,
+                head_sha=pr.head_commit_sha,
+                status=exc.response.status_code,
+            )
+            return []
+        signals: list[PlatformReadinessSignal] = []
+        for run in resp.json().get("workflow_runs", []) or []:
+            name = run.get("name") or run.get("display_title") or "workflow"
+            if run.get("status") == "completed":
+                state = run.get("conclusion") or "unknown"
+            else:
+                state = run.get("status") or "pending"
+            signals.append(
+                PlatformReadinessSignal(
+                    name=name,
+                    state=state,
+                    source="check_run",
+                    url=run.get("html_url") or "",
+                    description="",
                 )
             )
         return signals
