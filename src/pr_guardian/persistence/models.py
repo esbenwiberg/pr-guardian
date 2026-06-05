@@ -357,6 +357,44 @@ class PostedInlineCommentRow(Base):
 
 
 # ---------------------------------------------------------------------------
+# ChatOps command tracking
+# ---------------------------------------------------------------------------
+
+
+class ChatOpsCommandRow(Base):
+    """Idempotency/audit row for platform comments that trigger Guardian work."""
+
+    __tablename__ = "chatops_commands"
+    __table_args__ = (
+        UniqueConstraint(
+            "platform",
+            "external_id",
+            "command",
+            name="uq_chatops_command_external",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    repo: Mapped[str] = mapped_column(String(256), index=True)
+    pr_id: Mapped[str] = mapped_column(String(64), index=True)
+    command: Mapped[str] = mapped_column(String(64))
+    external_id: Mapped[str] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(64), default="")
+    actor: Mapped[str] = mapped_column(String(256), default="")
+    status: Mapped[str] = mapped_column(String(32), default="claimed")
+    status_detail: Mapped[str] = mapped_column(Text, default="")
+    review_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    payload: Mapped[dict] = mapped_column(_json_type(), default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
 # Profiles, connections, repo links, and readiness candidates
 # ---------------------------------------------------------------------------
 

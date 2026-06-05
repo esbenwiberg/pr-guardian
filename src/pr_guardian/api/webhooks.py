@@ -106,6 +106,31 @@ async def github_webhook(
         )
         return {"status": "evaluated", "count": len(updated)}
 
+    if x_github_event == "issue_comment":
+        action = body.get("action", "")
+        issue = body.get("issue") or {}
+        comment = body.get("comment") or {}
+        repo_data = body.get("repository") or {}
+        if action != "created" or not issue.get("pull_request"):
+            return {"status": "ignored", "reason": "not a PR comment command"}
+
+        from pr_guardian.core.github_chatops import handle_github_comment
+
+        repo = repo_data.get("full_name") or ""
+        pr_id = str(issue.get("number") or "")
+        if not repo or not pr_id:
+            return {"status": "ignored", "reason": "missing repo or PR number"}
+        return await handle_github_comment(
+            repo=repo,
+            pr_id=pr_id,
+            comment_id=str(comment.get("id") or ""),
+            body=comment.get("body") or "",
+            commenter=(comment.get("user") or {}).get("login") or "",
+            author_association=comment.get("author_association") or "",
+            source="github:issue_comment",
+            base_url=str(request.base_url).rstrip("/"),
+        )
+
     if x_github_event != "pull_request":
         return {"status": "ignored", "reason": f"event type: {x_github_event}"}
 

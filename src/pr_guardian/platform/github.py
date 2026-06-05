@@ -11,7 +11,11 @@ from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
-from pr_guardian.platform.protocol import InlinePostResult, PlatformPRMetadata, PlatformReadinessSignal
+from pr_guardian.platform.protocol import (
+    InlinePostResult,
+    PlatformPRMetadata,
+    PlatformReadinessSignal,
+)
 
 log = structlog.get_logger()
 
@@ -233,6 +237,47 @@ class GitHubAdapter:
             closed=data.get("state") == "closed",
             merged=bool(data.get("merged")),
         )
+
+    async def fetch_pr(self, repo: str, pr_id: str | int) -> PlatformPR:
+        """Fetch a full GitHub PR as Guardian's normalized PlatformPR."""
+        client = self._get_client()
+        resp = await client.get(f"/repos/{repo}/pulls/{pr_id}")
+        resp.raise_for_status()
+        data = resp.json()
+        owner = repo.split("/", 1)[0] if "/" in repo else ""
+        return PlatformPR(
+            platform=Platform.GITHUB,
+            pr_id=str(pr_id),
+            repo=repo,
+            repo_url=data.get("base", {}).get("repo", {}).get("clone_url", ""),
+            source_branch=data.get("head", {}).get("ref", ""),
+            target_branch=data.get("base", {}).get("ref", ""),
+            author=data.get("user", {}).get("login", ""),
+            title=data.get("title", ""),
+            head_commit_sha=data.get("head", {}).get("sha", ""),
+            body=data.get("body") or "",
+            org=owner,
+        )
+
+    async def list_issue_comments(self, repo: str, pr_id: str | int) -> list[dict]:
+        """List PR conversation comments from GitHub's issue-comments API."""
+        client = self._get_client()
+        comments: list[dict] = []
+        page = 1
+        while page <= 10:
+            resp = await client.get(
+                f"/repos/{repo}/issues/{pr_id}/comments",
+                params={"per_page": 100, "page": page},
+            )
+            resp.raise_for_status()
+            batch = resp.json()
+            if not batch:
+                break
+            comments.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+        return comments
 
     async def fetch_readiness_signals(self, pr: PlatformPR) -> list[PlatformReadinessSignal]:
         client = self._get_client()

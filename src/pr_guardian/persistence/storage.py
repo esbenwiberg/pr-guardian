@@ -14,6 +14,7 @@ from typing import Any
 import structlog
 from sqlalchemy import func, select
 from sqlalchemy import update as sa_update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pr_guardian.models.output import ReviewResult
@@ -24,6 +25,7 @@ from pr_guardian.persistence.models import (
     AdminRow,
     AgentResultRow,
     ApiKeyRow,
+    ChatOpsCommandRow,
     ConnectionRow,
     ExcludedRepoRow,
     FindingDismissalRow,
@@ -1166,7 +1168,18 @@ async def list_active_readiness_candidates(
 
 
 async def list_recoverable_readiness_candidates(*, limit: int = 100) -> list[dict[str, Any]]:
-    recoverable_reasons = ("", "quiet_period", "draft", "checks_pending", "checks_failed", "checks_timeout", "archmap_wait", "platform_error", "platform_access_error", "status_write_failed")
+    recoverable_reasons = (
+        "",
+        "quiet_period",
+        "draft",
+        "checks_pending",
+        "checks_failed",
+        "checks_timeout",
+        "archmap_wait",
+        "platform_error",
+        "platform_access_error",
+        "status_write_failed",
+    )
     async with async_session() as session:
         rows = (
             await session.scalars(
@@ -1645,6 +1658,21 @@ async def find_review_by_pr_url(pr_url: str) -> dict[str, Any] | None:
         return _review_to_dict(row) if row else None
 
 
+async def find_latest_review_for_pr(platform: str, repo: str, pr_id: str) -> dict[str, Any] | None:
+    """Find the most recent completed review for a platform PR key."""
+    async with async_session() as session:
+        q = (
+            select(ReviewRow)
+            .where(ReviewRow.platform == platform)
+            .where(ReviewRow.repo == repo)
+            .where(ReviewRow.pr_id == str(pr_id))
+            .where(ReviewRow.finished_at.isnot(None))
+            .order_by(ReviewRow.finished_at.desc())
+        )
+        row = (await session.scalars(q)).first()
+        return _review_to_dict(row) if row else None
+
+
 async def get_active_reviews() -> list[dict[str, Any]]:
     """Get reviews that haven't finished yet (live progress)."""
     async with async_session() as session:
@@ -1879,7 +1907,6 @@ async def delete_global_config(key: str) -> bool:
         await session.delete(row)
         await session.commit()
         return True
-
 
 
 async def resolve_github_token(pat_name: str | None = None) -> str:
@@ -2814,6 +2841,67 @@ async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
             )
         ).all()
         return [r.platform_comment_id for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# ChatOps command helpers
+# ---------------------------------------------------------------------------
+
+
+async def claim_chatops_command(
+    *,
+    platform: str,
+    repo: str,
+    pr_id: str,
+    command: str,
+    external_id: str,
+    source: str,
+    actor: str,
+    payload: dict[str, Any] | None = None,
+) -> uuid.UUID | None:
+    """Claim a platform command exactly once.
+
+    Returns the new row id, or None when the command was already seen through
+    another ingress path (webhook redelivery, polling, or both).
+    """
+    row = ChatOpsCommandRow(
+        platform=platform,
+        repo=repo,
+        pr_id=str(pr_id),
+        command=command,
+        external_id=str(external_id),
+        source=source,
+        actor=actor,
+        payload=payload or {},
+    )
+    async with async_session() as session:
+        session.add(row)
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return None
+        return row.id
+
+
+async def update_chatops_command(
+    command_id: uuid.UUID,
+    *,
+    status: str,
+    status_detail: str = "",
+    review_id: uuid.UUID | str | None = None,
+) -> None:
+    """Update the audit status for a claimed ChatOps command."""
+    async with async_session() as session:
+        row = await session.get(ChatOpsCommandRow, command_id)
+        if not row:
+            return
+        row.status = status
+        row.status_detail = status_detail
+        if review_id:
+            row.review_id = uuid.UUID(str(review_id))
+        row.updated_at = _now()
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------

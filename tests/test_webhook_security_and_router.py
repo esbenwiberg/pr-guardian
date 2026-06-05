@@ -28,6 +28,27 @@ def _github_payload() -> dict:
     }
 
 
+def _github_issue_comment_payload() -> dict:
+    return {
+        "action": "created",
+        "repository": {
+            "full_name": "octo/service",
+            "clone_url": "https://github.com/octo/service.git",
+            "owner": {"login": "octo"},
+        },
+        "issue": {
+            "number": 42,
+            "pull_request": {"url": "https://api.github.com/repos/octo/service/pulls/42"},
+        },
+        "comment": {
+            "id": 9001,
+            "body": "@pr-guardian re-review",
+            "user": {"login": "alice"},
+            "author_association": "MEMBER",
+        },
+    }
+
+
 def _signature(body: bytes, secret: str) -> str:
     return "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
 
@@ -112,3 +133,34 @@ def test_github_and_ado_webhooks_require_valid_secrets(monkeypatch):
         assert valid_ado.json()["status"] == "candidate"
 
         assert create_candidate.await_count == 2
+
+
+def test_github_issue_comment_webhook_routes_chatops_command(monkeypatch):
+    monkeypatch.delenv("GUARDIAN_WEBHOOK_DEV_BYPASS", raising=False)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "github-secret")
+    body = json.dumps(_github_issue_comment_payload()).encode()
+
+    with (
+        patch(
+            "pr_guardian.core.github_chatops.handle_github_comment",
+            new_callable=AsyncMock,
+            return_value={"status": "queued", "review_id": "review-1"},
+        ) as handle_comment,
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.post(
+            "/api/webhooks/github",
+            content=body,
+            headers={
+                "X-GitHub-Event": "issue_comment",
+                "X-Hub-Signature-256": _signature(body, "github-secret"),
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "queued"
+    handle_comment.assert_awaited_once()
+    assert handle_comment.call_args.kwargs["repo"] == "octo/service"
+    assert handle_comment.call_args.kwargs["pr_id"] == "42"
+    assert handle_comment.call_args.kwargs["body"] == "@pr-guardian re-review"

@@ -167,7 +167,9 @@ async def _post_review_pending(adapter: PlatformAdapter, pr: PlatformPR) -> None
         if method is not None:
             await method(pr, "pending", "Guardian review pending")
         else:
-            await adapter.set_status(pr, "pending", "Guardian review pending", context="guardian/review")
+            await adapter.set_status(
+                pr, "pending", "Guardian review pending", context="guardian/review"
+            )
     except Exception as exc:
         log.warning("review_pending_status_write_failed", pr_id=pr.pr_id, error=str(exc))
 
@@ -229,6 +231,7 @@ async def create_or_update_candidate_from_pr(
             readiness_snapshot={"created_source": source},
         )
 
+    assert existing is not None
     adapter = adapter or await _adapter_for_candidate(existing)
     await _post_readiness_status(adapter, pr, "pending", "Guardian readiness waiting")
     if is_new:
@@ -324,11 +327,7 @@ async def evaluate_candidate(
     # reconciler retries and flips it to success once the platform recovers.
     # Posting "pending" keeps the PR neutral while we self-heal.
     status_state = (
-        "success"
-        if decision.ready
-        else "failure"
-        if decision.state == "blocked"
-        else "pending"
+        "success" if decision.ready else "failure" if decision.state == "blocked" else "pending"
     )
     status_written = await _post_readiness_status(
         adapter,

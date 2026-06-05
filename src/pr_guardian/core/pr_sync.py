@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -276,6 +277,33 @@ async def _sync_github(token: str, connection: dict[str, Any]) -> None:
                                 org=org,
                             )
                         )
+                        if int(pr.get("comments") or 0) > 0:
+                            try:
+                                from pr_guardian.core.github_chatops import (
+                                    poll_github_pr_comments,
+                                )
+
+                                handled = await poll_github_pr_comments(
+                                    adapter,
+                                    repo=repo,
+                                    pr=pr,
+                                    source="poll:github",
+                                    base_url=os.environ.get("GUARDIAN_BASE_URL", ""),
+                                )
+                                if handled:
+                                    log.info(
+                                        "github_chatops_poll_commands_queued",
+                                        repo=repo,
+                                        pr_id=data["pr_id"],
+                                        count=handled,
+                                    )
+                            except Exception as exc:
+                                log.warning(
+                                    "github_chatops_poll_failed",
+                                    repo=repo,
+                                    pr_id=data["pr_id"],
+                                    error=str(exc),
+                                )
                     for pr in merged_prs:
                         data = _normalize_github_merged_pr(pr, repo)
                         data["connection_id"] = _connection_uuid(connection)
