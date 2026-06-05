@@ -133,6 +133,8 @@ def test_github_and_ado_webhooks_require_valid_secrets(monkeypatch):
         assert valid_ado.json()["status"] == "candidate"
 
         assert create_candidate.await_count == 2
+        assert create_candidate.await_args_list[0].kwargs["base_url"] == "http://testserver"
+        assert create_candidate.await_args_list[1].kwargs["base_url"] == "http://testserver"
 
 
 def test_github_issue_comment_webhook_routes_chatops_command(monkeypatch):

@@ -468,7 +468,12 @@ class ADOAdapter:
         resp.raise_for_status()
 
     async def set_status(
-        self, pr: PlatformPR, state: str, description: str, context: str = "pr-guardian"
+        self,
+        pr: PlatformPR,
+        state: str,
+        description: str,
+        context: str = "pr-guardian",
+        target_url: str = "",
     ) -> None:
         client = self._get_client()
         state_map = {"success": "succeeded", "failure": "failed", "pending": "pending"}
@@ -476,13 +481,16 @@ class ADOAdapter:
             f"{self._org_url}/{pr.project}/_apis/git/repositories/{pr.repo}"
             f"/pullRequests/{pr.pr_id}/statuses"
         )
+        payload = {
+            "state": state_map.get(state, "notSet"),
+            "description": description[:140],
+            "context": {"name": context, "genre": "pr-guardian"},
+        }
+        if target_url:
+            payload["targetUrl"] = target_url
         resp = await client.post(
             url,
-            json={
-                "state": state_map.get(state, "notSet"),
-                "description": description[:140],
-                "context": {"name": context, "genre": "pr-guardian"},
-            },
+            json=payload,
             params={"api-version": "7.1"},
         )
         resp.raise_for_status()
@@ -551,8 +559,12 @@ class ADOAdapter:
     async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
         await self.set_status(pr, state, description, context="guardian/readiness")
 
-    async def set_review_status(self, pr: PlatformPR, state: str, description: str) -> None:
-        await self.set_status(pr, state, description, context="guardian/review")
+    async def set_review_status(
+        self, pr: PlatformPR, state: str, description: str, target_url: str = ""
+    ) -> None:
+        await self.set_status(
+            pr, state, description, context="guardian/review", target_url=target_url
+        )
 
     async def find_archmap_artifact(self, pr: PlatformPR, head_sha: str) -> bool:
         client = self._get_client()

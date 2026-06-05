@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
@@ -398,6 +399,100 @@ async def test_reconciler_starts_candidate_after_missed_check_event():
             assert updated["state"] == "reviewing"
             transitions = await storage.list_candidate_transitions(uuid.UUID(candidate["id"]))
             assert transitions[-1]["source"] == "reconciler"
+    finally:
+        await engine.dispose()
+
+
+async def test_reconciler_recovers_stale_reviewing_candidate():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            candidate = await storage.create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="42",
+                head_sha="sha1",
+            )
+            started = await storage.try_start_candidate_review(
+                uuid.UUID(candidate["id"]),
+                _pr(),
+                source="automatic",
+                actor="webhook",
+                reason="ready",
+                readiness_snapshot={"ready": True},
+            )
+            assert started is not None
+            old_review_id, _ = started
+            stale_time = datetime.now(timezone.utc) - timedelta(minutes=16)
+            with patch("pr_guardian.persistence.storage._now", return_value=stale_time):
+                await storage.record_candidate_transition(
+                    uuid.UUID(candidate["id"]),
+                    to_state="reviewing",
+                    source="fixture",
+                    reason="ready",
+                    readiness_snapshot={"ready": True},
+                )
+
+            adapter = FakeReadinessAdapter(
+                signals=[PlatformReadinessSignal("ci", "success", "check_run")]
+            )
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=adapter):
+                assert await reconcile_readiness_once() == 1
+
+            abandoned = await storage.get_review(old_review_id)
+            assert abandoned is not None
+            assert abandoned["stage"] == "error"
+            assert abandoned["decision"] == "error"
+            assert "heartbeat expired" in abandoned["stage_detail"]
+
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["state"] == "reviewing"
+            assert updated["reason"] == "ready"
+            transitions = await storage.list_candidate_transitions(uuid.UUID(candidate["id"]))
+            assert any(t["reason"] == "review_worker_stale" for t in transitions)
+            reviews = await storage.list_reviews(limit=10)
+            linked_reviews = [r for r in reviews if r.get("candidate_id") == candidate["id"]]
+            assert len(linked_reviews) == 2
+    finally:
+        await engine.dispose()
+
+
+async def test_automatic_review_startup_failure_is_marked_and_reported(monkeypatch):
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo()
+            adapter = FakeReadinessAdapter(
+                signals=[PlatformReadinessSignal("ci", "success", "check_run")]
+            )
+            monkeypatch.setattr(
+                "pr_guardian.config.profile_resolver.resolve_profile_snapshot_config",
+                AsyncMock(side_effect=RuntimeError("profile snapshot invalid")),
+            )
+
+            candidate = await create_or_update_candidate_from_pr(_pr(), adapter=adapter)
+            assert candidate is not None
+
+            linked_reviews = []
+            for _ in range(20):
+                reviews = await storage.list_reviews(limit=10)
+                linked_reviews = [
+                    r for r in reviews if r.get("candidate_id") == candidate["id"]
+                ]
+                if linked_reviews and linked_reviews[0]["stage"] == "error":
+                    break
+                await asyncio.sleep(0.01)
+            assert len(linked_reviews) == 1
+            review = linked_reviews[0]
+            assert review["stage"] == "error"
+            assert review["decision"] == "error"
+            assert "Automatic review startup failed" in review["stage_detail"]
+            assert (
+                "guardian/review",
+                "failure",
+                "Guardian review failed before starting",
+            ) in adapter.statuses
     finally:
         await engine.dispose()
 

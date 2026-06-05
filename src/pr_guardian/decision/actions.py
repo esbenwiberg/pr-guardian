@@ -19,7 +19,7 @@ _AGENT_LABELS: dict[str, str] = {
 }
 
 
-def _detail_url(review_id: str, base_url: str = "") -> str | None:
+def build_review_detail_url(review_id: str, base_url: str = "") -> str | None:
     """Build the URL to the findings detail page.
 
     Uses the provided base_url (inferred from the incoming request), falling
@@ -29,6 +29,11 @@ def _detail_url(review_id: str, base_url: str = "") -> str | None:
     if not base or not review_id:
         return None
     return f"{base}/reviews/{review_id}"
+
+
+def _detail_url(review_id: str, base_url: str = "") -> str | None:
+    """Backward-compatible wrapper for older callers/tests."""
+    return build_review_detail_url(review_id, base_url)
 
 
 def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
@@ -100,6 +105,12 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     if detail_url:
         lines.append("")
         lines.append(f"[\U0001f50e View full findings \u2192]({detail_url})")
+
+    lines.append("")
+    lines.append(
+        "On GitHub PRs, after pushing fixes, comment `@pr-guardian re-review` "
+        "to queue a focused re-review."
+    )
 
     lines.append("")
     lines.append("---")

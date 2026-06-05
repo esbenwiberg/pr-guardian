@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from pr_guardian.api import reviews_queue
 from pr_guardian.auth.identity import Identity
-from pr_guardian.core.readiness import supersede_candidates_for_pr
+from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.core.readiness import (
+    ReadinessDecision,
+    _start_automatic_review,
+    supersede_candidates_for_pr,
+)
 from pr_guardian.core.orchestrator import _is_stale_automatic_review
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
@@ -97,6 +103,42 @@ async def test_ready_candidate_transitions_to_one_review_under_concurrency():
             assert review["repo_link_id"] == candidate["repo_link_id"]
             assert review["profile_snapshot"]["name"].startswith("Readiness")
             assert review["connection_snapshot"]["name"].startswith("Connection")
+    finally:
+        await engine.dispose()
+
+
+async def test_automatic_review_runs_inline_with_guardian_base_url():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            candidate = await _linked_candidate()
+            adapter = AsyncMock()
+            run_review = AsyncMock()
+
+            with patch("pr_guardian.core.orchestrator.run_review", run_review):
+                with patch(
+                    "pr_guardian.config.profile_resolver.resolve_profile_snapshot_config",
+                    AsyncMock(return_value=SimpleNamespace(config=GuardianConfig())),
+                ):
+                    started = await _start_automatic_review(
+                        uuid.UUID(candidate["id"]),
+                        _pr(repo=candidate["repo"]),
+                        adapter,
+                        "webhook",
+                        ReadinessDecision("reviewing", "ready", {"ready": True}),
+                        base_url="https://guardian.example",
+                    )
+                    assert started is not None
+                    for _ in range(20):
+                        if run_review.await_count:
+                            break
+                        await asyncio.sleep(0.01)
+
+            run_review.assert_awaited_once()
+            kwargs = run_review.await_args.kwargs
+            assert kwargs["comment_mode"] == "inline"
+            assert kwargs["manual_comment_override"] is True
+            assert kwargs["base_url"] == "https://guardian.example"
     finally:
         await engine.dispose()
 

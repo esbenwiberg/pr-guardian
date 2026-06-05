@@ -65,7 +65,12 @@ class PlatformAdapter(Protocol):
         ...
 
     async def set_status(
-        self, pr: PlatformPR, state: str, description: str, context: str = "pr-guardian"
+        self,
+        pr: PlatformPR,
+        state: str,
+        description: str,
+        context: str = "pr-guardian",
+        target_url: str = "",
     ) -> None:
         """Set a commit status check."""
         ...
@@ -82,7 +87,9 @@ class PlatformAdapter(Protocol):
         """Write Guardian's readiness status."""
         ...
 
-    async def set_review_status(self, pr: PlatformPR, state: str, description: str) -> None:
+    async def set_review_status(
+        self, pr: PlatformPR, state: str, description: str, target_url: str = ""
+    ) -> None:
         """Write Guardian's review execution/result status."""
         ...
 

@@ -24,6 +24,7 @@ from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import (
     SEVERITY_ORDER,
+    build_review_detail_url,
     build_summary_comment,
     get_review_labels,
 )
@@ -212,7 +213,13 @@ async def run_review(
     # Set pending review status (skip for synthetic PRs like repo reviews or stale automatic runs)
     if not side_effects_skipped:
         try:
-            await _post_review_status(adapter, pr, "pending", "Guardian review in progress")
+            await _post_review_status(
+                adapter,
+                pr,
+                "pending",
+                "Guardian review in progress",
+                target_url=build_review_detail_url(str(review_db_id or ""), base_url) or "",
+            )
         except Exception as e:
             log.warning("set_status_failed", error=str(e))
 
@@ -1321,16 +1328,29 @@ _MECH_SEVERITY_MAP: dict[str, Severity] = {
 
 
 async def _post_review_status(
-    adapter: PlatformAdapter, pr: PlatformPR, state: str, description: str
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    state: str,
+    description: str,
+    target_url: str = "",
 ) -> None:
     method = getattr(adapter, "set_review_status", None)
     if method is not None:
-        result = method(pr, state, description)
+        try:
+            result = method(pr, state, description, target_url=target_url)
+        except TypeError:
+            result = method(pr, state, description)
         if inspect.isawaitable(result):
             await result
         return
     try:
-        result = adapter.set_status(pr, state, description, context="guardian/review")
+        result = adapter.set_status(
+            pr,
+            state,
+            description,
+            context="guardian/review",
+            target_url=target_url,
+        )
     except TypeError:
         result = adapter.set_status(pr, state, description)
     if inspect.isawaitable(result):
@@ -1341,15 +1361,24 @@ async def _post_result_status(
     adapter: PlatformAdapter,
     pr: PlatformPR,
     result: ReviewResult,
+    *,
+    base_url: str = "",
 ) -> None:
+    target_url = build_review_detail_url(result.review_id, base_url) or ""
     if result.decision == Decision.AUTO_APPROVE:
-        await _post_review_status(adapter, pr, "success", "Guardian cleared")
+        await _post_review_status(adapter, pr, "success", "Guardian cleared", target_url)
     elif result.decision == Decision.HUMAN_REVIEW:
-        await _post_review_status(adapter, pr, "failure", "Guardian review needs human review")
+        await _post_review_status(
+            adapter, pr, "failure", "Guardian review needs human review", target_url
+        )
     elif result.decision == Decision.REJECT:
-        await _post_review_status(adapter, pr, "failure", "Guardian review requested changes")
+        await _post_review_status(
+            adapter, pr, "failure", "Guardian review requested changes", target_url
+        )
     elif result.decision == Decision.HARD_BLOCK:
-        await _post_review_status(adapter, pr, "failure", "Guardian review blocked this PR")
+        await _post_review_status(
+            adapter, pr, "failure", "Guardian review blocked this PR", target_url
+        )
 
 
 async def _is_stale_automatic_review(
@@ -1421,7 +1450,7 @@ async def _post_results(
     summary_enabled = comments_enabled and comment_mode == "summary"
 
     try:
-        await _post_result_status(adapter, pr, result)
+        await _post_result_status(adapter, pr, result, base_url=base_url)
     except Exception as e:
         log.warning("post_review_status_failed", pr_id=pr.pr_id, error=str(e))
 

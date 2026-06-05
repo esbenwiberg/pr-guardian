@@ -802,6 +802,10 @@ def _build_verdict_body(
         parts.append(f"_Posted from [PR Guardian wizard review]({review_url})._")
     else:
         parts.append("_Posted from PR Guardian wizard review._")
+    parts.append(
+        "On GitHub PRs, after pushing fixes, comment `@pr-guardian re-review` "
+        "to queue a focused re-review."
+    )
     return "\n\n".join(parts)
 
 

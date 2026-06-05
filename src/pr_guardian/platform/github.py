@@ -205,17 +205,25 @@ class GitHubAdapter:
         resp.raise_for_status()
 
     async def set_status(
-        self, pr: PlatformPR, state: str, description: str, context: str = "pr-guardian"
+        self,
+        pr: PlatformPR,
+        state: str,
+        description: str,
+        context: str = "pr-guardian",
+        target_url: str = "",
     ) -> None:
         client = self._get_client()
         state_map = {"success": "success", "failure": "failure", "pending": "pending"}
+        payload = {
+            "state": state_map.get(state, "pending"),
+            "description": description[:140],
+            "context": context,
+        }
+        if target_url:
+            payload["target_url"] = target_url
         resp = await client.post(
             f"/repos/{pr.repo}/statuses/{pr.head_commit_sha}",
-            json={
-                "state": state_map.get(state, "pending"),
-                "description": description[:140],
-                "context": context,
-            },
+            json=payload,
         )
         resp.raise_for_status()
 
@@ -379,8 +387,12 @@ class GitHubAdapter:
     async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
         await self.set_status(pr, state, description, context="guardian/readiness")
 
-    async def set_review_status(self, pr: PlatformPR, state: str, description: str) -> None:
-        await self.set_status(pr, state, description, context="guardian/review")
+    async def set_review_status(
+        self, pr: PlatformPR, state: str, description: str, target_url: str = ""
+    ) -> None:
+        await self.set_status(
+            pr, state, description, context="guardian/review", target_url=target_url
+        )
 
     async def find_archmap_artifact(self, pr: PlatformPR, head_sha: str) -> bool:
         client = self._get_client()

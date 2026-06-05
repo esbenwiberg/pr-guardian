@@ -57,6 +57,7 @@ READINESS_STATES = frozenset(
     {"waiting", "blocked", "reviewing", "reviewed", "superseded", "error"}
 )
 TERMINAL_READINESS_STATES = frozenset({"reviewing", "reviewed", "superseded"})
+DEFAULT_REVIEWING_STALE_MINUTES = 15
 
 add_excluded_repo = _exclusions.add_excluded_repo
 add_exclusion_rule = _exclusions.add_exclusion_rule
@@ -161,6 +162,12 @@ def _audit_event_to_dict(row: ProfileAuditEventRow) -> dict[str, Any]:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+
+def _ensure_aware(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 def _default_profile_settings() -> dict[str, Any]:
@@ -1167,7 +1174,9 @@ async def list_active_readiness_candidates(
         return [_candidate_to_dict(row) for row in rows]
 
 
-async def list_recoverable_readiness_candidates(*, limit: int = 100) -> list[dict[str, Any]]:
+async def list_recoverable_readiness_candidates(
+    *, limit: int = 100, reviewing_stale_minutes: int = DEFAULT_REVIEWING_STALE_MINUTES
+) -> list[dict[str, Any]]:
     recoverable_reasons = (
         "",
         "quiet_period",
@@ -1179,18 +1188,98 @@ async def list_recoverable_readiness_candidates(*, limit: int = 100) -> list[dic
         "platform_error",
         "platform_access_error",
         "status_write_failed",
+        "review_worker_stale",
     )
+    stale_cutoff = _now() - timedelta(minutes=reviewing_stale_minutes)
     async with async_session() as session:
         rows = (
             await session.scalars(
                 select(ReadinessCandidateRow)
-                .where(ReadinessCandidateRow.state.in_(("waiting", "blocked", "error")))
-                .where(ReadinessCandidateRow.reason.in_(recoverable_reasons))
+                .where(
+                    (
+                        ReadinessCandidateRow.state.in_(("waiting", "blocked", "error"))
+                        & ReadinessCandidateRow.reason.in_(recoverable_reasons)
+                    )
+                    | (
+                        (ReadinessCandidateRow.state == "reviewing")
+                        & (ReadinessCandidateRow.updated_at < stale_cutoff)
+                    )
+                )
                 .order_by(ReadinessCandidateRow.updated_at.asc())
                 .limit(limit)
             )
         ).all()
         return [_candidate_to_dict(row) for row in rows]
+
+
+async def recover_stale_reviewing_candidate(
+    candidate_id: uuid.UUID,
+    *,
+    source: str,
+    actor: str = "guardian",
+    stale_after_minutes: int = DEFAULT_REVIEWING_STALE_MINUTES,
+) -> dict[str, Any] | None:
+    """Move an abandoned reviewing candidate back into the recoverable pool.
+
+    Active reviews heartbeat by touching the linked candidate whenever their
+    stage advances. If that heartbeat expires, the process probably died; mark
+    the abandoned review row failed, then let the reconciler evaluate and claim
+    the candidate again.
+    """
+    now = _now()
+    cutoff = now - timedelta(minutes=stale_after_minutes)
+    async with async_session() as session:
+        candidate = await session.get(ReadinessCandidateRow, candidate_id)
+        if candidate is None:
+            return None
+        candidate_updated_at = _ensure_aware(candidate.updated_at)
+        if candidate.state != "reviewing" or candidate_updated_at >= cutoff:
+            return _candidate_to_dict(candidate)
+
+        error = f"Review worker heartbeat expired after {stale_after_minutes} minutes"
+        open_reviews = (
+            await session.scalars(
+                select(ReviewRow)
+                .where(ReviewRow.candidate_id == candidate_id)
+                .where(ReviewRow.finished_at.is_(None))
+            )
+        ).all()
+        for review in open_reviews:
+            review.stage = "error"
+            review.stage_detail = error
+            review.decision = "error"
+            review.finished_at = now
+            if review.started_at:
+                review.duration_ms = int(
+                    (now - _ensure_aware(review.started_at)).total_seconds() * 1000
+                )
+
+        snapshot = {
+            **(candidate.readiness_snapshot or {}),
+            "stale_review": {
+                "detected_at": now.isoformat(),
+                "stale_after_minutes": stale_after_minutes,
+                "previous_updated_at": candidate_updated_at.isoformat(),
+                "failed_review_ids": [str(review.id) for review in open_reviews],
+            },
+        }
+        transition = ReadinessCandidateTransitionRow(
+            candidate_id=candidate_id,
+            from_state=candidate.state,
+            to_state="error",
+            source=source,
+            actor=actor,
+            reason="review_worker_stale",
+            readiness_snapshot=snapshot,
+        )
+        candidate.state = "error"
+        candidate.reason = "review_worker_stale"
+        candidate.readiness_snapshot = snapshot
+        candidate.updated_at = now
+        session.add(transition)
+        await session.commit()
+        await session.refresh(candidate)
+        return _candidate_to_dict(candidate)
 
 
 async def record_candidate_transition(
@@ -1462,8 +1551,13 @@ async def update_review_stage(review_id: uuid.UUID, stage: str, detail: str = ""
     async with async_session() as session:
         row = await session.get(ReviewRow, review_id)
         if row:
+            now = _now()
             row.stage = stage
             row.stage_detail = detail
+            if row.candidate_id is not None and row.finished_at is None:
+                candidate = await session.get(ReadinessCandidateRow, row.candidate_id)
+                if candidate is not None and candidate.state == "reviewing":
+                    candidate.updated_at = now
             await session.commit()
 
 
@@ -1522,7 +1616,9 @@ async def mark_review_failed(
             if pipeline_log is not None:
                 row.pipeline_log = pipeline_log
             if row.started_at:
-                row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
+                row.duration_ms = int(
+                    (now - _ensure_aware(row.started_at)).total_seconds() * 1000
+                )
             await session.commit()
 
 
@@ -1562,7 +1658,9 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.stage = "complete"
         row.finished_at = now
         if row.started_at:
-            row.duration_ms = int((now - row.started_at).total_seconds() * 1000)
+            row.duration_ms = int(
+                (now - _ensure_aware(row.started_at)).total_seconds() * 1000
+            )
 
         # Mechanical results
         for mech in result.mechanical_results:

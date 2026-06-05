@@ -650,3 +650,20 @@ class TestCommentWithTrustTier:
         )
         comment = build_summary_comment(result)
         assert "Trust" not in comment
+
+    def test_comment_includes_review_deeplink_and_rereview_tag_guidance(self):
+        from pr_guardian.models.output import ReviewResult
+
+        result = ReviewResult(
+            pr_id="1",
+            repo="test",
+            risk_tier=RiskTier.LOW,
+            repo_risk_class=RepoRiskClass.STANDARD,
+            decision=Decision.HUMAN_REVIEW,
+            review_id="review-123",
+        )
+
+        comment = build_summary_comment(result, base_url="https://guardian.example")
+
+        assert "https://guardian.example/reviews/review-123" in comment
+        assert "`@pr-guardian re-review`" in comment

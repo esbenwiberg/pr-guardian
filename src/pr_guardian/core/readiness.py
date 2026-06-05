@@ -18,8 +18,10 @@ log = structlog.get_logger()
 DEFAULT_QUIET_PERIOD_SECONDS = 10
 DEFAULT_MAX_WAIT_MINUTES = 30
 DEFAULT_ARCHMAP_MAX_WAIT_MINUTES = 10
+DEFAULT_REVIEWING_STALE_MINUTES = 15
 
-TERMINAL_CANDIDATE_STATES = {"reviewing", "reviewed", "superseded"}
+TERMINAL_CANDIDATE_STATES = {"reviewed", "superseded"}
+ACTIVE_CANDIDATE_STATES = {"reviewing"}
 RECOVERABLE_BLOCK_REASONS = {"checks_failed", "checks_timeout"}
 GUARDIAN_STATUS_NAMES = {"guardian/readiness", "guardian/review", "pr-guardian"}
 SUCCESS_STATES = {"success", "succeeded", "neutral", "skipped"}
@@ -54,9 +56,12 @@ def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
     try:
-        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 def _readiness_settings(profile: dict[str, Any] | None) -> dict[str, Any]:
@@ -162,16 +167,33 @@ async def _post_readiness_status(
 
 async def _post_review_pending(adapter: PlatformAdapter, pr: PlatformPR) -> None:
     """Post guardian/review = pending immediately so merge is blocked from PR open."""
+    await _post_review_status(adapter, pr, "pending", "Guardian review pending")
+
+
+async def _post_review_status(
+    adapter: PlatformAdapter, pr: PlatformPR, state: str, description: str
+) -> None:
     try:
         method = getattr(adapter, "set_review_status", None)
         if method is not None:
-            await method(pr, "pending", "Guardian review pending")
+            await method(pr, state, description)
         else:
-            await adapter.set_status(
-                pr, "pending", "Guardian review pending", context="guardian/review"
-            )
+            await adapter.set_status(pr, state, description, context="guardian/review")
     except Exception as exc:
-        log.warning("review_pending_status_write_failed", pr_id=pr.pr_id, error=str(exc))
+        log.warning(
+            "review_status_write_failed",
+            pr_id=pr.pr_id,
+            state=state,
+            description=description,
+            error=str(exc),
+        )
+
+
+def _candidate_reviewing_stale(candidate: dict[str, Any], now: datetime) -> bool:
+    updated_at = _parse_dt(candidate.get("updated_at"))
+    if updated_at is None:
+        return True
+    return now >= updated_at + timedelta(minutes=DEFAULT_REVIEWING_STALE_MINUTES)
 
 
 async def create_or_update_candidate_from_pr(
@@ -179,6 +201,7 @@ async def create_or_update_candidate_from_pr(
     *,
     source: str = "webhook",
     adapter: PlatformAdapter | None = None,
+    base_url: str = "",
 ) -> dict[str, Any] | None:
     """Create/update a candidate for an exact opted-in repo and evaluate it."""
     link = await storage.get_active_repo_link_for_repo(
@@ -237,7 +260,7 @@ async def create_or_update_candidate_from_pr(
     if is_new:
         await _post_review_pending(adapter, pr)
     return await evaluate_candidate(
-        uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr
+        uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url
     )
 
 
@@ -288,12 +311,25 @@ async def evaluate_candidate(
     adapter: PlatformAdapter | None = None,
     pr: PlatformPR | None = None,
     start_review: bool = True,
+    base_url: str = "",
 ) -> dict[str, Any]:
     candidate = await storage.get_readiness_candidate_by_id(candidate_id)
     if candidate is None:
         raise LookupError(f"Readiness candidate not found: {candidate_id}")
     if candidate["state"] in TERMINAL_CANDIDATE_STATES:
         return candidate
+    if candidate["state"] in ACTIVE_CANDIDATE_STATES:
+        if not _candidate_reviewing_stale(candidate, _now()):
+            return candidate
+        recovered = await storage.recover_stale_reviewing_candidate(
+            candidate_id,
+            source=source,
+            actor="reconciler" if source == "reconciler" else source,
+            stale_after_minutes=DEFAULT_REVIEWING_STALE_MINUTES,
+        )
+        if recovered is None:
+            raise LookupError(f"Readiness candidate not found after stale recovery: {candidate_id}")
+        candidate = recovered
 
     link = await storage.get_repo_link(uuid.UUID(candidate["repo_link_id"]))
     profile = (
@@ -345,7 +381,9 @@ async def evaluate_candidate(
         else:
             decision = ReadinessDecision("error", "status_write_failed", augmented)
     if decision.ready and start_review:
-        started = await _start_automatic_review(candidate_id, pr, adapter, source, decision)
+        started = await _start_automatic_review(
+            candidate_id, pr, adapter, source, decision, base_url=base_url
+        )
         if started is not None:
             return started
         updated = await storage.get_readiness_candidate_by_id(candidate_id)
@@ -383,6 +421,8 @@ async def _start_automatic_review(
     adapter: PlatformAdapter,
     source: str,
     decision: ReadinessDecision,
+    *,
+    base_url: str = "",
 ) -> dict[str, Any] | None:
     started = await storage.try_start_candidate_review(
         candidate_id,
@@ -414,8 +454,27 @@ async def _start_automatic_review(
                 existing_review_db_id=review_id,
                 comment_mode="inline",
                 manual_comment_override=True,
+                base_url=base_url,
             )
         except Exception as exc:  # noqa: BLE001
+            try:
+                await storage.mark_review_failed(
+                    review_id,
+                    f"Automatic review startup failed: {exc}",
+                )
+            except Exception as mark_exc:  # noqa: BLE001
+                log.warning(
+                    "automatic_candidate_review_mark_failed",
+                    candidate_id=str(candidate_id),
+                    review_id=str(review_id),
+                    error=str(mark_exc),
+                )
+            await _post_review_status(
+                adapter,
+                pr,
+                "failure",
+                "Guardian review failed before starting",
+            )
             log.error(
                 "automatic_candidate_review_failed",
                 candidate_id=str(candidate_id),

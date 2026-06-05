@@ -46,6 +46,7 @@ def _resp(json_data: dict | list, status_code: int = 200) -> MagicMock:
 def _adapter(*responses: MagicMock) -> GitHubAdapter:
     adapter = GitHubAdapter(token="test-token")
     mock_client = AsyncMock()
+    mock_client.post = AsyncMock()
     mock_client.get = AsyncMock(side_effect=list(responses))
     adapter._client = mock_client
     return adapter
@@ -54,6 +55,24 @@ def _adapter(*responses: MagicMock) -> GitHubAdapter:
 # ---------------------------------------------------------------------------
 # Happy-path
 # ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_set_review_status_links_to_guardian_review():
+    adapter = _adapter()
+    adapter._client.post.return_value = _resp({})
+
+    await adapter.set_review_status(
+        _pr(),
+        "failure",
+        "Guardian review requested changes",
+        target_url="https://guardian.example/reviews/abc",
+    )
+
+    adapter._client.post.assert_awaited_once()
+    payload = adapter._client.post.await_args.kwargs["json"]
+    assert payload["context"] == "guardian/review"
+    assert payload["target_url"] == "https://guardian.example/reviews/abc"
 
 
 @pytest.mark.asyncio

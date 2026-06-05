@@ -166,6 +166,7 @@ async def github_webhook(
     candidate = await readiness.create_or_update_candidate_from_pr(
         pr,
         source="github:pull_request",
+        base_url=str(request.base_url).rstrip("/"),
     )
     log.info("webhook_candidate_evaluated", platform="github", pr_id=pr.pr_id)
     return {"status": "candidate" if candidate else "ignored", "pr_id": pr.pr_id}
@@ -198,6 +199,7 @@ async def ado_webhook(request: Request):
     candidate = await readiness.create_or_update_candidate_from_pr(
         pr,
         source="ado:pullrequest",
+        base_url=str(request.base_url).rstrip("/"),
     )
     log.info("webhook_candidate_evaluated", platform="ado", pr_id=pr.pr_id)
     return {"status": "candidate" if candidate else "ignored", "pr_id": pr.pr_id}
