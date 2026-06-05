@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from pr_guardian.auth.dependencies import require_human_signed_in, require_profile_manager
 from pr_guardian.auth.identity import Identity
+from pr_guardian.decision.actions import build_review_detail_url
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 
@@ -901,6 +902,7 @@ def _build_summary_comment(
     verdict: str,
     *,
     include_fix_findings: bool = True,
+    review_url: str | None = None,
 ) -> str:
     """Compose the summary comment posted alongside the verdict."""
     headline = {
@@ -938,7 +940,14 @@ def _build_summary_comment(
             title = (f.get("description") or "(no description)").split("\n", 1)[0][:140]
             parts.append(f"- {title}" + (f" — `{where}`" if where else ""))
 
-    parts.append("_Posted from PR Guardian wrap-up._")
+    if review_url:
+        parts.append(f"_Posted from [PR Guardian wrap-up]({review_url})._")
+    else:
+        parts.append("_Posted from PR Guardian wrap-up._")
+    parts.append(
+        "After pushing fixes on GitHub, comment `@pr-guardian re-review` "
+        "to queue a focused re-review."
+    )
     return "\n\n".join(parts)
 
 
@@ -1009,6 +1018,7 @@ async def _adapter_from_review_connection(review: dict[str, Any]):
 async def finalize_review(
     review_id: str,
     body: FinalizeRequest,
+    request: Request,
     identity: Identity = Depends(require_human_signed_in),
 ):
     """Post the reviewer's decisions, comment, and verdict back to the platform.
@@ -1154,6 +1164,9 @@ async def finalize_review(
                 body.comment_to_author,
                 body.verdict,
                 include_fix_findings=include_fix_findings_in_summary,
+                review_url=build_review_detail_url(
+                    review_id, str(request.base_url).rstrip("/")
+                ),
             )
 
             # Summary + verdict.

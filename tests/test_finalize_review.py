@@ -334,6 +334,29 @@ def test_github_request_changes_422_falls_back_to_comment(client, monkeypatch):
     assert "Can not review your own pull request" in appended[0]["error"]
 
 
+def test_github_finalize_wrapup_comment_has_deeplink_and_rereview_help(client, monkeypatch):
+    review = _github_review()
+    adapter = _make_adapter()
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "summary",
+            "comment_to_author": "Please address this before merge.",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    adapter.request_changes.assert_awaited_once()
+    summary = adapter.request_changes.await_args.args[1]
+    assert f"http://testserver/reviews/{review['id']}" in summary
+    assert "PR Guardian wrap-up" in summary
+    assert "`@pr-guardian re-review`" in summary
+
+
 def test_finalize_inline_recovers_persisted_fix_decisions(client, monkeypatch):
     """The finish-review modal may send an empty decision map if the viewer
     state was stale; persisted will_fix choices must still produce inline
