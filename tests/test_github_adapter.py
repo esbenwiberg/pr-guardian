@@ -257,3 +257,64 @@ async def test_same_repo_non_fork_pr_is_not_fork():
     )
     metadata = await _adapter(_resp(data)).fetch_pr_metadata(_pr())
     assert metadata.fork is False
+
+
+# ---------------------------------------------------------------------------
+# Readiness signals: Checks API with Actions fallback for fine-grained PATs
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_readiness_signals_use_check_runs_when_readable():
+    """Classic PAT / GitHub App: the Checks API is readable, so check runs are used
+    directly and the Actions API is never touched."""
+    adapter = _adapter(
+        _resp({"check_runs": [{"name": "build", "status": "completed", "conclusion": "success"}]}),
+        _resp({"statuses": []}),
+    )
+    signals = await adapter.fetch_readiness_signals(_pr())
+    assert [(s.name, s.state, s.source) for s in signals] == [("build", "success", "check_run")]
+
+
+@pytest.mark.asyncio
+async def test_readiness_signals_fall_back_to_actions_when_checks_forbidden():
+    """Fine-grained PAT: check-runs 403s, so the adapter falls back to the Actions API
+    and surfaces workflow runs as check_run signals, plus any commit statuses."""
+    adapter = _adapter(
+        _resp({}, status_code=403),  # check-runs denied
+        _resp(  # actions/runs fallback
+            {
+                "workflow_runs": [
+                    {"name": "Build & Smoke", "status": "completed", "conclusion": "success"},
+                    {"name": "Lint", "status": "in_progress", "conclusion": None},
+                ]
+            }
+        ),
+        _resp({"statuses": [{"context": "legacy-ci", "state": "success"}]}),
+    )
+    signals = await adapter.fetch_readiness_signals(_pr())
+    assert ("Build & Smoke", "success", "check_run") in [(s.name, s.state, s.source) for s in signals]
+    assert ("Lint", "in_progress", "check_run") in [(s.name, s.state, s.source) for s in signals]
+    assert ("legacy-ci", "success", "status") in [(s.name, s.state, s.source) for s in signals]
+
+
+@pytest.mark.asyncio
+async def test_readiness_signals_degrade_to_statuses_when_actions_also_forbidden():
+    """Neither Checks nor Actions scope: degrade to commit-statuses-only rather than
+    wedge the whole gate."""
+    adapter = _adapter(
+        _resp({}, status_code=403),  # check-runs denied
+        _resp({}, status_code=403),  # actions/runs also denied
+        _resp({"statuses": [{"context": "legacy-ci", "state": "pending"}]}),
+    )
+    signals = await adapter.fetch_readiness_signals(_pr())
+    assert [(s.name, s.state, s.source) for s in signals] == [("legacy-ci", "pending", "status")]
+
+
+@pytest.mark.asyncio
+async def test_readiness_signals_propagate_non_auth_errors():
+    """A 500 on check-runs is a real platform error, not a permission gap — it must
+    propagate (surfacing as platform_error), never be silently swallowed."""
+    adapter = _adapter(_resp({}, status_code=500))
+    with pytest.raises(httpx.HTTPStatusError):
+        await adapter.fetch_readiness_signals(_pr())

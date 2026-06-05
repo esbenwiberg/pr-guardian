@@ -300,6 +300,12 @@ _VISIBLE_WAITING_CANDIDATE_REASONS = {
     "checks_pending",
     "archmap_wait",
 }
+# Error states are normally hidden as transient Guardian-side noise. A persistent
+# access error (auth/access/not-found on the repo) is the exception: it won't
+# self-heal and needs an operator to fix the connection, so it must be visible.
+_VISIBLE_ERROR_CANDIDATE_REASONS = {
+    "platform_access_error",
+}
 _HIDDEN_CANDIDATE_REASONS = {
     "draft",
     "platform_error",
@@ -341,6 +347,8 @@ def _candidate_visible(candidate: dict[str, Any]) -> bool:
         return reason in _VISIBLE_WAITING_CANDIDATE_REASONS
     if state == "blocked":
         return reason in _VISIBLE_BLOCKED_CANDIDATE_REASONS
+    if state == "error":
+        return reason in _VISIBLE_ERROR_CANDIDATE_REASONS
     return False
 
 

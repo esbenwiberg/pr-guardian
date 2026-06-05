@@ -11,6 +11,7 @@ from pr_guardian.core.readiness import (
     evaluate_candidate,
     evaluate_candidates_for_sha,
 )
+from pr_guardian.api.reviews_queue import _candidate_visible
 from pr_guardian.core.readiness_reconciler import reconcile_readiness_once
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
@@ -280,6 +281,59 @@ async def test_platform_error_posts_pending_not_failing_readiness_status():
             assert readiness_statuses, "expected guardian/readiness to be posted"
             assert all(state != "failure" for _, state, _ in readiness_statuses)
             assert readiness_statuses[-1][1] == "pending"
+    finally:
+        await engine.dispose()
+
+
+class _FakeHTTPError(Exception):
+    """Mimics httpx.HTTPStatusError: carries a .response with a status code."""
+
+    def __init__(self, status_code: int):
+        super().__init__(f"HTTP {status_code}")
+        self.response = type("Resp", (), {"status_code": status_code})()
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+async def test_persistent_access_error_is_distinct_and_visible(status):
+    """An auth/access/not-found failure won't self-heal by retrying — the credential
+    can't see the repo. It must get the distinct 'platform_access_error' reason (not
+    the transient 'platform_error' bucket) so the dashboard surfaces it for an
+    operator instead of hiding it as noise."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo({"readiness": {"quiet_period_seconds": 0, "max_wait_minutes": 30}})
+            adapter = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="boom"),
+                metadata_error=_FakeHTTPError(status),
+            )
+            candidate = await create_or_update_candidate_from_pr(_pr("boom"), adapter=adapter)
+
+            assert candidate is not None
+            assert candidate["state"] == "error"
+            assert candidate["reason"] == "platform_access_error"
+            assert candidate["readiness_snapshot"].get("error_status") == status
+            assert _candidate_visible(candidate) is True
+    finally:
+        await engine.dispose()
+
+
+async def test_transient_platform_error_stays_hidden():
+    """A non-HTTP failure (no status) is a transient Guardian-side blip — it keeps the
+    'platform_error' reason and stays hidden from the operator queue."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo({"readiness": {"quiet_period_seconds": 0, "max_wait_minutes": 30}})
+            adapter = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="boom"),
+                metadata_error=RuntimeError("github unreachable"),
+            )
+            candidate = await create_or_update_candidate_from_pr(_pr("boom"), adapter=adapter)
+
+            assert candidate is not None
+            assert candidate["reason"] == "platform_error"
+            assert _candidate_visible(candidate) is False
     finally:
         await engine.dispose()
 
