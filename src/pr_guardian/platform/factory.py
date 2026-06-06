@@ -56,7 +56,17 @@ async def create_github_adapter(connection_id_or_name: str | None = None) -> Git
             uid = uuid.UUID(connection_id_or_name)
             connection = await storage.get_connection(uid)
         except ValueError:
-            pass
+            # Not a UUID — search by name among GitHub App connections
+            all_connections = await storage.list_connections()
+            matched = [
+                c
+                for c in all_connections
+                if c.get("name") == connection_id_or_name
+                and c.get("platform") == "github"
+                and c.get("auth_kind") == "github_app"
+            ]
+            if matched:
+                connection = matched[0]
 
     if connection is None:
         connections = await storage.list_connections()

@@ -448,6 +448,19 @@ async def _sync_ado(pat: str, connection: dict[str, Any]) -> None:
         await adapter.close()
 
 
+async def _sync_github_guarded(connection: dict[str, Any]) -> None:
+    """Run _sync_github with per-connection error isolation and structured logging."""
+    try:
+        await _sync_github(connection)
+    except Exception as exc:
+        log.warning(
+            "pr_sync_github_connection_failed",
+            connection_id=connection.get("id", ""),
+            connection_name=connection.get("name", ""),
+            error=str(exc),
+        )
+
+
 async def run_pr_sync() -> None:
     """Single sync pass across all configured platforms."""
     tasks = []
@@ -463,7 +476,7 @@ async def run_pr_sync() -> None:
                     hint="Convert this connection to a GitHub App Connection",
                 )
                 continue
-            tasks.append(_sync_github(connection))
+            tasks.append(_sync_github_guarded(connection))
         elif platform == "ado":
             try:
                 token = await storage.get_connection_token(_connection_uuid(connection))

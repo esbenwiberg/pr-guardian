@@ -6,10 +6,13 @@ import time
 from collections.abc import AsyncGenerator, Callable, Coroutine
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import structlog
+
+if TYPE_CHECKING:
+    from pr_guardian.platform.github import GitHubAdapter
 
 log = structlog.get_logger()
 
@@ -125,7 +128,7 @@ class _InstallationBearerAuth(httpx.Auth):
         yield request
 
 
-async def build_github_adapter_from_connection(connection: dict) -> Any:
+async def build_github_adapter_from_connection(connection: dict) -> GitHubAdapter:
     """Resolve a GitHub App Connection into a configured GitHubAdapter.
 
     Raises ValueError if the connection is not a valid GitHub App connection.
