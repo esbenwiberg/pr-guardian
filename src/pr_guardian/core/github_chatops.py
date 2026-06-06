@@ -31,15 +31,18 @@ def _is_authorized(commenter: str, author_association: str, pr_author: str) -> b
 
 
 async def _fresh_adapter_for_review(review: dict[str, Any]) -> GitHubAdapter:
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
     connection_id = review.get("connection_id")
     if connection_id:
-        token = await storage.get_connection_token(uuid.UUID(str(connection_id)))
-        return GitHubAdapter(token=token or "")
+        connection = await storage.get_connection(uuid.UUID(str(connection_id)))
+        if connection is not None:
+            return await build_github_adapter_from_connection(connection)
 
-    snapshot = review.get("connection_snapshot") or {}
-    legacy_pat_name = snapshot.get("legacy_pat_name")
-    token = await storage.resolve_github_token(legacy_pat_name)
-    return GitHubAdapter(token=token)
+    raise ValueError(
+        f"No GitHub App Connection found for review {review.get('id')}; "
+        "GITHUB_TOKEN env fallback has been removed"
+    )
 
 
 async def _mark_command(

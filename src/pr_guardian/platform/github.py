@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+from typing import TYPE_CHECKING
 from zipfile import BadZipFile, ZipFile
 
 import httpx
@@ -16,6 +17,9 @@ from pr_guardian.platform.protocol import (
     PlatformPRMetadata,
     PlatformReadinessSignal,
 )
+
+if TYPE_CHECKING:
+    from pr_guardian.platform.github_auth import GitHubAppAuth
 
 log = structlog.get_logger()
 
@@ -60,25 +64,46 @@ def _extract_archmap_json(zip_bytes: bytes) -> str | None:
 
 
 class GitHubAdapter:
-    """GitHub platform adapter using REST API."""
+    """GitHub platform adapter using REST API.
 
-    def __init__(self, token: str = ""):
+    Accepts either:
+    - ``app_auth``: a GitHubAppAuth instance that mints installation tokens
+      (preferred for all runtime GitHub App paths).
+    - ``token``: a static PAT or test token (used in tests and legacy paths).
+
+    When ``app_auth`` is provided the HTTP client uses Bearer auth that calls
+    ``app_auth.get_token()`` on every request, transparently refreshing the
+    installation token before expiry.
+    """
+
+    def __init__(self, token: str = "", *, app_auth: GitHubAppAuth | None = None):
         self._token = token
+        self._app_auth = app_auth
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
+            from pr_guardian.platform.github_auth import _InstallationBearerAuth
+
             headers: dict[str, str] = {
                 "Accept": "application/vnd.github.v3+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             }
-            if self._token:
-                headers["Authorization"] = f"token {self._token}"
-            self._client = httpx.AsyncClient(
-                base_url="https://api.github.com",
-                headers=headers,
-                timeout=30.0,
-            )
+            if self._app_auth is not None:
+                self._client = httpx.AsyncClient(
+                    base_url="https://api.github.com",
+                    headers=headers,
+                    auth=_InstallationBearerAuth(self._app_auth.get_token),
+                    timeout=30.0,
+                )
+            else:
+                if self._token:
+                    headers["Authorization"] = f"token {self._token}"
+                self._client = httpx.AsyncClient(
+                    base_url="https://api.github.com",
+                    headers=headers,
+                    timeout=30.0,
+                )
         return self._client
 
     @staticmethod

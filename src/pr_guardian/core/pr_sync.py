@@ -210,10 +210,10 @@ async def _trigger_auto_review(pr: PlatformPR) -> None:
         )
 
 
-async def _sync_github(token: str, connection: dict[str, Any]) -> None:
-    from pr_guardian.platform.github import GitHubAdapter
+async def _sync_github(connection: dict[str, Any]) -> None:
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
 
-    adapter = GitHubAdapter(token=token)
+    adapter = await build_github_adapter_from_connection(connection)
     try:
         repos = await adapter.list_accessible_repos()
         log.info(
@@ -452,28 +452,38 @@ async def run_pr_sync() -> None:
     """Single sync pass across all configured platforms."""
     tasks = []
     for connection in await storage.list_broad_sync_connections():
-        try:
-            token = await storage.get_connection_token(_connection_uuid(connection))
-        except Exception as exc:
-            log.warning(
-                "pr_sync_connection_token_resolve_failed",
-                connection_id=connection.get("id", ""),
-                connection_name=connection.get("name", ""),
-                platform=connection.get("platform", ""),
-                error=str(exc),
-            )
-            continue
-        if not token:
-            log.warning(
-                "pr_sync_connection_missing_token",
-                connection_id=connection["id"],
-                connection_name=connection.get("name", ""),
-                platform=connection.get("platform", ""),
-            )
-            continue
-        if connection["platform"] == "github":
-            tasks.append(_sync_github(token, connection))
-        elif connection["platform"] == "ado":
+        platform = connection.get("platform", "")
+        if platform == "github":
+            if connection.get("auth_kind") != "github_app":
+                log.warning(
+                    "pr_sync_github_connection_not_app_skipped",
+                    connection_id=connection.get("id", ""),
+                    connection_name=connection.get("name", ""),
+                    auth_kind=connection.get("auth_kind"),
+                    hint="Convert this connection to a GitHub App Connection",
+                )
+                continue
+            tasks.append(_sync_github(connection))
+        elif platform == "ado":
+            try:
+                token = await storage.get_connection_token(_connection_uuid(connection))
+            except Exception as exc:
+                log.warning(
+                    "pr_sync_connection_token_resolve_failed",
+                    connection_id=connection.get("id", ""),
+                    connection_name=connection.get("name", ""),
+                    platform=platform,
+                    error=str(exc),
+                )
+                continue
+            if not token:
+                log.warning(
+                    "pr_sync_connection_missing_token",
+                    connection_id=connection["id"],
+                    connection_name=connection.get("name", ""),
+                    platform=platform,
+                )
+                continue
             if not connection.get("org_url"):
                 log.warning(
                     "pr_sync_ado_connection_missing_org",
