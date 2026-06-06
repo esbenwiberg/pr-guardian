@@ -137,3 +137,72 @@ async def test_expired_cache_entry_triggers_refresh():
         token = await auth.get_token()
         assert token == "fresh-token"
         assert mock_ctx.post.call_count == 1
+
+
+# ---------------------------------------------------------------------------
+# build_github_adapter_from_connection — error branch coverage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_build_adapter_raises_when_connection_has_no_id():
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+    with pytest.raises(ValueError, match="no id"):
+        await build_github_adapter_from_connection({})
+
+
+@pytest.mark.asyncio
+async def test_build_adapter_raises_for_non_app_auth_kind():
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+    with pytest.raises(ValueError, match="not a GitHub App connection"):
+        await build_github_adapter_from_connection({"id": "abc123", "auth_kind": None})
+
+
+@pytest.mark.asyncio
+async def test_build_adapter_raises_when_private_key_missing():
+    import uuid
+
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+    conn_id = str(uuid.uuid4())
+    with patch(
+        "pr_guardian.persistence.storage.get_connection_private_key",
+        new=AsyncMock(return_value=""),
+    ):
+        with pytest.raises(ValueError, match="no private key"):
+            await build_github_adapter_from_connection(
+                {
+                    "id": conn_id,
+                    "auth_kind": "github_app",
+                    "app_id": "12345",
+                    "installation_id": "98765",
+                }
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "missing_field,connection_extra",
+    [
+        ("app_id", {"app_id": "", "installation_id": "98765"}),
+        ("installation_id", {"app_id": "12345", "installation_id": ""}),
+    ],
+)
+async def test_build_adapter_raises_when_app_id_or_installation_id_missing(
+    missing_field: str, connection_extra: dict
+):
+    import uuid
+
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+    conn_id = str(uuid.uuid4())
+    with patch(
+        "pr_guardian.persistence.storage.get_connection_private_key",
+        new=AsyncMock(return_value=_test_rsa_pem()),
+    ):
+        with pytest.raises(ValueError, match="missing app_id or installation_id"):
+            await build_github_adapter_from_connection(
+                {"id": conn_id, "auth_kind": "github_app", **connection_extra}
+            )

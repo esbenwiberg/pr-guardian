@@ -57,22 +57,24 @@ async def create_github_adapter(connection_id_or_name: str | None = None) -> Git
             connection = await storage.get_connection(uid)
         except ValueError:
             # Not a UUID — search by name among GitHub App connections
-            all_connections = await storage.list_connections()
             matched = [
                 c
-                for c in all_connections
+                for c in await storage.list_connections()
                 if c.get("name") == connection_id_or_name
                 and c.get("platform") == "github"
                 and c.get("auth_kind") == "github_app"
             ]
             if matched:
                 connection = matched[0]
-
-    if connection is None:
-        connections = await storage.list_connections()
+        if connection is None:
+            raise ValueError(
+                f"No GitHub App Connection found with id or name {connection_id_or_name!r}. "
+                "GITHUB_TOKEN env fallback has been removed."
+            )
+    else:
         app_connections = [
             c
-            for c in connections
+            for c in await storage.list_connections()
             if c.get("platform") == "github" and c.get("auth_kind") == "github_app"
         ]
         if not app_connections:
