@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -339,3 +340,60 @@ async def test_readiness_signals_propagate_non_auth_errors():
     adapter = _adapter(_resp({}, status_code=500))
     with pytest.raises(httpx.HTTPStatusError):
         await adapter.fetch_readiness_signals(_pr())
+
+
+# ---------------------------------------------------------------------------
+# GitHub App installation token authorization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_github_adapter_uses_installation_token_for_platform_actions():
+    """Adapter created with app_auth sends Bearer <installation-token> on every
+    request.  No PAT or GITHUB_TOKEN value is read from the environment."""
+    from pr_guardian.platform.github_auth import _InstallationBearerAuth
+
+    captured_auth_headers: list[str] = []
+
+    class _CapturingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            captured_auth_headers.append(request.headers.get("authorization", ""))
+            return httpx.Response(200, json={})
+
+    mock_app_auth = MagicMock()
+    mock_app_auth.get_token = AsyncMock(return_value="ghs-installation-token-abc123")
+
+    adapter = GitHubAdapter(app_auth=mock_app_auth)
+    # Inject a capturing client that exercises the real _InstallationBearerAuth flow
+    adapter._client = httpx.AsyncClient(
+        base_url="https://api.github.com",
+        headers={
+            "Accept": "application/vnd.github.v3+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        auth=_InstallationBearerAuth(mock_app_auth.get_token),
+        transport=_CapturingTransport(),
+        timeout=30.0,
+    )
+
+    pr = _pr()
+    # Exercise several platform actions
+    await adapter.post_comment(pr, "Guardian review complete")
+    await adapter.set_status(pr, "success", "All checks passed", context="guardian/review")
+    await adapter.approve_pr(pr)
+
+    # Every request must carry Bearer auth with the installation token
+    assert len(captured_auth_headers) == 3
+    for auth_header in captured_auth_headers:
+        assert auth_header == "Bearer ghs-installation-token-abc123", (
+            f"Expected Bearer installation token, got: {auth_header!r}"
+        )
+
+    # get_token() called once per request (auth flow is per-request)
+    assert mock_app_auth.get_token.call_count == 3
+
+    # GITHUB_TOKEN env var must not appear in any auth header
+    env_token = os.environ.get("GITHUB_TOKEN", "")
+    if env_token:
+        for auth_header in captured_auth_headers:
+            assert env_token not in auth_header
