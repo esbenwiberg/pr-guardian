@@ -457,6 +457,11 @@ async def create_connection(
 ):
     try:
         if body.platform == "github":
+            if body.sync_enabled:
+                raise HTTPException(
+                    400,
+                    "GitHub App connections must be validated healthy before enabling sync",
+                )
             # GitHub App Connection: store encrypted credentials; runtime validation in Brief 02
             return await storage.create_connection(
                 body.name,

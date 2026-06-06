@@ -103,7 +103,8 @@ def _private_key_fingerprint(pem: str) -> str:
 def _secretish_key(key: str) -> bool:
     lowered = key.lower()
     if any(
-        marker in lowered for marker in ("token", "secret", "password", "api_key", "private_key")
+        marker in lowered
+        for marker in ("token", "secret", "password", "api_key", "encrypted_private")
     ):
         return True
     return lowered in {"pat", "authorization"} or lowered.endswith("_pat")
