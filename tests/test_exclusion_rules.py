@@ -403,19 +403,25 @@ class TestSyncTimeFilter:
             "id": "11111111-1111-1111-1111-111111111111",
             "name": "GitHub Browse",
             "platform": "github",
+            "auth_kind": "github_app",
+            "app_id": "12345",
+            "installation_id": "98765",
             "org_url": None,
             "sync_enabled": True,
             "health_status": "healthy",
         }
 
         with (
-            patch("pr_guardian.platform.github.GitHubAdapter", return_value=adapter),
+            patch(
+                "pr_guardian.platform.github_auth.build_github_adapter_from_connection",
+                AsyncMock(return_value=adapter),
+            ),
             patch(
                 "pr_guardian.core.pr_sync.storage.list_exclusion_rules",
                 AsyncMock(return_value=rules),
             ),
         ):
-            await pr_sync._sync_github("token-xyz", connection)
+            await pr_sync._sync_github(connection)
 
         # Exclusions are browse-only; sync still records what the Connection can see.
         called_repos = [c.args[0] for c in adapter.list_repo_open_prs.call_args_list]
@@ -430,6 +436,8 @@ class TestSyncTimeFilter:
 
 class TestMultiPatSync:
     async def test_run_pr_sync_iterates_healthy_sync_connections(self, monkeypatch):
+        """run_pr_sync calls _sync_github for each healthy GitHub App connection
+        and _sync_ado (with token) for each healthy ADO connection."""
         from pr_guardian.core import pr_sync
 
         monkeypatch.setenv("GITHUB_TOKEN", "env-token-must-not-sync")
@@ -441,6 +449,7 @@ class TestMultiPatSync:
                 "id": "11111111-1111-1111-1111-111111111111",
                 "name": "org-a",
                 "platform": "github",
+                "auth_kind": "github_app",
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
@@ -448,6 +457,7 @@ class TestMultiPatSync:
                 "id": "22222222-2222-2222-2222-222222222222",
                 "name": "org-b",
                 "platform": "github",
+                "auth_kind": "github_app",
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
@@ -461,19 +471,17 @@ class TestMultiPatSync:
             },
         ]
         token_map = {
-            "11111111-1111-1111-1111-111111111111": "tok-a",
-            "22222222-2222-2222-2222-222222222222": "tok-b",
             "33333333-3333-3333-3333-333333333333": "ado-token",
         }
 
         async def _token(connection_id):
-            return token_map[str(connection_id)]
+            return token_map.get(str(connection_id), "")
 
-        github_tokens: list[str] = []
+        github_connection_ids: list[str] = []
         ado_tokens: list[str] = []
 
-        async def _fake_sync_github(token, connection):
-            github_tokens.append(token)
+        async def _fake_sync_github(connection):
+            github_connection_ids.append(connection["id"])
 
         async def _fake_sync_ado(token, connection):
             ado_tokens.append(token)
@@ -489,7 +497,10 @@ class TestMultiPatSync:
         ):
             await pr_sync.run_pr_sync()
 
-        assert sorted(github_tokens) == ["tok-a", "tok-b"]
+        assert sorted(github_connection_ids) == [
+            "11111111-1111-1111-1111-111111111111",
+            "22222222-2222-2222-2222-222222222222",
+        ]
         assert ado_tokens == ["ado-token"]
 
     async def test_run_pr_sync_does_not_fall_back_to_env(self, monkeypatch):
@@ -499,10 +510,10 @@ class TestMultiPatSync:
         monkeypatch.setenv("ADO_PAT", "ado-env-token")
         monkeypatch.setenv("ADO_ORG_URL", "https://dev.azure.com/env")
 
-        called_tokens: list[str] = []
+        github_syncs: list[dict] = []
 
-        async def _fake_sync_github(token, connection):
-            called_tokens.append(token)
+        async def _fake_sync_github(connection):
+            github_syncs.append(connection)
 
         with (
             patch(
@@ -513,9 +524,11 @@ class TestMultiPatSync:
         ):
             await pr_sync.run_pr_sync()
 
-        assert called_tokens == []
+        assert github_syncs == []
 
-    async def test_run_pr_sync_skips_connections_with_missing_or_broken_tokens(self, monkeypatch):
+    async def test_run_pr_sync_skips_github_connections_without_app_auth(self, monkeypatch):
+        """GitHub connections without auth_kind='github_app' are skipped with a warning.
+        ADO connections still use token resolution and skip on missing/broken tokens."""
         from pr_guardian.core import pr_sync
 
         monkeypatch.delenv("GITHUB_TOKEN", raising=False)
@@ -525,47 +538,53 @@ class TestMultiPatSync:
         connections = [
             {
                 "id": "11111111-1111-1111-1111-111111111111",
-                "name": "good",
+                "name": "github-app-good",
                 "platform": "github",
+                "auth_kind": "github_app",
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
             {
                 "id": "22222222-2222-2222-2222-222222222222",
-                "name": "missing-token",
+                "name": "github-legacy-pat",
                 "platform": "github",
+                "auth_kind": None,  # PAT shape — must be skipped
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
             {
                 "id": "33333333-3333-3333-3333-333333333333",
-                "name": "broken-token",
-                "platform": "github",
+                "name": "ado-good",
+                "platform": "ado",
+                "org_url": "https://dev.azure.com/acme",
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
             {
                 "id": "44444444-4444-4444-4444-444444444444",
-                "name": "late-good",
-                "platform": "github",
+                "name": "ado-missing-token",
+                "platform": "ado",
+                "org_url": "https://dev.azure.com/acme",
                 "sync_enabled": True,
                 "health_status": "healthy",
             },
         ]
 
         async def _token(connection_id):
-            if str(connection_id) == "22222222-2222-2222-2222-222222222222":
+            if str(connection_id) == "44444444-4444-4444-4444-444444444444":
                 return ""
             if str(connection_id) == "33333333-3333-3333-3333-333333333333":
-                raise RuntimeError("cannot decrypt token")
-            if str(connection_id) == "44444444-4444-4444-4444-444444444444":
-                return "tok-late-good"
-            return "tok-good"
+                return "ado-tok"
+            return ""
 
-        called_tokens: list[str] = []
+        github_synced: list[str] = []
+        ado_synced: list[str] = []
 
-        async def _fake_sync_github(token, connection):
-            called_tokens.append(token)
+        async def _fake_sync_github(connection):
+            github_synced.append(connection["id"])
+
+        async def _fake_sync_ado(token, connection):
+            ado_synced.append(token)
 
         with (
             patch(
@@ -574,7 +593,11 @@ class TestMultiPatSync:
             ),
             patch("pr_guardian.core.pr_sync.storage.get_connection_token", side_effect=_token),
             patch("pr_guardian.core.pr_sync._sync_github", side_effect=_fake_sync_github),
+            patch("pr_guardian.core.pr_sync._sync_ado", side_effect=_fake_sync_ado),
         ):
             await pr_sync.run_pr_sync()
 
-        assert called_tokens == ["tok-good", "tok-late-good"]
+        # Only the GitHub App connection is synced; PAT connection is skipped
+        assert github_synced == ["11111111-1111-1111-1111-111111111111"]
+        # ADO with good token is synced; ADO with missing token is skipped
+        assert ado_synced == ["ado-tok"]
