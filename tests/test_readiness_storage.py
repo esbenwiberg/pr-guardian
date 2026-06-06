@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import patch
 
+import uuid as _uuid
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -336,7 +338,14 @@ sa.Table(
 
 
 async def _make_session_factory():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # Use a unique named shared-memory database so multiple connections share the
+    # same data (needed when background tasks open their own sessions) while each
+    # connection gets its own transaction (unlike StaticPool which reuses one
+    # connection and causes rollback interference between concurrent sessions).
+    db_name = f"testdb_{_uuid.uuid4().hex}"
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///file:{db_name}?mode=memory&cache=shared&uri=true",
+    )
     async with engine.begin() as conn:
         await conn.run_sync(_meta.create_all)
     return engine, async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
