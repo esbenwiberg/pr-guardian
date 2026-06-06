@@ -68,9 +68,7 @@ class GitHubAppAuth:
             self._creds.private_key_pem.encode(), password=None
         )
         if not isinstance(key, RSAPrivateKey):
-            raise TypeError(
-                f"GitHub App private key must be RSA; got {type(key).__name__}"
-            )
+            raise TypeError(f"GitHub App private key must be RSA; got {type(key).__name__}")
         signature = key.sign(message, padding.PKCS1v15(), hashes.SHA256())
         return f"{header_b64}.{payload_b64}.{_b64url(signature)}"
 
