@@ -52,7 +52,6 @@ def test_profile_manager_can_create_connection_profile_and_repo_link():
         with (
             patch("pr_guardian.auth.identity._db_available", return_value=True),
             patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
-            patch("pr_guardian.api.profiles._probe_connection", _healthy_probe),
             TestClient(app, raise_server_exceptions=False) as client,
         ):
             connection_response = client.post(
@@ -61,14 +60,30 @@ def test_profile_manager_can_create_connection_profile_and_repo_link():
                 json={
                     "name": "Org GitHub",
                     "platform": "github",
-                    "token": "ghp_fixture_profile_manager_can_link_repo",
+                    "app_id": "12345",
+                    "private_key": "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJfixture\n-----END RSA PRIVATE KEY-----",
+                    "installation_id": "98765",
+                    "installation_account": "octo",
                     "sync_enabled": False,
                 },
             )
             assert connection_response.status_code == 201, connection_response.text
             connection = connection_response.json()
-            assert connection["health_status"] == "healthy"
+            assert connection["auth_kind"] == "github_app"
             assert "token" not in connection
+            assert "private_key" not in connection
+
+            # GitHub App connections start as "unknown" until Brief 02 installs auth adapter.
+            # Manually mark healthy so the repo link can be created.
+            async def mark_healthy() -> None:
+                with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+                    await storage.update_connection(
+                        __import__("uuid").UUID(connection["id"]),
+                        health_status="healthy",
+                        health_message="fixture healthy",
+                    )
+
+            asyncio.run(mark_healthy())
 
             profile_response = client.post(
                 "/api/profiles/profiles",
@@ -111,8 +126,8 @@ def test_profile_manager_can_create_connection_profile_and_repo_link():
 
 
 def test_profile_audit_diffs_redact_connection_secrets():
-    raw_token = "ghp_raw_secret_token_for_audit_create"
-    replacement_token = "ghp_raw_secret_token_for_audit_update"
+    raw_private_key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA_RAW_FIXTURE_KEY\n-----END RSA PRIVATE KEY-----"
+    replacement_private_key = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA_REPLACEMENT_FIXTURE\n-----END RSA PRIVATE KEY-----"
     engine, factory = asyncio.run(_make_session_factory())
     try:
 
@@ -124,13 +139,17 @@ def test_profile_audit_diffs_redact_connection_secrets():
         with (
             patch("pr_guardian.auth.identity._db_available", return_value=True),
             patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
-            patch("pr_guardian.api.profiles._probe_connection", _healthy_probe),
             TestClient(app, raise_server_exceptions=False) as client,
         ):
             created = client.post(
                 "/api/profiles/connections",
                 headers=_manager_headers(),
-                json={"name": "Audit GitHub", "platform": "github", "token": raw_token},
+                json={
+                    "name": "Audit GitHub",
+                    "platform": "github",
+                    "app_id": "12345",
+                    "private_key": raw_private_key,
+                },
             )
             assert created.status_code == 201, created.text
             connection_id = created.json()["id"]
@@ -138,10 +157,10 @@ def test_profile_audit_diffs_redact_connection_secrets():
             updated = client.patch(
                 f"/api/profiles/connections/{connection_id}",
                 headers=_manager_headers(),
-                json={"token": replacement_token},
+                json={"private_key": replacement_private_key},
             )
             assert updated.status_code == 200, updated.text
-            assert replacement_token not in updated.text
+            assert replacement_private_key not in updated.text
 
             audit = client.get(
                 "/api/profiles/audit",
@@ -150,16 +169,15 @@ def test_profile_audit_diffs_redact_connection_secrets():
             )
             assert audit.status_code == 200, audit.text
             audit_text = json.dumps(audit.json())
-            assert raw_token not in audit_text
-            assert replacement_token not in audit_text
+            assert raw_private_key not in audit_text
+            assert replacement_private_key not in audit_text
             update_event = next(
                 event
                 for event in audit.json()
-                if event["action"] == "connection.updated" and "token_secret" in event["diff"]
+                if event["action"] == "connection.updated"
+                and "private_key_secret" in event["diff"]
             )
-            assert "token_secret" in update_event["diff"]
-            if "token_prefix" in update_event["diff"]:
-                assert "ghp_raw_secret" not in json.dumps(update_event["diff"]["token_prefix"])
+            assert "private_key_secret" in update_event["diff"]
             assert update_event["actor"] == "manager@example.com"
             assert update_event["target_id"] == connection_id
     finally:
@@ -188,6 +206,68 @@ def test_api_keys_cannot_manage_profile_managers_or_report_profile_capability():
                 json={"email": "new-manager@example.com"},
             )
             assert managers.status_code == 403
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_github_connections_reject_token_credentials_and_hide_env_import():
+    """
+    fact-github-token-import-removed
+
+    GitHub Connection payloads must reject token-only credentials.
+    The env-imports endpoint must not offer GITHUB_TOKEN.
+    """
+    engine, factory = asyncio.run(_make_session_factory())
+    try:
+
+        async def seed_manager() -> None:
+            with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+                await storage.add_profile_manager("manager@example.com")
+
+        asyncio.run(seed_manager())
+        with (
+            patch("pr_guardian.auth.identity._db_available", return_value=True),
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            # Token-only GitHub Connection must be rejected
+            token_only_response = client.post(
+                "/api/profiles/connections",
+                headers=_manager_headers(),
+                json={
+                    "name": "Bad GitHub PAT",
+                    "platform": "github",
+                    "token": "ghp_should_be_rejected",
+                },
+            )
+            assert token_only_response.status_code == 400, token_only_response.text
+            assert (
+                "app_id" in token_only_response.text or "token" in token_only_response.text.lower()
+            )
+
+            # GitHub Connection missing app_id must be rejected
+            no_app_id_response = client.post(
+                "/api/profiles/connections",
+                headers=_manager_headers(),
+                json={
+                    "name": "Incomplete GitHub App",
+                    "platform": "github",
+                    "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfake\n-----END RSA PRIVATE KEY-----",
+                },
+            )
+            assert no_app_id_response.status_code == 400, no_app_id_response.text
+
+            # env-imports must NOT include GITHUB_TOKEN
+            with patch.dict("os.environ", {"GITHUB_TOKEN": "ghp_should_not_appear"}):
+                env_response = client.get(
+                    "/api/profiles/connections/env-imports",
+                    headers=_manager_headers(),
+                )
+            assert env_response.status_code == 200, env_response.text
+            env_data = env_response.json()
+            assert "GITHUB_TOKEN" not in env_data
+            # ADO env imports still present
+            assert "ADO_PAT" in env_data
     finally:
         asyncio.run(engine.dispose())
 

@@ -509,8 +509,9 @@ async def test_inline_mode_posts_summary_after_inline():
     adapter = _mock_adapter()
     call_order: list[str] = []
     adapter.post_inline_comments = AsyncMock(
-        side_effect=lambda *a, **kw: call_order.append("inline")
-        or InlinePostResult(posted_ids=["id-1"], skipped=[])
+        side_effect=lambda *a, **kw: (
+            call_order.append("inline") or InlinePostResult(posted_ids=["id-1"], skipped=[])
+        )
     )
     adapter.post_comment = AsyncMock(side_effect=lambda *a, **kw: call_order.append("summary"))
     storage = _mock_storage()
@@ -569,8 +570,9 @@ async def test_inline_rereview_deletes_before_posting():
         side_effect=lambda *a, **kw: call_order.append("delete")
     )
     adapter.post_inline_comments = AsyncMock(
-        side_effect=lambda *a, **kw: call_order.append("post")
-        or InlinePostResult(posted_ids=["new-1"], skipped=[])
+        side_effect=lambda *a, **kw: (
+            call_order.append("post") or InlinePostResult(posted_ids=["new-1"], skipped=[])
+        )
     )
 
     original_review_id = str(_uuid.uuid4())

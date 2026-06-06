@@ -298,7 +298,11 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
 
     # Start a new review in the background
     try:
-        bg_adapter = await _create_adapter_for_resolution(platform_name, resolved_profile) if resolved_profile else create_adapter(platform_name)
+        bg_adapter = (
+            await _create_adapter_for_resolution(platform_name, resolved_profile)
+            if resolved_profile
+            else create_adapter(platform_name)
+        )
         base_url = str(request.base_url)
         asyncio.create_task(
             _run_review_background(

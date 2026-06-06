@@ -1164,9 +1164,7 @@ async def finalize_review(
                 body.comment_to_author,
                 body.verdict,
                 include_fix_findings=include_fix_findings_in_summary,
-                review_url=build_review_detail_url(
-                    review_id, str(request.base_url).rstrip("/")
-                ),
+                review_url=build_review_detail_url(review_id, str(request.base_url).rstrip("/")),
             )
 
             # Summary + verdict.

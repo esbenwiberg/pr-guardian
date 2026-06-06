@@ -328,7 +328,9 @@ async def evaluate_candidate(
             stale_after_minutes=DEFAULT_REVIEWING_STALE_MINUTES,
         )
         if recovered is None:
-            raise LookupError(f"Readiness candidate not found after stale recovery: {candidate_id}")
+            raise LookupError(
+                f"Readiness candidate not found after stale recovery: {candidate_id}"
+            )
         candidate = recovered
 
     link = await storage.get_repo_link(uuid.UUID(candidate["repo_link_id"]))

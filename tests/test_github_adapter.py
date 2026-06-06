@@ -312,7 +312,9 @@ async def test_readiness_signals_fall_back_to_actions_when_checks_forbidden():
         _resp({"statuses": [{"context": "legacy-ci", "state": "success"}]}),
     )
     signals = await adapter.fetch_readiness_signals(_pr())
-    assert ("Build & Smoke", "success", "check_run") in [(s.name, s.state, s.source) for s in signals]
+    assert ("Build & Smoke", "success", "check_run") in [
+        (s.name, s.state, s.source) for s in signals
+    ]
     assert ("Lint", "in_progress", "check_run") in [(s.name, s.state, s.source) for s in signals]
     assert ("legacy-ci", "success", "status") in [(s.name, s.state, s.source) for s in signals]
 

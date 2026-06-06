@@ -13,7 +13,11 @@ from pr_guardian.models.findings import Finding
 from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, PlatformPR
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
-from pr_guardian.platform.protocol import InlinePostResult, PlatformPRMetadata, PlatformReadinessSignal
+from pr_guardian.platform.protocol import (
+    InlinePostResult,
+    PlatformPRMetadata,
+    PlatformReadinessSignal,
+)
 
 log = structlog.get_logger()
 

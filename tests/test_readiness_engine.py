@@ -361,9 +361,7 @@ async def test_check_event_recovers_errored_candidate():
                 metadata=PlatformPRMetadata(head_sha="sha1"),
                 signals=[PlatformReadinessSignal("ci", "success", "check_run")],
             )
-            with patch(
-                "pr_guardian.core.readiness._adapter_for_candidate", return_value=healthy
-            ):
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=healthy):
                 evaluated = await evaluate_candidates_for_sha(
                     platform="github",
                     repo="octo/service",
@@ -477,9 +475,7 @@ async def test_automatic_review_startup_failure_is_marked_and_reported(monkeypat
             linked_reviews = []
             for _ in range(20):
                 reviews = await storage.list_reviews(limit=10)
-                linked_reviews = [
-                    r for r in reviews if r.get("candidate_id") == candidate["id"]
-                ]
+                linked_reviews = [r for r in reviews if r.get("candidate_id") == candidate["id"]]
                 if linked_reviews and linked_reviews[0]["stage"] == "error":
                     break
                 await asyncio.sleep(0.01)
