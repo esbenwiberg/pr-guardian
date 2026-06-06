@@ -1,0 +1,77 @@
+contract_version: 1
+title: "Post inline findings, sticky guidance, statuses, and configured approval"
+depends_on:
+  - 01-github-app-connection-data-model
+  - 02-github-installation-token-adapter
+  - 03-github-app-setup-and-merge-gates
+scenarios:
+  - id: sticky-guidance-upserts-through-lifecycle
+    given:
+      - "a linked GitHub PR enters Guardian review"
+    when:
+      - "Guardian posts pending status, starts review, completes review, and later re-reviews"
+    then:
+      - "one top-level guidance comment exists"
+      - "the same comment is updated with the latest state"
+      - "the comment includes the Guardian review deeplink when available"
+      - "the comment says to comment @guardian for another pass"
+  - id: auto-review-posts-inline-comments
+    given:
+      - "an automatic GitHub review finds actionable line-anchored findings"
+    when:
+      - "Profile comments are enabled"
+    then:
+      - "Guardian posts inline comments for the findings"
+      - "the sticky guidance comment is also updated"
+  - id: formal-approval-stays-profile-gated
+    given:
+      - "Guardian result is AUTO_APPROVE"
+    when:
+      - "Profile platform approval or formal_approve side effect is disabled"
+    then:
+      - "guardian/review is success"
+      - "approve_pr is not called"
+    and_when:
+      - "both switches are enabled and the PR is not a fork"
+    then_also:
+      - "approve_pr is called as the GitHub App installation actor"
+  - id: review-detail-postback-browser-panel
+    given:
+      - "a review has platform postback metadata"
+    when:
+      - "a user opens /reviews/{id}"
+    then:
+      - "they can see status, inline comments, guidance, approval, and merge gate state"
+required_facts:
+  - id: fact-sticky-guidance-upserts-through-lifecycle
+    proves:
+      - sticky-guidance-upserts-through-lifecycle
+    kind: integration-test
+    artifact:
+      path: tests/test_github_guidance_comment.py
+      change: create
+    command: python -m pytest tests/test_github_guidance_comment.py::test_sticky_guidance_comment_is_created_recovered_and_updated
+  - id: fact-auto-review-posts-inline-comments
+    proves:
+      - auto-review-posts-inline-comments
+    kind: integration-test
+    artifact:
+      path: tests/test_inline_comments.py
+      change: update
+    command: python -m pytest tests/test_inline_comments.py::test_automatic_github_review_posts_inline_comments_and_sticky_guidance
+  - id: fact-formal-approval-stays-profile-gated
+    proves:
+      - formal-approval-stays-profile-gated
+    kind: integration-test
+    artifact:
+      path: tests/test_profile_side_effects.py
+      change: update
+    command: python -m pytest tests/test_profile_side_effects.py::test_github_app_formal_approval_requires_profile_switches_and_non_fork
+  - id: fact-review-detail-postback-browser-panel
+    proves:
+      - review-detail-postback-browser-panel
+    kind: browser-test
+    artifact:
+      path: tests/browser/review_detail_postback.spec.mjs
+      change: create
+    command: node tests/browser/review_detail_postback.spec.mjs --grep postback-panel

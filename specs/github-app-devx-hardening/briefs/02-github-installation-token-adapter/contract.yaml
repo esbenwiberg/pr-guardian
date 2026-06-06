@@ -1,0 +1,58 @@
+contract_version: 1
+title: "Wire GitHub adapter to installation tokens"
+depends_on:
+  - 01-github-app-connection-data-model
+scenarios:
+  - id: github-app-jwt-and-token-cache
+    given:
+      - "a GitHub App Connection with app_id, installation_id, and private_key"
+    when:
+      - "two GitHub API calls run before the installation token refresh window"
+    then:
+      - "one app JWT is exchanged for one installation token"
+      - "both API calls use the cached installation token"
+    and_when:
+      - "the cached token is near expiry"
+    then_also:
+      - "a fresh installation token is minted"
+  - id: github-adapter-uses-installation-bearer
+    given:
+      - "a GitHubAdapter is created from a GitHub App Connection"
+    when:
+      - "it posts status, issue comments, inline comments, reactions, and reviews"
+    then:
+      - "the HTTP client uses the installation token authorization header"
+      - "no PAT or GITHUB_TOKEN value is read"
+  - id: github-runtime-has-no-github-token-fallback
+    given:
+      - "GITHUB_TOKEN is set but no GitHub App Connection is available"
+    when:
+      - "a GitHub review, sync, or ChatOps path attempts to create an adapter"
+    then:
+      - "the operation fails clearly with a missing GitHub App Connection error"
+      - "the env token is ignored"
+required_facts:
+  - id: fact-github-app-jwt-and-token-cache
+    proves:
+      - github-app-jwt-and-token-cache
+    kind: unit-test
+    artifact:
+      path: tests/test_github_app_auth.py
+      change: create
+    command: python -m pytest tests/test_github_app_auth.py::test_installation_token_is_cached_and_refreshed_before_expiry
+  - id: fact-github-adapter-uses-installation-bearer
+    proves:
+      - github-adapter-uses-installation-bearer
+    kind: unit-test
+    artifact:
+      path: tests/test_github_adapter.py
+      change: update
+    command: python -m pytest tests/test_github_adapter.py::test_github_adapter_uses_installation_token_for_platform_actions
+  - id: fact-github-runtime-has-no-github-token-fallback
+    proves:
+      - github-runtime-has-no-github-token-fallback
+    kind: integration-test
+    artifact:
+      path: tests/test_connection_sync.py
+      change: update
+    command: python -m pytest tests/test_connection_sync.py::test_github_sync_ignores_github_token_without_app_connection

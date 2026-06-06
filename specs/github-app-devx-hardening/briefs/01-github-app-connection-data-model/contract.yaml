@@ -1,0 +1,54 @@
+contract_version: 1
+title: "Add GitHub App Connection data model"
+depends_on: []
+scenarios:
+  - id: github-app-connection-redacts-private-key
+    given:
+      - "a Profile Manager creates a GitHub Connection with app_id and private_key"
+    when:
+      - "the Connection is saved and listed"
+    then:
+      - "the private key is encrypted at rest"
+      - "the API response includes app_id, installation metadata, health, permissions, and fingerprint"
+      - "the API response does not include raw private key, encrypted private key, JWT, or installation token"
+      - "audit diffs contain a redacted secret marker only"
+  - id: github-token-import-removed
+    given:
+      - "GITHUB_TOKEN exists in the process environment"
+    when:
+      - "Profile Manager setup APIs are queried"
+    then:
+      - "GitHub token import is not offered"
+      - "GitHub Connection payloads reject token-only credentials"
+  - id: ado-connections-stay-pat-shaped
+    given:
+      - "an ADO Connection is created with org_url and token"
+    when:
+      - "the Connection validates successfully"
+    then:
+      - "ADO redaction and health behavior remain unchanged"
+required_facts:
+  - id: fact-github-app-connection-redacts-private-key
+    proves:
+      - github-app-connection-redacts-private-key
+    kind: integration-test
+    artifact:
+      path: tests/test_github_app_connection_storage.py
+      change: create
+    command: python -m pytest tests/test_github_app_connection_storage.py::test_github_app_connection_encrypts_and_redacts_private_key
+  - id: fact-github-token-import-removed
+    proves:
+      - github-token-import-removed
+    kind: integration-test
+    artifact:
+      path: tests/test_profiles_api.py
+      change: update
+    command: python -m pytest tests/test_profiles_api.py::test_github_connections_reject_token_credentials_and_hide_env_import
+  - id: fact-ado-connections-stay-pat-shaped
+    proves:
+      - ado-connections-stay-pat-shaped
+    kind: integration-test
+    artifact:
+      path: tests/test_connection_health.py
+      change: update
+    command: python -m pytest tests/test_connection_health.py::test_ado_connection_health_still_uses_pat_shape
