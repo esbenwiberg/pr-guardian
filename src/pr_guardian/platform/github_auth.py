@@ -62,10 +62,16 @@ class GitHubAppAuth:
         payload_b64 = _b64url(json.dumps(payload, separators=(",", ":")).encode())
         message = f"{header_b64}.{payload_b64}".encode()
 
+        from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
+
         key = serialization.load_pem_private_key(
             self._creds.private_key_pem.encode(), password=None
         )
-        signature = key.sign(message, padding.PKCS1v15(), hashes.SHA256())  # type: ignore[call-arg]
+        if not isinstance(key, RSAPrivateKey):
+            raise TypeError(
+                f"GitHub App private key must be RSA; got {type(key).__name__}"
+            )
+        signature = key.sign(message, padding.PKCS1v15(), hashes.SHA256())
         return f"{header_b64}.{payload_b64}.{_b64url(signature)}"
 
     async def get_token(self) -> str:
