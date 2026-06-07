@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -368,6 +368,22 @@ async def test_non_opted_prs_stay_in_pull_requests_api_not_reviews(monkeypatch):
             assert "Unlinked browse-only pull request" not in review_titles
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sync_github_guarded_isolates_per_connection_errors():
+    """_sync_github_guarded must not propagate exceptions — logs and returns normally."""
+    from pr_guardian.core import pr_sync
+
+    connection = {"id": "conn-abc", "name": "Failing GitHub App"}
+
+    with patch.object(
+        pr_sync,
+        "_sync_github",
+        new=AsyncMock(side_effect=RuntimeError("network failure")),
+    ):
+        # Must not raise — exception isolation is the point of the wrapper
+        await pr_sync._sync_github_guarded(connection)
 
 
 @pytest.mark.asyncio
