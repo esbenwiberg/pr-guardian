@@ -1484,7 +1484,10 @@ async def _post_results(
             labels_enabled=config.side_effects.labels,
             postback=postback,
         )
-        await _apply_platform_actions(adapter, pr, result, config, comment, postback=postback)
+        try:
+            await _apply_platform_actions(adapter, pr, result, config, comment, postback=postback)
+        except Exception as e:
+            log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
     else:
         try:
             if summary_enabled:
