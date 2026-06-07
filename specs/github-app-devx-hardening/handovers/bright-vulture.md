@@ -84,8 +84,10 @@ The `issue_comment` webhook handler extracts the PR author from `issue["user"]["
 
 2. **`_adapter_for_repo_link` creates a new adapter** — the command adapter (used for eyes reaction + PR fetch) is a separate instance from the background adapter. Both are closed in their respective `finally` blocks. Do not try to share adapters across the `asyncio.create_task` boundary.
 
-3. **First review bypasses readiness gating** — explicitly by design (user ChatOps command overrides auto-review paused state). If Brief 06 needs the E2E to verify first-review-via-chatops, it should ensure the PR comment is posted before Guardian processes the webhook and that the repo link exists with `require_auto_review=False` accessible.
+3. **Unlinked-repo ack is not possible** — when `review is None and repo_link is None`, no adapter exists (we don't know which GitHub App installation to authenticate with). The command is marked ignored with `"repo not linked"`; no ack comment is posted. The brief's "if possible" qualifier covers this case.
 
-4. **`@guardian-app` does NOT trigger** — the `(?!\w)(?!-)` lookaheads ensure `@guardian` followed by `-` is rejected. Brief 06 E2E should use plain `@guardian` in test comments.
+4. **First review bypasses readiness gating** — explicitly by design (user ChatOps command overrides auto-review paused state). If Brief 06 needs the E2E to verify first-review-via-chatops, it should ensure the PR comment is posted before Guardian processes the webhook and that the repo link exists with `require_auto_review=False` accessible.
 
-5. **Bare `@pr-guardian review` (without re-review) now triggers** — `is_github_command` accepts any `@guardian`/`@pr-guardian` mention. A user saying "great job @pr-guardian" will now trigger the chatops flow. This is consistent with modern review bot behavior (see Copilot, CodeRabbit) but may surprise admins. The duplicate check prevents runaway work on repeated mentions.
+5. **`@guardian-app` does NOT trigger** — the `(?!\w)(?!-)` lookaheads ensure `@guardian` followed by `-` is rejected. Brief 06 E2E should use plain `@guardian` in test comments.
+
+6. **Bare `@pr-guardian review` (without re-review) now triggers** — `is_github_command` accepts any `@guardian`/`@pr-guardian` mention. A user saying "great job @pr-guardian" will now trigger the chatops flow. This is consistent with modern review bot behavior (see Copilot, CodeRabbit) but may surprise admins. The duplicate check prevents runaway work on repeated mentions.
