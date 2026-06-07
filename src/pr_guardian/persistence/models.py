@@ -97,6 +97,8 @@ class ReviewRow(Base):
         back_populates="review", cascade="all, delete-orphan", lazy="selectin"
     )
 
+    postback_meta: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+
 
 class MechanicalResultRow(Base):
     __tablename__ = "mechanical_results"
@@ -352,6 +354,32 @@ class PostedInlineCommentRow(Base):
     pr_id: Mapped[str] = mapped_column(String(64))
     repo: Mapped[str] = mapped_column(String(256))
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
+# Guidance comment tracking (one sticky comment per PR per platform)
+# ---------------------------------------------------------------------------
+
+
+class GuidanceCommentRow(Base):
+    """Tracks the sticky guidance comment ID posted on a PR."""
+
+    __tablename__ = "guidance_comments"
+    __table_args__ = (
+        UniqueConstraint("platform", "repo", "pr_id", name="uq_guidance_comment_pr"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    repo: Mapped[str] = mapped_column(String(256), index=True)
+    pr_id: Mapped[str] = mapped_column(String(64), index=True)
+    comment_id: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 

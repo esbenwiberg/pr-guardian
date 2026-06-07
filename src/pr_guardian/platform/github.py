@@ -409,6 +409,57 @@ class GitHubAdapter:
             )
         return signals
 
+    async def upsert_guidance_comment(
+        self,
+        pr: PlatformPR,
+        body: str,
+        *,
+        stored_comment_id: str | None = None,
+    ) -> str:
+        """Create or update the sticky guidance comment on a PR.
+
+        Recovery order:
+        1. If stored_comment_id is given, attempt PATCH; skip recovery on 404.
+        2. If no stored ID or the stored comment was deleted, scan PR comments
+           for the hidden marker and patch that comment.
+        3. If not found at all, create a new comment.
+
+        Returns the platform comment ID (new or existing).
+        """
+        from pr_guardian.decision.actions import GUIDANCE_MARKER
+
+        client = self._get_client()
+
+        if stored_comment_id:
+            resp = await client.patch(
+                f"/repos/{pr.repo}/issues/comments/{stored_comment_id}",
+                json={"body": body},
+            )
+            if resp.status_code != 404:
+                resp.raise_for_status()
+                return stored_comment_id
+            # 404: comment was deleted — fall through to search/recreate
+
+        # Scan existing PR comments for the hidden marker
+        comments = await self.list_issue_comments(pr.repo, pr.pr_id)
+        for c in comments:
+            if GUIDANCE_MARKER in (c.get("body") or ""):
+                found_id = str(c["id"])
+                resp = await client.patch(
+                    f"/repos/{pr.repo}/issues/comments/{found_id}",
+                    json={"body": body},
+                )
+                resp.raise_for_status()
+                return found_id
+
+        # No existing comment — create one
+        resp = await client.post(
+            f"/repos/{pr.repo}/issues/{pr.pr_id}/comments",
+            json={"body": body},
+        )
+        resp.raise_for_status()
+        return str(resp.json()["id"])
+
     async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
         await self.set_status(pr, state, description, context="guardian/readiness")
 

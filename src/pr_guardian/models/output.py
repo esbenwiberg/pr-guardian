@@ -60,3 +60,6 @@ class ReviewResult:
 
     # Feedback loop: populated on re-reviews with dismissals
     dismissal_summary: dict | None = None  # {new, resolved, carried_over, dismissed}
+
+    # Populated by orchestrator after platform side effects complete
+    postback_meta: dict = field(default_factory=dict)

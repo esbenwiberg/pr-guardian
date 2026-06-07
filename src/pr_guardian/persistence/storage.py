@@ -31,6 +31,7 @@ from pr_guardian.persistence.models import (
     FindingDismissalRow,
     FindingRow,
     GlobalConfigRow,
+    GuidanceCommentRow,
     MechanicalResultRow,
     PostedInlineCommentRow,
     ProfileAuditEventRow,
@@ -1738,6 +1739,8 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.cost_usd = result.cost_usd
         row.stage = "complete"
         row.finished_at = now
+        if result.postback_meta:
+            row.postback_meta = result.postback_meta
         if row.started_at:
             row.duration_ms = int((now - _ensure_aware(row.started_at)).total_seconds() * 1000)
 
@@ -2786,6 +2789,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,
+        "postback_meta": row.postback_meta or {},
         "mechanical_results": [
             {
                 "tool": m.tool,
@@ -3018,6 +3022,57 @@ async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
             )
         ).all()
         return [r.platform_comment_id for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Guidance comment helpers
+# ---------------------------------------------------------------------------
+
+
+async def load_guidance_comment_id(platform: str, repo: str, pr_id: str) -> str | None:
+    """Return the stored platform comment ID for the sticky guidance comment, or None."""
+    async with async_session() as session:
+        row = (
+            await session.scalars(
+                select(GuidanceCommentRow).where(
+                    GuidanceCommentRow.platform == platform,
+                    GuidanceCommentRow.repo == repo,
+                    GuidanceCommentRow.pr_id == pr_id,
+                )
+            )
+        ).first()
+        return row.comment_id if row else None
+
+
+async def save_guidance_comment_id(
+    platform: str, repo: str, pr_id: str, comment_id: str
+) -> None:
+    """Upsert the guidance comment ID for a PR."""
+    async with async_session() as session:
+        row = (
+            await session.scalars(
+                select(GuidanceCommentRow).where(
+                    GuidanceCommentRow.platform == platform,
+                    GuidanceCommentRow.repo == repo,
+                    GuidanceCommentRow.pr_id == pr_id,
+                )
+            )
+        ).first()
+        if row:
+            row.comment_id = comment_id
+            row.updated_at = datetime.now(timezone.utc)
+        else:
+            session.add(
+                GuidanceCommentRow(
+                    platform=platform,
+                    repo=repo,
+                    pr_id=pr_id,
+                    comment_id=comment_id,
+                    created_at=datetime.now(timezone.utc),
+                    updated_at=datetime.now(timezone.utc),
+                )
+            )
+        await session.commit()
 
 
 # ---------------------------------------------------------------------------
