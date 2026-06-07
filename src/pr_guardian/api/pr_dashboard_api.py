@@ -235,10 +235,9 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
             if user_id and pr["platform"] == "github":
                 github_handle = user_id.get("github_handle")
                 if github_handle:
-                    from pr_guardian.platform.github import GitHubAdapter
+                    from pr_guardian.platform.factory import create_github_adapter
 
-                    token = os.environ.get("GITHUB_TOKEN", "")
-                    adapter = GitHubAdapter(token=token)
+                    adapter = await create_github_adapter()
                     try:
                         await adapter.add_pr_reviewer(pr["repo"], pr["pr_id"], github_handle)
                         await adapter.add_pr_assignee(pr["repo"], pr["pr_id"], github_handle)

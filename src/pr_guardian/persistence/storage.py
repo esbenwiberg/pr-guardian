@@ -2090,9 +2090,13 @@ async def delete_global_config(key: str) -> bool:
 
 
 async def resolve_github_token(pat_name: str | None = None) -> str:
-    """Resolve a GitHub token from unified Connections, falling back to env."""
-    import os
+    """Deprecated: GitHub runtime auth uses App Connections.
 
+    Use ``build_github_adapter_from_connection()`` from
+    ``pr_guardian.platform.github_auth`` instead.  The GITHUB_TOKEN env
+    fallback has been removed — this function now raises ``LookupError`` when
+    no stored token is found.
+    """
     from pr_guardian.persistence.crypto import decrypt
 
     try:
@@ -2130,9 +2134,13 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
     except Exception:
         log.warning(
             "resolve_github_token_failed",
-            hint="DB unavailable or decrypt error; falling back to env var",
+            hint="DB unavailable or decrypt error",
         )
-    return os.environ.get("GITHUB_TOKEN", "")
+    raise LookupError(
+        "No GitHub token found in stored Connections. "
+        "GITHUB_TOKEN env fallback has been removed — "
+        "add a GitHub App Connection via the Connections UI."
+    )
 
 
 # ---------------------------------------------------------------------------
