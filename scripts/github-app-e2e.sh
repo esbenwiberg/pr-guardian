@@ -262,6 +262,18 @@ gh_api_put() {
         "$url"
 }
 
+gh_api_patch() {
+    local url="$1"
+    local body="$2"
+    curl -sf -X PATCH \
+        -H "Authorization: $(gh_auth_header)" \
+        -H "Accept: application/vnd.github+json" \
+        -H "X-GitHub-Api-Version: 2022-11-28" \
+        -H "Content-Type: application/json" \
+        -d "$body" \
+        "$url"
+}
+
 gh_api_delete() {
     local url="$1"
     curl -sf -X DELETE \
@@ -286,19 +298,21 @@ replay_webhook() {
     local sig
     sig=$(sign_webhook_payload "${WEBHOOK_SECRET}" "${payload}")
 
-    local response http_code
-    http_code=$(curl -sf -o /dev/null -w "%{http_code}" -X POST \
+    # Drop -f so curl always exits 0 and -w writes the HTTP code unconditionally.
+    # With -sf, a 4xx/5xx would exit non-zero before -w fires, corrupting the capture.
+    local http_code
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
         -H "Content-Type: application/json" \
         -H "X-GitHub-Event: ${event_type}" \
         -H "X-Hub-Signature-256: ${sig}" \
         -H "X-GitHub-Delivery: e2e-$(date +%s)-${event_type}" \
         -d "${payload}" \
-        "$(guardian_url)/api/webhooks/github" || echo "000")
+        "$(guardian_url)/api/webhooks/github")
 
-    if [[ "${http_code}" == "000" ]]; then
-        warn "Webhook replay returned an error for event: ${event_type}"
-    else
+    if [[ "${http_code}" =~ ^2 ]]; then
         ok "Webhook replayed: ${event_type} (HTTP ${http_code})"
+    else
+        warn "Webhook replay returned HTTP ${http_code} for event: ${event_type}"
     fi
 }
 
@@ -330,7 +344,7 @@ cleanup() {
 
     if [[ -n "${TEST_PR_NUMBER:-}" ]]; then
         info "Closing PR #${TEST_PR_NUMBER}..."
-        gh_api_post \
+        gh_api_patch \
             "https://api.github.com/repos/${SANDBOX_REPO}/pulls/${TEST_PR_NUMBER}" \
             '{"state":"closed"}' &>/dev/null || true
     fi
