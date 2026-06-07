@@ -1518,11 +1518,9 @@ async def _post_results(
 
 
 def _decision_to_status_state(result: ReviewResult) -> str:
-    if result.decision == Decision.AUTO_APPROVE:
-        return "success"
-    if result.decision == Decision.HARD_BLOCK:
-        return "blocked"
-    return "failure"
+    # Delegates to _decision_to_guidance_state; kept separate so the postback
+    # panel label and the guidance comment state can diverge independently later.
+    return _decision_to_guidance_state(result)
 
 
 def _decision_to_guidance_state(result: ReviewResult) -> str:

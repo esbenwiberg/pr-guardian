@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -22,6 +23,7 @@ async def _make_db():
     return engine, factory
 
 
+@pytest.mark.asyncio
 async def test_save_guidance_comment_id_inserts_when_no_existing_row():
     engine, factory = await _make_db()
     with (
@@ -33,6 +35,7 @@ async def test_save_guidance_comment_id_inserts_when_no_existing_row():
     assert result == "cmt-001"
 
 
+@pytest.mark.asyncio
 async def test_save_guidance_comment_id_updates_existing_row():
     engine, factory = await _make_db()
     with (
@@ -45,6 +48,7 @@ async def test_save_guidance_comment_id_updates_existing_row():
     assert result == "cmt-002"
 
 
+@pytest.mark.asyncio
 async def test_save_guidance_comment_id_tolerates_integrity_error_on_concurrent_insert():
     """Simulate a concurrent INSERT winning the race: IntegrityError must be swallowed."""
     engine, factory = await _make_db()
@@ -97,6 +101,7 @@ async def test_save_guidance_comment_id_tolerates_integrity_error_on_concurrent_
     mock_session.rollback.assert_called_once()
 
 
+@pytest.mark.asyncio
 async def test_load_guidance_comment_id_returns_none_when_absent():
     engine, factory = await _make_db()
     with (
@@ -107,6 +112,7 @@ async def test_load_guidance_comment_id_returns_none_when_absent():
     assert result is None
 
 
+@pytest.mark.asyncio
 async def test_save_and_load_multiple_prs_are_independent():
     engine, factory = await _make_db()
     with (
