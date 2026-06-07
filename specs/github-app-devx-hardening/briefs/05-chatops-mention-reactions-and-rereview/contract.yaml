@@ -1,0 +1,61 @@
+contract_version: 1
+title: "Add @guardian ChatOps, eyes reactions, first review, and re-review"
+depends_on:
+  - 02-github-installation-token-adapter
+  - 04-review-postback-guidance-and-approvals
+scenarios:
+  - id: chatops-guardian-aliases
+    given:
+      - "a PR issue comment contains @guardian"
+    when:
+      - "the GitHub issue_comment webhook is handled"
+    then:
+      - "the comment is recognized as a Guardian command"
+    and_when:
+      - "the comment contains @pr-guardian re-review"
+    then_also:
+      - "the legacy alias is still recognized"
+  - id: chatops-eyes-reaction
+    given:
+      - "an authorized user comments @guardian"
+    when:
+      - "Guardian claims the ChatOps command"
+    then:
+      - "Guardian creates an eyes reaction on that comment"
+      - "duplicate reaction responses are treated as success"
+  - id: chatops-first-review-or-rereview
+    given:
+      - "an authorized user comments @guardian on a linked PR with no previous review"
+    when:
+      - "Guardian handles the command"
+    then:
+      - "a first review is queued"
+    and_when:
+      - "a completed Guardian review exists for the PR"
+    then_also:
+      - "a focused re-review is queued"
+required_facts:
+  - id: fact-chatops-guardian-aliases
+    proves:
+      - chatops-guardian-aliases
+    kind: unit-test
+    artifact:
+      path: tests/test_github_chatops.py
+      change: update
+    command: python -m pytest tests/test_github_chatops.py::test_is_github_command_accepts_guardian_and_legacy_aliases
+  - id: fact-chatops-eyes-reaction
+    proves:
+      - chatops-eyes-reaction
+    kind: integration-test
+    artifact:
+      path: tests/test_github_chatops.py
+      change: update
+    command: python -m pytest tests/test_github_chatops.py::test_handle_github_comment_reacts_with_eyes_when_claimed
+  - id: fact-chatops-first-review-or-rereview
+    proves:
+      - chatops-first-review-or-rereview
+    kind: integration-test
+    artifact:
+      path: tests/test_github_chatops.py
+      change: update
+    command: python -m pytest tests/test_github_chatops.py::test_guardian_mention_queues_first_review_or_rereview

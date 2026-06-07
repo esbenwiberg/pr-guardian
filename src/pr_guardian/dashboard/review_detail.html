@@ -48,6 +48,16 @@
       </div>
     </div>
 
+    <!-- Postback panel: platform side-effects from this review run -->
+    <div id="postback-panel" style="display:none" class="mb-4">
+      <div class="card border border-slate-700/50 bg-slate-800/40">
+        <div class="px-5 py-3.5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2.5">Platform postback</div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs" id="postback-grid"></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Sticky triggers (structural escalation reasons) — surfaced near banner so reviewers see WHY first -->
     <div id="sticky-triggers-section" style="display:none" class="mb-4">
       <div class="card border-l-[3px] border-l-orange-400/50 bg-orange-400/[0.03]">
@@ -316,6 +326,34 @@ function render(d) {
   if (d.summary) {
     document.getElementById('summary-section').style.display = '';
     document.getElementById('summary-text').textContent = d.summary;
+  }
+
+  // Postback panel
+  const pm = d.postback_meta || {};
+  const postbackItems = [];
+  if (pm.status_state !== undefined) {
+    const stateLabel = { success: '✓ cleared', failure: '✗ changes requested', blocked: '✗ hard blocked', pending: '… pending' }[pm.status_state] || pm.status_state;
+    const stateColor = pm.status_state === 'success' ? 'text-emerald-400' : (pm.status_state === 'failure' || pm.status_state === 'blocked') ? 'text-red-400' : 'text-slate-400';
+    postbackItems.push({ label: 'guardian/review', value: pm.status_posted ? stateLabel : 'not posted', color: pm.status_posted ? stateColor : 'text-slate-500' });
+  }
+  if (pm.inline_comments_posted !== undefined) {
+    postbackItems.push({ label: 'inline comments', value: pm.inline_comments_posted === 0 ? 'none' : `${pm.inline_comments_posted} posted`, color: pm.inline_comments_posted > 0 ? 'text-blue-400' : 'text-slate-500' });
+  }
+  if (pm.guidance_posted !== undefined) {
+    postbackItems.push({ label: 'guidance comment', value: pm.guidance_posted ? (pm.guidance_comment_id ? 'updated' : 'posted') : 'skipped', color: pm.guidance_posted ? 'text-emerald-400' : 'text-slate-500' });
+  }
+  if (pm.formal_approval !== undefined) {
+    const approvalMap = { posted: '✓ approved', skipped_fork: 'skipped (fork)', skipped_fork_unknown: 'skipped (fork?)', skipped_profile: 'skipped (profile)' };
+    postbackItems.push({ label: 'formal approval', value: approvalMap[pm.formal_approval] || pm.formal_approval, color: pm.formal_approval === 'posted' ? 'text-emerald-400' : 'text-slate-500' });
+  }
+  if (postbackItems.length > 0) {
+    document.getElementById('postback-panel').style.display = '';
+    document.getElementById('postback-grid').innerHTML = postbackItems.map(item =>
+      `<div class="flex flex-col gap-0.5">
+        <span class="text-slate-500 text-2xs uppercase tracking-wider">${esc(item.label)}</span>
+        <span class="${item.color} font-medium">${esc(item.value)}</span>
+      </div>`
+    ).join('');
   }
 
   // Sticky triggers (structural)

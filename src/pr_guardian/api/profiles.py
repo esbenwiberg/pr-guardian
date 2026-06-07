@@ -167,8 +167,17 @@ class ConnectionPayload(BaseModel):
 
     name: str
     platform: Platform
-    token: str
+    # ADO credentials (token required for ADO; forbidden for GitHub App)
+    token: str | None = None
     org_url: str | None = None
+    # GitHub App credentials (required for GitHub; forbidden for ADO)
+    app_id: str | None = None
+    private_key: str | None = None
+    app_slug: str | None = None
+    installation_id: str | None = None
+    installation_account: str | None = None
+    installation_target_type: str | None = None
+    app_permissions: dict[str, Any] | None = None
     description: str = ""
     sync_enabled: bool = False
     is_default: bool = False
@@ -176,13 +185,29 @@ class ConnectionPayload(BaseModel):
     @model_validator(mode="after")
     def validate_connection(self) -> "ConnectionPayload":
         self.name = _clean_name(self.name)
-        self.token = _clean_name(self.token, field="token")
         self.description = self.description.strip()
         self.org_url = self.org_url.strip().rstrip("/") if self.org_url else None
-        if self.platform == "ado" and not self.org_url:
-            raise HTTPException(400, "ADO Connections require org_url")
-        if self.platform == "ado" and self.org_url:
+        if self.platform == "ado":
+            if not self.token:
+                raise HTTPException(400, "ADO Connections require a token")
+            if not self.org_url:
+                raise HTTPException(400, "ADO Connections require org_url")
             self.org_url = _normalize_ado_org_url(self.org_url)
+            self.token = _clean_name(self.token, field="token")
+            if self.app_id or self.private_key:
+                raise HTTPException(400, "ADO Connections do not accept GitHub App fields")
+        else:
+            # GitHub App Connection
+            if self.token:
+                raise HTTPException(
+                    400, "GitHub Connections require app_id and private_key, not a token"
+                )
+            if not self.app_id:
+                raise HTTPException(400, "GitHub Connections require app_id")
+            if not self.private_key:
+                raise HTTPException(400, "GitHub Connections require private_key")
+            self.app_id = self.app_id.strip()
+            self.private_key = self.private_key.strip()
         return self
 
 
@@ -190,11 +215,20 @@ class ConnectionUpdatePayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
+    # ADO token update
     token: str | None = None
     org_url: str | None = None
     description: str | None = None
     sync_enabled: bool | None = None
     is_default: bool | None = None
+    # GitHub App credential/metadata updates
+    app_id: str | None = None
+    private_key: str | None = None
+    app_slug: str | None = None
+    installation_id: str | None = None
+    installation_account: str | None = None
+    installation_target_type: str | None = None
+    app_permissions: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def validate_connection(self) -> "ConnectionUpdatePayload":
@@ -206,6 +240,10 @@ class ConnectionUpdatePayload(BaseModel):
             self.description = self.description.strip()
         if self.org_url is not None:
             self.org_url = self.org_url.strip().rstrip("/")
+        if self.app_id is not None:
+            self.app_id = self.app_id.strip()
+        if self.private_key is not None:
+            self.private_key = self.private_key.strip()
         return self
 
 
@@ -332,7 +370,6 @@ async def _validate_and_persist_connection(
 @router.get("/connections/env-imports")
 async def env_imports(identity: Identity = Depends(require_profile_manager)):
     return {
-        "GITHUB_TOKEN": {"available": bool(os.environ.get("GITHUB_TOKEN"))},
         "ADO_PAT": {"available": bool(os.environ.get("ADO_PAT"))},
         "ADO_ORG_URL": {"available": bool(os.environ.get("ADO_ORG_URL"))},
     }
@@ -419,6 +456,31 @@ async def create_connection(
     body: ConnectionPayload, identity: Identity = Depends(require_profile_manager)
 ):
     try:
+        if body.platform == "github":
+            if body.sync_enabled:
+                raise HTTPException(
+                    400,
+                    "GitHub App connections must be validated healthy before enabling sync",
+                )
+            # GitHub App Connection: store encrypted credentials; runtime validation in Brief 02
+            return await storage.create_connection(
+                body.name,
+                platform=body.platform,
+                auth_kind="github_app",
+                org_url=body.org_url,
+                description=body.description,
+                sync_enabled=False,
+                is_default=body.is_default,
+                actor=_actor(identity),
+                app_id=body.app_id,
+                app_slug=body.app_slug,
+                installation_id=body.installation_id,
+                installation_account=body.installation_account,
+                installation_target_type=body.installation_target_type,
+                private_key=body.private_key,
+                app_permissions=body.app_permissions,
+            )
+        # ADO Connection: PAT-based, validate immediately
         connection = await storage.create_connection(
             body.name,
             platform=body.platform,
@@ -432,7 +494,7 @@ async def create_connection(
         return await _validate_and_persist_connection(
             uuid.UUID(connection["id"]),
             platform=body.platform,
-            token=body.token,
+            token=body.token or "",
             org_url=body.org_url,
             requested_sync_enabled=body.sync_enabled,
             actor=_actor(identity),
@@ -452,13 +514,20 @@ async def update_connection(
     if current is None:
         raise HTTPException(404, "Connection not found")
     platform = current["platform"]
-    token = body.token or await storage.get_connection_token(connection_id)
+    is_github_app = current.get("auth_kind") == "github_app"
+
     org_url = body.org_url if body.org_url is not None else current.get("org_url")
     if platform == "ado" and org_url:
         org_url = _normalize_ado_org_url(org_url)
-    credential_changed = body.token is not None or body.org_url is not None
     if platform == "ado" and not org_url:
         raise HTTPException(400, "ADO Connections require org_url")
+
+    ado_credential_changed = not is_github_app and (
+        body.token is not None or body.org_url is not None
+    )
+    github_app_credential_changed = is_github_app and body.private_key is not None
+    credential_changed = ado_credential_changed or github_app_credential_changed
+
     if (
         body.sync_enabled is True
         and current["health_status"] != "healthy"
@@ -469,15 +538,23 @@ async def update_connection(
         updated = await storage.update_connection(
             connection_id,
             name=body.name,
-            token=body.token,
+            token=body.token if not is_github_app else None,
             org_url=org_url if body.org_url is not None else None,
             description=body.description,
             is_default=body.is_default,
             actor=_actor(identity),
+            app_id=body.app_id,
+            app_slug=body.app_slug,
+            installation_id=body.installation_id,
+            installation_account=body.installation_account,
+            installation_target_type=body.installation_target_type,
+            private_key=body.private_key if is_github_app else None,
+            app_permissions=body.app_permissions,
         )
         if updated is None:
             raise HTTPException(404, "Connection not found")
-        if credential_changed:
+        if ado_credential_changed:
+            token = body.token or await storage.get_connection_token(connection_id)
             updated = await _validate_and_persist_connection(
                 connection_id,
                 platform=platform,
@@ -508,6 +585,11 @@ async def validate_connection(
     current = await storage.get_connection(connection_id)
     if current is None:
         raise HTTPException(404, "Connection not found")
+    is_github_app = current.get("auth_kind") == "github_app"
+    if is_github_app:
+        # GitHub App validation requires installation token auth (Brief 02).
+        # Return current state; the health probe will be wired up by the auth adapter.
+        return current
     token = await storage.get_connection_token(connection_id)
     if not token:
         updated = await storage.update_connection(

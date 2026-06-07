@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from pr_guardian.config.schema import GuardianConfig
@@ -49,9 +50,11 @@ def _adapter() -> MagicMock:
     adapter.request_changes = AsyncMock()
     adapter.set_review_status = AsyncMock()
     adapter.fetch_pr_metadata = AsyncMock(return_value=PlatformPRMetadata(head_sha="sha1"))
+    adapter.upsert_guidance_comment = AsyncMock(return_value=None)
     return adapter
 
 
+@pytest.mark.asyncio
 async def test_auto_approve_is_guardian_clearance_unless_profile_enables_platform_approval():
     disabled = GuardianConfig()
     disabled.platform_approval_enabled = False
@@ -87,3 +90,74 @@ async def test_auto_approve_is_guardian_clearance_unless_profile_enables_platfor
     )
 
     second.approve_pr.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_github_app_formal_approval_requires_profile_switches_and_non_fork():
+    """Formal approval is gated on Profile switches and fork check.
+
+    Cases tested:
+    1. AUTO_APPROVE + platform_approval_enabled=True + formal_approve=True + fork=False → approve
+    2. AUTO_APPROVE + platform_approval_enabled=False → no approve, postback skipped_profile
+    3. AUTO_APPROVE + platform_approval_enabled=True + formal_approve=True + fork=True → no approve
+    """
+    # Case 1: all gates pass → approve_pr called
+    config_full = GuardianConfig()
+    config_full.platform_approval_enabled = True
+    config_full.side_effects.formal_approve = True
+    full_adapter = _adapter()
+    full_adapter.fetch_pr_metadata = AsyncMock(
+        return_value=PlatformPRMetadata(head_sha="sha1", fork=False)
+    )
+
+    await _post_results(
+        full_adapter,
+        _pr(),
+        _result(),
+        config_full,
+        comment_mode="summary",
+        manual_comment_override=False,
+    )
+
+    full_adapter.approve_pr.assert_awaited_once()
+
+    # Case 2: platform_approval_enabled=False → no approve
+    config_disabled = GuardianConfig()
+    config_disabled.platform_approval_enabled = False
+    config_disabled.side_effects.formal_approve = True
+    disabled_adapter = _adapter()
+    result_disabled = _result()
+
+    await _post_results(
+        disabled_adapter,
+        _pr(),
+        result_disabled,
+        config_disabled,
+        comment_mode="summary",
+        manual_comment_override=False,
+    )
+
+    disabled_adapter.approve_pr.assert_not_awaited()
+    assert result_disabled.postback_meta.get("formal_approval") == "skipped_profile"
+
+    # Case 3: fork=True → no approve even if profile switches enabled
+    config_fork = GuardianConfig()
+    config_fork.platform_approval_enabled = True
+    config_fork.side_effects.formal_approve = True
+    fork_adapter = _adapter()
+    fork_adapter.fetch_pr_metadata = AsyncMock(
+        return_value=PlatformPRMetadata(head_sha="sha1", fork=True)
+    )
+    result_fork = _result()
+
+    await _post_results(
+        fork_adapter,
+        _pr(),
+        result_fork,
+        config_fork,
+        comment_mode="summary",
+        manual_comment_override=False,
+    )
+
+    fork_adapter.approve_pr.assert_not_awaited()
+    assert result_fork.postback_meta.get("formal_approval") == "skipped_fork"

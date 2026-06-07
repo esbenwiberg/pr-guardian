@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+import os
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -312,7 +313,9 @@ async def test_readiness_signals_fall_back_to_actions_when_checks_forbidden():
         _resp({"statuses": [{"context": "legacy-ci", "state": "success"}]}),
     )
     signals = await adapter.fetch_readiness_signals(_pr())
-    assert ("Build & Smoke", "success", "check_run") in [(s.name, s.state, s.source) for s in signals]
+    assert ("Build & Smoke", "success", "check_run") in [
+        (s.name, s.state, s.source) for s in signals
+    ]
     assert ("Lint", "in_progress", "check_run") in [(s.name, s.state, s.source) for s in signals]
     assert ("legacy-ci", "success", "status") in [(s.name, s.state, s.source) for s in signals]
 
@@ -337,3 +340,66 @@ async def test_readiness_signals_propagate_non_auth_errors():
     adapter = _adapter(_resp({}, status_code=500))
     with pytest.raises(httpx.HTTPStatusError):
         await adapter.fetch_readiness_signals(_pr())
+
+
+# ---------------------------------------------------------------------------
+# GitHub App installation token authorization
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_github_adapter_uses_installation_token_for_platform_actions():
+    """_get_client() app_auth branch is exercised: _InstallationBearerAuth is
+    instantiated by _get_client() itself and injects Bearer tokens on every request.
+    No PAT or GITHUB_TOKEN value is read from the environment."""
+    from pr_guardian.platform.github_auth import _InstallationBearerAuth
+
+    captured_auth_headers: list[str] = []
+    captured_auth_instances: list[object] = []
+    _orig_async_client = httpx.AsyncClient
+
+    class _CapturingTransport(httpx.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+            captured_auth_headers.append(request.headers.get("authorization", ""))
+            return httpx.Response(200, json={})
+
+    mock_app_auth = MagicMock()
+    mock_app_auth.get_token = AsyncMock(return_value="ghs-installation-token-abc123")
+
+    def _capturing_client(*args, **kwargs):
+        # Record the auth instance _get_client() supplies, then inject our transport
+        captured_auth_instances.append(kwargs.get("auth"))
+        kwargs["transport"] = _CapturingTransport()
+        return _orig_async_client(*args, **kwargs)
+
+    adapter = GitHubAdapter(app_auth=mock_app_auth)
+    pr = _pr()
+
+    # Patch httpx.AsyncClient in the github module so _get_client() runs naturally
+    # through the app_auth branch while requests are captured by _CapturingTransport.
+    with patch("pr_guardian.platform.github.httpx.AsyncClient", side_effect=_capturing_client):
+        await adapter.post_comment(pr, "Guardian review complete")
+        await adapter.set_status(pr, "success", "All checks passed", context="guardian/review")
+        await adapter.approve_pr(pr)
+
+    # _get_client() created the client exactly once (cached thereafter)
+    assert len(captured_auth_instances) == 1
+    assert isinstance(captured_auth_instances[0], _InstallationBearerAuth), (
+        f"Expected _InstallationBearerAuth, got {type(captured_auth_instances[0])!r}"
+    )
+
+    # Every request must carry Bearer auth with the installation token
+    assert len(captured_auth_headers) == 3
+    for auth_header in captured_auth_headers:
+        assert auth_header == "Bearer ghs-installation-token-abc123", (
+            f"Expected Bearer installation token, got: {auth_header!r}"
+        )
+
+    # get_token() is called per-request by the auth flow
+    assert mock_app_auth.get_token.call_count == 3
+
+    # GITHUB_TOKEN env var must not appear in any auth header
+    env_token = os.environ.get("GITHUB_TOKEN", "")
+    if env_token:
+        for auth_header in captured_auth_headers:
+            assert env_token not in auth_header

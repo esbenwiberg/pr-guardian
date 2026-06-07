@@ -11,6 +11,7 @@ import structlog
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.platform.factory import create_adapter
+from pr_guardian.platform.guidance import upsert_guidance_comment
 from pr_guardian.platform.protocol import PlatformAdapter, PlatformReadinessSignal
 
 log = structlog.get_logger()
@@ -142,13 +143,29 @@ def _checks_snapshot(signals: list[PlatformReadinessSignal]) -> dict[str, Any]:
 
 
 async def _adapter_for_candidate(candidate: dict[str, Any]) -> PlatformAdapter:
+    platform = candidate["platform"]
     connection_id = candidate.get("connection_id")
+
+    if platform == "github":
+        if not connection_id:
+            raise ValueError(
+                f"GitHub readiness candidate {candidate.get('id')} has no connection_id; "
+                "a GitHub App Connection is required"
+            )
+        connection = await storage.get_connection(uuid.UUID(connection_id))
+        if connection is None:
+            raise ValueError(f"Connection {connection_id} not found")
+        from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+        return await build_github_adapter_from_connection(connection)
+
+    # Non-GitHub platforms (ADO etc.) use PAT/token from connection or env.
     if not connection_id:
-        return create_adapter(candidate["platform"])
+        return create_adapter(platform)
     connection = await storage.get_connection(uuid.UUID(connection_id))
     token = await storage.get_connection_token(uuid.UUID(connection_id))
     return create_adapter(
-        candidate["platform"],
+        platform,
         token_override=token,
         org_url_override=(connection or {}).get("org_url") or None,
     )
@@ -259,6 +276,8 @@ async def create_or_update_candidate_from_pr(
     await _post_readiness_status(adapter, pr, "pending", "Guardian readiness waiting")
     if is_new:
         await _post_review_pending(adapter, pr)
+        # Post initial sticky guidance comment (no review deeplink yet)
+        await upsert_guidance_comment(adapter, pr, "pending", storage=storage)
     return await evaluate_candidate(
         uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url
     )
@@ -328,7 +347,9 @@ async def evaluate_candidate(
             stale_after_minutes=DEFAULT_REVIEWING_STALE_MINUTES,
         )
         if recovered is None:
-            raise LookupError(f"Readiness candidate not found after stale recovery: {candidate_id}")
+            raise LookupError(
+                f"Readiness candidate not found after stale recovery: {candidate_id}"
+            )
         candidate = recovered
 
     link = await storage.get_repo_link(uuid.UUID(candidate["repo_link_id"]))

@@ -40,9 +40,7 @@ def parse_archmap_artifact(
         return ArchmapContext(commit=commit, error="artifact files is not an object")
 
     changed = {
-        normalized
-        for path in (changed_files or [])
-        if (normalized := _normalize_path(path))
+        normalized for path in (changed_files or []) if (normalized := _normalize_path(path))
     }
     files: dict[str, ArchmapFile] = {}
     for raw_path, raw_file in files_obj.items():

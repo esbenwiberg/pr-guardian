@@ -1,0 +1,45 @@
+contract_version: 1
+title: "Add deterministic GitHub App sandbox E2E harness"
+depends_on:
+  - 01-github-app-connection-data-model
+  - 02-github-installation-token-adapter
+  - 03-github-app-setup-and-merge-gates
+  - 04-review-postback-guidance-and-approvals
+  - 05-chatops-mention-reactions-and-rereview
+scenarios:
+  - id: fake-llm-provider-deterministic
+    given:
+      - "Guardian is configured with the fake provider"
+      - "a PR diff contains the E2E finding marker"
+    when:
+      - "review agents run"
+    then:
+      - "the same deterministic finding is produced every time"
+      - "no external LLM network call is made"
+  - id: github-app-e2e-script-contract
+    given:
+      - "required GitHub App credentials are missing"
+    when:
+      - "scripts/github-app-e2e.sh --check starts"
+    then:
+      - "it fails fast with actionable setup instructions"
+      - "it does not call GitHub"
+      - "it does not mutate any repository"
+      - "it documents the full live command as manual validation"
+required_facts:
+  - id: fact-fake-llm-provider-deterministic
+    proves:
+      - fake-llm-provider-deterministic
+    kind: unit-test
+    artifact:
+      path: tests/test_fake_llm_provider.py
+      change: create
+    command: python -m pytest tests/test_fake_llm_provider.py::test_fake_llm_provider_returns_stable_review_json_without_network
+  - id: fact-github-app-e2e-script-check-is-local
+    proves:
+      - github-app-e2e-script-contract
+    kind: smoke-script
+    artifact:
+      path: scripts/github-app-e2e.sh
+      change: create
+    command: bash scripts/github-app-e2e.sh --check

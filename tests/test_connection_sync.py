@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,11 +30,26 @@ async def _make_session_factory():
     return engine, async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-class _FakeGitHubAdapter:
-    called_tokens: list[str] = []
+def _test_rsa_pem() -> str:
+    """Generate a fresh RSA-2048 private key for test App connections."""
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
 
-    def __init__(self, token: str):
-        self.called_tokens.append(token)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    return key.private_bytes(
+        encoding=serialization.Encoding.PEM,
+        format=serialization.PrivateFormat.TraditionalOpenSSL,
+        encryption_algorithm=serialization.NoEncryption(),
+    ).decode()
+
+
+class _FakeGitHubAdapter:
+    """Fake GitHubAdapter that tracks whether it was created with App auth."""
+
+    called_with_app_auth: list[bool] = []
+
+    def __init__(self, token: str = "", *, app_auth=None):
+        _FakeGitHubAdapter.called_with_app_auth.append(app_auth is not None)
 
     async def list_accessible_repos(self):
         return [
@@ -84,17 +99,22 @@ async def test_pr_sync_uses_only_healthy_sync_enabled_connections():
     from pr_guardian.core import pr_sync
 
     engine, factory = await _make_session_factory()
-    _FakeGitHubAdapter.called_tokens = []
+    _FakeGitHubAdapter.called_with_app_auth = []
     try:
         with (
             patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
             patch("pr_guardian.persistence.exclusions.async_session", lambda: factory()),
         ):
             profile = await create_profile("Standard", settings={"severity_floor": "medium"})
+            # GitHub App connection — the only kind that triggers sync now
+            pem = _test_rsa_pem()
             github_sync = await create_connection(
-                "Healthy GitHub Sync",
+                "Healthy GitHub App Sync",
                 platform="github",
-                token="gh-token-connection",
+                auth_kind="github_app",
+                app_id="12345",
+                installation_id="98765",
+                private_key=pem,
                 sync_enabled=True,
                 health_status="healthy",
             )
@@ -106,10 +126,14 @@ async def test_pr_sync_uses_only_healthy_sync_enabled_connections():
                 sync_enabled=False,
                 health_status="healthy",
             )
+            # Unhealthy GitHub App connection — must be skipped (health_status filter)
             await create_connection(
-                "Unhealthy GitHub Sync",
+                "Unhealthy GitHub App Sync",
                 platform="github",
-                token="gh-token-unhealthy",
+                auth_kind="github_app",
+                app_id="99999",
+                installation_id="11111",
+                private_key=pem,
                 sync_enabled=True,
                 health_status="unhealthy",
             )
@@ -131,7 +155,10 @@ async def test_pr_sync_uses_only_healthy_sync_enabled_connections():
             ):
                 await pr_sync.run_pr_sync()
 
-            assert _FakeGitHubAdapter.called_tokens == ["gh-token-connection"]
+            # Exactly one adapter was created, and it used App auth (not a PAT token)
+            assert _FakeGitHubAdapter.called_with_app_auth == [True], (
+                "Expected exactly one GitHubAdapter created via App auth"
+            )
             assert link["connection_id"] == ado_manual["id"]
 
             async with factory() as session:
@@ -149,7 +176,7 @@ async def test_pr_sync_uses_only_healthy_sync_enabled_connections():
                 ).one()
 
             assert str(synced_pr.connection_id) == github_sync["id"]
-            assert synced_pr.connection_snapshot["name"] == "Healthy GitHub Sync"
+            assert synced_pr.connection_snapshot["name"] == "Healthy GitHub App Sync"
             assert str(sync_source.connection_id) == github_sync["id"]
             assert sync_source.connection_snapshot["platform"] == "github"
     finally:
@@ -339,5 +366,68 @@ async def test_non_opted_prs_stay_in_pull_requests_api_not_reviews(monkeypatch):
             assert reviews_response.status_code == 200
             review_titles = [item["title"] for item in reviews_response.json()["items"]]
             assert "Unlinked browse-only pull request" not in review_titles
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_sync_github_guarded_isolates_per_connection_errors():
+    """_sync_github_guarded must not propagate exceptions — logs and returns normally."""
+    from pr_guardian.core import pr_sync
+
+    connection = {"id": "conn-abc", "name": "Failing GitHub App"}
+
+    with patch.object(
+        pr_sync,
+        "_sync_github",
+        new=AsyncMock(side_effect=RuntimeError("network failure")),
+    ):
+        # Must not raise — exception isolation is the point of the wrapper
+        await pr_sync._sync_github_guarded(connection)
+
+
+@pytest.mark.asyncio
+async def test_github_sync_ignores_github_token_without_app_connection(monkeypatch):
+    """Even with GITHUB_TOKEN set in the environment, the sync path must not use it.
+
+    A healthy, sync-enabled GitHub connection that lacks ``auth_kind='github_app'``
+    (i.e. a legacy PAT connection) must be skipped — not silently promoted with the
+    env token.  GitHubAdapter must never be instantiated from the env fallback.
+    """
+    from pr_guardian.core import pr_sync
+
+    engine, factory = await _make_session_factory()
+    adapter_instantiated: list[dict] = []
+
+    class _CapturingAdapter:
+        def __init__(self, *args, **kwargs):
+            adapter_instantiated.append({"args": args, "kwargs": kwargs})
+
+    monkeypatch.setenv("GITHUB_TOKEN", "env-token-must-not-be-used")
+
+    try:
+        with (
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch("pr_guardian.persistence.exclusions.async_session", lambda: factory()),
+        ):
+            # Create a healthy sync-enabled GitHub connection WITHOUT auth_kind='github_app'
+            # (legacy PAT shape — auth_kind is NULL)
+            await create_connection(
+                "Legacy PAT GitHub",
+                platform="github",
+                token="gh-token-legacy-pat",
+                sync_enabled=True,
+                health_status="healthy",
+            )
+
+            with patch("pr_guardian.platform.github.GitHubAdapter", _CapturingAdapter):
+                await pr_sync.run_pr_sync()
+
+            # The legacy PAT connection must have been skipped — GitHubAdapter never
+            # instantiated and GITHUB_TOKEN never used.
+            assert adapter_instantiated == [], (
+                "GitHubAdapter was created from a non-App connection or env token. "
+                f"Calls: {adapter_instantiated}"
+            )
     finally:
         await engine.dispose()

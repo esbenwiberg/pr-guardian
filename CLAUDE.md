@@ -110,8 +110,15 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
 - `GUARDIAN_DEV_ADMIN=1` bypasses admin auth — dev only.
 - At least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` must be set for agent
   calls. Mechanical gates work without either.
-- `GITHUB_TOKEN` + `GITHUB_WEBHOOK_SECRET` enable platform mode; ADO is the
-  alternative (`ADO_PAT`, `ADO_ORG_URL`).
+- **GitHub integration** uses a GitHub App Connection stored via the `/profiles`
+  Connections UI. `GITHUB_WEBHOOK_SECRET` is required for webhook signature
+  verification. Do **not** set `GITHUB_TOKEN` — Guardian no longer reads it for
+  GitHub API calls. See `docs/github-app-setup.md` for full setup instructions.
+- **ADO integration** uses `ADO_PAT` + `ADO_ORG_URL` from the environment.
+- **Sandbox E2E**: `scripts/github-app-e2e.sh` is an opt-in harness that
+  validates the full GitHub App review flow against
+  `esbenwiberg/pr-guardian-e2e`. Run with `--check` to verify prerequisites.
+  Do not use it against production repos.
 - Node is used only for Tailwind CSS and browser smoke scripts. Run
   `npm install` if `node_modules/` is absent, then `npm run build:css` for a
   one-shot dashboard CSS rebuild.

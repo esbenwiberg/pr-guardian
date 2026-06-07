@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 from pr_guardian.platform.ado import ADOAdapter
 from pr_guardian.platform.github import GitHubAdapter
 from pr_guardian.platform.models import WebhookPayload
@@ -17,13 +15,18 @@ def create_adapter(
 ) -> PlatformAdapter:
     """Create the appropriate platform adapter.
 
-    For GitHub, pass token_override to use a specific token instead of GITHUB_TOKEN.
-    Use create_github_adapter() when you need async PAT resolution from the database.
+    For GitHub, ``token_override`` must be supplied explicitly; there is no
+    GITHUB_TOKEN env fallback — callers must resolve a GitHub App Connection.
+    Use ``build_github_adapter_from_connection()`` from ``github_auth`` for
+    the standard runtime path.
+
+    For ADO, ``token_override`` / ``org_url_override`` can fall back to env
+    vars (``ADO_PAT``, ``ADO_ORG_URL``).
     """
+    import os
+
     if platform == "github":
-        token = (
-            token_override if token_override is not None else os.environ.get("GITHUB_TOKEN", "")
-        )
+        token = token_override if token_override is not None else ""
         return GitHubAdapter(token=token)
 
     if platform == "ado":
@@ -36,15 +39,53 @@ def create_adapter(
     raise ValueError(f"Unknown platform: {platform}")
 
 
-async def create_github_adapter(pat_name: str | None = None) -> GitHubAdapter:
-    """Create a GitHubAdapter, resolving the token from DB or env var.
+async def create_github_adapter(connection_id_or_name: str | None = None) -> GitHubAdapter:
+    """Create a GitHubAdapter from a stored GitHub App Connection.
 
-    Priority: named PAT by pat_name > default PAT in DB > GITHUB_TOKEN env var.
+    Raises ``ValueError`` if no suitable GitHub App Connection can be found.
+    Does NOT fall back to ``GITHUB_TOKEN``.
     """
     from pr_guardian.persistence import storage
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
 
-    token = await storage.resolve_github_token(pat_name)
-    return GitHubAdapter(token=token)
+    connection: dict | None = None
+    if connection_id_or_name:
+        import uuid
+
+        try:
+            uid = uuid.UUID(connection_id_or_name)
+            connection = await storage.get_connection(uid)
+        except ValueError:
+            # Not a UUID — search by name among GitHub App connections
+            matched = [
+                c
+                for c in await storage.list_connections()
+                if c.get("name") == connection_id_or_name
+                and c.get("platform") == "github"
+                and c.get("auth_kind") == "github_app"
+            ]
+            if matched:
+                connection = matched[0]
+        if connection is None:
+            raise ValueError(
+                f"No GitHub App Connection found with id or name {connection_id_or_name!r}. "
+                "GITHUB_TOKEN env fallback has been removed."
+            )
+    else:
+        app_connections = [
+            c
+            for c in await storage.list_connections()
+            if c.get("platform") == "github" and c.get("auth_kind") == "github_app"
+        ]
+        if not app_connections:
+            raise ValueError(
+                "No GitHub App Connection found. "
+                "GITHUB_TOKEN env fallback has been removed — "
+                "add a GitHub App Connection via the Connections UI."
+            )
+        connection = app_connections[0]
+
+    return await build_github_adapter_from_connection(connection)
 
 
 def normalize_webhook(payload: WebhookPayload) -> PlatformPR | None:

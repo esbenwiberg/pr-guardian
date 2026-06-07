@@ -41,6 +41,7 @@ from pr_guardian.models.context import ArchmapContext, RepoRiskClass, ReviewCont
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
+from pr_guardian.platform.guidance import upsert_guidance_comment as _upsert_guidance_comment
 from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.triage.classifier import classify
 from pr_guardian.triage.hotspots import load_hotspots
@@ -212,16 +213,21 @@ async def run_review(
 
     # Set pending review status (skip for synthetic PRs like repo reviews or stale automatic runs)
     if not side_effects_skipped:
+        review_url = build_review_detail_url(str(review_db_id or ""), base_url) or ""
         try:
             await _post_review_status(
                 adapter,
                 pr,
                 "pending",
                 "Guardian review in progress",
-                target_url=build_review_detail_url(str(review_db_id or ""), base_url) or "",
+                target_url=review_url,
             )
         except Exception as e:
             log.warning("set_status_failed", error=str(e))
+        # Update guidance comment with review-in-progress state and deeplink
+        await _upsert_guidance_comment(
+            adapter, pr, "reviewing", review_url=review_url, storage=storage
+        )
 
     # Link the previous completed review for this PR so re-reviews clean up their
     # predecessor's inline comments instead of orphaning them. Resolved centrally
@@ -1449,10 +1455,19 @@ async def _post_results(
     inline_enabled = comments_enabled and comment_mode == "inline"
     summary_enabled = comments_enabled and comment_mode == "summary"
 
+    postback: dict = {}
+    review_url = build_review_detail_url(result.review_id, base_url) or ""
+
+    # guardian/review status
+    status_state = ""
     try:
         await _post_result_status(adapter, pr, result, base_url=base_url)
+        status_state = _decision_to_status_state(result)
+        postback["status_posted"] = True
+        postback["status_state"] = status_state
     except Exception as e:
         log.warning("post_review_status_failed", pr_id=pr.pr_id, error=str(e))
+        postback["status_posted"] = False
 
     if inline_enabled:
         await _post_inline_and_summary(
@@ -1467,19 +1482,53 @@ async def _post_results(
             original_review_id=original_review_id,
             post_summary=comments_enabled,
             labels_enabled=config.side_effects.labels,
+            postback=postback,
         )
-        await _apply_platform_actions(adapter, pr, result, config, comment)
-        return
+        try:
+            await _apply_platform_actions(adapter, pr, result, config, comment, postback=postback)
+        except Exception as e:
+            log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
+    else:
+        try:
+            if summary_enabled:
+                await adapter.post_comment(pr, comment)
+            if config.side_effects.labels:
+                for label in labels:
+                    await adapter.add_label(pr, label)
+            await _apply_platform_actions(adapter, pr, result, config, comment, postback=postback)
+        except Exception as e:
+            log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
 
-    try:
-        if summary_enabled:
-            await adapter.post_comment(pr, comment)
-        if config.side_effects.labels:
-            for label in labels:
-                await adapter.add_label(pr, label)
-        await _apply_platform_actions(adapter, pr, result, config, comment)
-    except Exception as e:
-        log.error("post_results_failed", pr_id=pr.pr_id, error=str(e))
+    # Sticky guidance comment — always attempted for adapters that support it
+    guidance_state = _decision_to_guidance_state(result)
+    comment_id = await _upsert_guidance_comment(
+        adapter,
+        pr,
+        guidance_state,
+        review_url=review_url,
+        storage=storage,
+    )
+    if comment_id is not None:
+        postback["guidance_comment_id"] = comment_id
+        postback["guidance_posted"] = True
+    elif getattr(adapter, "upsert_guidance_comment", None) is not None:
+        postback["guidance_posted"] = False
+
+    result.postback_meta = postback
+
+
+def _decision_to_status_state(result: ReviewResult) -> str:
+    # Delegates to _decision_to_guidance_state; kept separate so the postback
+    # panel label and the guidance comment state can diverge independently later.
+    return _decision_to_guidance_state(result)
+
+
+def _decision_to_guidance_state(result: ReviewResult) -> str:
+    if result.decision == Decision.AUTO_APPROVE:
+        return "success"
+    if result.decision == Decision.HARD_BLOCK:
+        return "blocked"
+    return "failure"
 
 
 async def _apply_platform_actions(
@@ -1488,8 +1537,12 @@ async def _apply_platform_actions(
     result: ReviewResult,
     config: GuardianConfig,
     comment: str,
+    *,
+    postback: dict | None = None,
 ) -> None:
     """Apply non-status platform actions based on decision and Profile switches."""
+    if postback is None:
+        postback = {}
     if result.decision == Decision.AUTO_APPROVE:
         if config.platform_approval_enabled and config.side_effects.formal_approve:
             fork: bool | None = None
@@ -1499,6 +1552,13 @@ async def _apply_platform_actions(
                 log.warning("fork_metadata_lookup_failed", pr_id=pr.pr_id, error=str(exc))
             if fork is False:
                 await adapter.approve_pr(pr)
+                postback["formal_approval"] = "posted"
+            elif fork is True:
+                postback["formal_approval"] = "skipped_fork"
+            else:
+                postback["formal_approval"] = "skipped_fork_unknown"
+        else:
+            postback["formal_approval"] = "skipped_profile"
         if (
             config.side_effects.reviewers
             and result.trust_tier
@@ -1529,8 +1589,11 @@ async def _post_inline_and_summary(
     original_review_id: str | None,
     post_summary: bool = True,
     labels_enabled: bool = True,
+    postback: dict | None = None,
 ) -> None:
     """Handle inline comment mode: delete old, post inline, then post summary."""
+    if postback is None:
+        postback = {}
     threshold = config.inline_comments.severity_threshold.lower()
     threshold_ord = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER["medium"])
 
@@ -1584,6 +1647,7 @@ async def _post_inline_and_summary(
                     pr.pr_id,
                     pr.repo,
                 )
+            postback["inline_comments_posted"] = len(inline_result.posted_ids)
             if inline_result.skipped:
                 log.warning(
                     "inline_comments_not_anchored",
@@ -1592,6 +1656,9 @@ async def _post_inline_and_summary(
                 )
         except Exception as e:
             log.error("post_inline_comments_failed", pr_id=pr.pr_id, error=str(e))
+            postback["inline_comments_posted"] = 0
+    else:
+        postback["inline_comments_posted"] = 0
 
     # Summary comment posts last in inline mode when comments are enabled.
     try:

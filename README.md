@@ -101,14 +101,18 @@ docker compose -f infra/docker-compose/docker-compose.yml up
 # LLM provider (at least one required)
 export ANTHROPIC_API_KEY=sk-ant-...
 
-# Platform integration
-export GITHUB_TOKEN=ghp_...
+# GitHub webhook signature verification
 export GITHUB_WEBHOOK_SECRET=your-secret
 
-# Azure DevOps (alternative)
+# Azure DevOps (alternative platform)
 # export ADO_PAT=...
 # export ADO_ORG_URL=https://dev.azure.com/yourorg
 ```
+
+> **GitHub integration**: Guardian authenticates to GitHub through a **GitHub App
+> Connection**, not a `GITHUB_TOKEN`. App credentials are stored encrypted in the
+> Guardian database via the `/profiles` → GitHub Apps UI. See
+> [docs/github-app-setup.md](docs/github-app-setup.md) for setup instructions.
 
 ## Usage
 

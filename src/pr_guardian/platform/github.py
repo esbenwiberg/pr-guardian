@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+from typing import TYPE_CHECKING
 from zipfile import BadZipFile, ZipFile
 
 import httpx
@@ -16,6 +17,9 @@ from pr_guardian.platform.protocol import (
     PlatformPRMetadata,
     PlatformReadinessSignal,
 )
+
+if TYPE_CHECKING:
+    from pr_guardian.platform.github_auth import GitHubAppAuth
 
 log = structlog.get_logger()
 
@@ -60,25 +64,46 @@ def _extract_archmap_json(zip_bytes: bytes) -> str | None:
 
 
 class GitHubAdapter:
-    """GitHub platform adapter using REST API."""
+    """GitHub platform adapter using REST API.
 
-    def __init__(self, token: str = ""):
+    Accepts either:
+    - ``app_auth``: a GitHubAppAuth instance that mints installation tokens
+      (preferred for all runtime GitHub App paths).
+    - ``token``: a static PAT or test token (used in tests and legacy paths).
+
+    When ``app_auth`` is provided the HTTP client uses Bearer auth that calls
+    ``app_auth.get_token()`` on every request, transparently refreshing the
+    installation token before expiry.
+    """
+
+    def __init__(self, token: str = "", *, app_auth: GitHubAppAuth | None = None):
         self._token = token
+        self._app_auth = app_auth
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
+            from pr_guardian.platform.github_auth import _InstallationBearerAuth
+
             headers: dict[str, str] = {
                 "Accept": "application/vnd.github.v3+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             }
-            if self._token:
-                headers["Authorization"] = f"token {self._token}"
-            self._client = httpx.AsyncClient(
-                base_url="https://api.github.com",
-                headers=headers,
-                timeout=30.0,
-            )
+            if self._app_auth is not None:
+                self._client = httpx.AsyncClient(
+                    base_url="https://api.github.com",
+                    headers=headers,
+                    auth=_InstallationBearerAuth(self._app_auth.get_token),
+                    timeout=30.0,
+                )
+            else:
+                if self._token:
+                    headers["Authorization"] = f"token {self._token}"
+                self._client = httpx.AsyncClient(
+                    base_url="https://api.github.com",
+                    headers=headers,
+                    timeout=30.0,
+                )
         return self._client
 
     @staticmethod
@@ -383,6 +408,57 @@ class GitHubAdapter:
                 )
             )
         return signals
+
+    async def upsert_guidance_comment(
+        self,
+        pr: PlatformPR,
+        body: str,
+        *,
+        stored_comment_id: str | None = None,
+    ) -> str:
+        """Create or update the sticky guidance comment on a PR.
+
+        Recovery order:
+        1. If stored_comment_id is given, attempt PATCH; skip recovery on 404.
+        2. If no stored ID or the stored comment was deleted, scan PR comments
+           for the hidden marker and patch that comment.
+        3. If not found at all, create a new comment.
+
+        Returns the platform comment ID (new or existing).
+        """
+        from pr_guardian.decision.actions import GUIDANCE_MARKER
+
+        client = self._get_client()
+
+        if stored_comment_id:
+            resp = await client.patch(
+                f"/repos/{pr.repo}/issues/comments/{stored_comment_id}",
+                json={"body": body},
+            )
+            if resp.status_code != 404:
+                resp.raise_for_status()
+                return stored_comment_id
+            # 404: comment was deleted — fall through to search/recreate
+
+        # Scan existing PR comments for the hidden marker
+        comments = await self.list_issue_comments(pr.repo, pr.pr_id)
+        for c in comments:
+            if GUIDANCE_MARKER in (c.get("body") or ""):
+                found_id = str(c["id"])
+                resp = await client.patch(
+                    f"/repos/{pr.repo}/issues/comments/{found_id}",
+                    json={"body": body},
+                )
+                resp.raise_for_status()
+                return found_id
+
+        # No existing comment — create one
+        resp = await client.post(
+            f"/repos/{pr.repo}/issues/{pr.pr_id}/comments",
+            json={"body": body},
+        )
+        resp.raise_for_status()
+        return str(resp.json()["id"])
 
     async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
         await self.set_status(pr, state, description, context="guardian/readiness")
@@ -849,6 +925,17 @@ class GitHubAdapter:
         )
         if resp.status_code not in (200, 201):
             resp.raise_for_status()
+
+    async def create_issue_comment_reaction(
+        self, repo: str, comment_id: str | int, content: str
+    ) -> None:
+        """Add a reaction to an issue comment. 200 (already exists) and 201 are both success."""
+        client = self._get_client()
+        resp = await client.post(
+            f"/repos/{repo}/issues/comments/{comment_id}/reactions",
+            json={"content": content},
+        )
+        resp.raise_for_status()
 
     async def close(self) -> None:
         if self._client:

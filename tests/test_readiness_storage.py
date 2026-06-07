@@ -5,6 +5,8 @@ from __future__ import annotations
 import uuid
 from unittest.mock import patch
 
+import uuid as _uuid
+
 import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -53,10 +55,19 @@ sa.Table(
     sa.Column("name", sa.String(128), unique=True),
     sa.Column("description", sa.String(256), nullable=False, server_default=""),
     sa.Column("platform", sa.String(16), nullable=False),
+    sa.Column("auth_kind", sa.String(32)),
     sa.Column("org_url", sa.Text),
     sa.Column("encrypted_token", sa.Text),
     sa.Column("token_secret_ref", sa.Text),
     sa.Column("token_prefix", sa.String(20), nullable=False, server_default=""),
+    sa.Column("app_id", sa.String(64)),
+    sa.Column("app_slug", sa.String(128)),
+    sa.Column("installation_id", sa.String(64)),
+    sa.Column("installation_account", sa.String(256)),
+    sa.Column("installation_target_type", sa.String(32)),
+    sa.Column("encrypted_private_key", sa.Text),
+    sa.Column("private_key_fingerprint", sa.String(128)),
+    sa.Column("app_permissions", sa.JSON),
     sa.Column("health_status", sa.String(16), nullable=False, server_default="unknown"),
     sa.Column("health_message", sa.Text, nullable=False, server_default=""),
     sa.Column("health_checked_at", sa.DateTime(timezone=True)),
@@ -178,6 +189,19 @@ sa.Table(
     sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     sa.Column("finished_at", sa.DateTime(timezone=True)),
     sa.Column("duration_ms", sa.Integer),
+    sa.Column("postback_meta", sa.JSON),
+)
+sa.Table(
+    "guidance_comments",
+    _meta,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("platform", sa.String(16), nullable=False),
+    sa.Column("repo", sa.String(256), nullable=False),
+    sa.Column("pr_id", sa.String(64), nullable=False),
+    sa.Column("comment_id", sa.String(256), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    sa.UniqueConstraint("platform", "repo", "pr_id", name="uq_guidance_comment_pr"),
 )
 sa.Table(
     "scans",
@@ -327,7 +351,14 @@ sa.Table(
 
 
 async def _make_session_factory():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    # Use a unique named shared-memory database so multiple connections share the
+    # same data (needed when background tasks open their own sessions) while each
+    # connection gets its own transaction (unlike StaticPool which reuses one
+    # connection and causes rollback interference between concurrent sessions).
+    db_name = f"testdb_{_uuid.uuid4().hex}"
+    engine = create_async_engine(
+        f"sqlite+aiosqlite:///file:{db_name}?mode=memory&cache=shared&uri=true",
+    )
     async with engine.begin() as conn:
         await conn.run_sync(_meta.create_all)
     return engine, async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)

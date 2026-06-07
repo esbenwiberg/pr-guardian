@@ -361,9 +361,7 @@ async def test_check_event_recovers_errored_candidate():
                 metadata=PlatformPRMetadata(head_sha="sha1"),
                 signals=[PlatformReadinessSignal("ci", "success", "check_run")],
             )
-            with patch(
-                "pr_guardian.core.readiness._adapter_for_candidate", return_value=healthy
-            ):
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=healthy):
                 evaluated = await evaluate_candidates_for_sha(
                     platform="github",
                     repo="octo/service",
@@ -471,18 +469,27 @@ async def test_automatic_review_startup_failure_is_marked_and_reported(monkeypat
                 AsyncMock(side_effect=RuntimeError("profile snapshot invalid")),
             )
 
-            candidate = await create_or_update_candidate_from_pr(_pr(), adapter=adapter)
+            # Capture the asyncio Task spawned by _start_automatic_review so we
+            # can await it explicitly. This prevents any concurrent DB session
+            # from racing the background task's session on the shared in-memory
+            # connection (which would cause pool reset to rollback pending writes).
+            bg_tasks: list[asyncio.Task] = []
+            _orig_create_task = asyncio.create_task
+
+            def _capture_task(coro, **kw):
+                t = _orig_create_task(coro, **kw)
+                bg_tasks.append(t)
+                return t
+
+            with patch("pr_guardian.core.readiness.asyncio.create_task", _capture_task):
+                candidate = await create_or_update_candidate_from_pr(_pr(), adapter=adapter)
             assert candidate is not None
 
-            linked_reviews = []
-            for _ in range(20):
-                reviews = await storage.list_reviews(limit=10)
-                linked_reviews = [
-                    r for r in reviews if r.get("candidate_id") == candidate["id"]
-                ]
-                if linked_reviews and linked_reviews[0]["stage"] == "error":
-                    break
-                await asyncio.sleep(0.01)
+            # Wait for _run() to finish before opening any DB session from this test.
+            await asyncio.gather(*bg_tasks, return_exceptions=True)
+
+            reviews = await storage.list_reviews(limit=10)
+            linked_reviews = [r for r in reviews if r.get("candidate_id") == candidate["id"]]
             assert len(linked_reviews) == 1
             review = linked_reviews[0]
             assert review["stage"] == "error"

@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pr_guardian.models.output import ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.persistence import exclusions as _exclusions
-from pr_guardian.persistence.database import async_session
+from pr_guardian.persistence.database import _get_engine, async_session
 from pr_guardian.persistence.models import (
     AdminRow,
     AgentResultRow,
@@ -31,6 +31,7 @@ from pr_guardian.persistence.models import (
     FindingDismissalRow,
     FindingRow,
     GlobalConfigRow,
+    GuidanceCommentRow,
     MechanicalResultRow,
     PostedInlineCommentRow,
     ProfileAuditEventRow,
@@ -94,9 +95,18 @@ def _safe_token_prefix(prefix: str | None) -> str:
     return prefix[:8] + "..."
 
 
+def _private_key_fingerprint(pem: str) -> str:
+    """Compute a stable sha256 fingerprint of a PEM private key for display."""
+    digest = hashlib.sha256(pem.strip().encode()).hexdigest()
+    return f"sha256:{digest}"
+
+
 def _secretish_key(key: str) -> bool:
     lowered = key.lower()
-    if any(marker in lowered for marker in ("token", "secret", "password", "api_key")):
+    if any(
+        marker in lowered
+        for marker in ("token", "secret", "password", "api_key", "encrypted_private")
+    ):
         return True
     return lowered in {"pat", "authorization"} or lowered.endswith("_pat")
 
@@ -255,8 +265,18 @@ def _connection_to_dict(row: ConnectionRow) -> dict[str, Any]:
         "name": row.name,
         "description": row.description,
         "platform": row.platform,
+        "auth_kind": row.auth_kind,
         "org_url": row.org_url,
         "token_prefix": _safe_token_prefix(row.token_prefix),
+        # GitHub App identity fields — no secret material
+        "app_id": row.app_id,
+        "app_slug": row.app_slug,
+        "installation_id": row.installation_id,
+        "installation_account": row.installation_account,
+        "installation_target_type": row.installation_target_type,
+        "private_key_fingerprint": row.private_key_fingerprint,
+        "app_permissions": row.app_permissions,
+        # encrypted_private_key is intentionally excluded
         "health_status": row.health_status,
         "health_message": row.health_message,
         "health_checked_at": row.health_checked_at.isoformat() if row.health_checked_at else None,
@@ -488,6 +508,7 @@ async def create_connection(
     name: str,
     *,
     platform: str,
+    auth_kind: str | None = None,
     token: str | None = None,
     org_url: str | None = None,
     description: str = "",
@@ -496,6 +517,14 @@ async def create_connection(
     health_message: str = "",
     is_default: bool = False,
     actor: str = "system",
+    # GitHub App fields
+    app_id: str | None = None,
+    app_slug: str | None = None,
+    installation_id: str | None = None,
+    installation_account: str | None = None,
+    installation_target_type: str | None = None,
+    private_key: str | None = None,
+    app_permissions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     from pr_guardian.persistence.crypto import encrypt
 
@@ -511,9 +540,18 @@ async def create_connection(
             name=name,
             description=description,
             platform=platform,
+            auth_kind=auth_kind,
             org_url=org_url,
             encrypted_token=encrypt(token) if token else None,
             token_prefix=_token_prefix(token) if token else "",
+            app_id=app_id,
+            app_slug=app_slug,
+            installation_id=installation_id,
+            installation_account=installation_account,
+            installation_target_type=installation_target_type,
+            encrypted_private_key=encrypt(private_key) if private_key else None,
+            private_key_fingerprint=_private_key_fingerprint(private_key) if private_key else None,
+            app_permissions=app_permissions,
             health_status=health_status,
             health_message=health_message,
             sync_enabled=sync_enabled,
@@ -524,6 +562,11 @@ async def create_connection(
         session.add(row)
         await session.flush()
         audit_before, audit_after = _audit_before_after(None, _connection_to_dict(row))
+        if private_key is not None and audit_after is not None:
+            diff = audit_after.setdefault("diff", {})
+            fields = audit_after.setdefault("fields", {})
+            fields["private_key_secret"] = "set"
+            diff["private_key_secret"] = {"before": None, "after": "set"}
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
@@ -579,6 +622,17 @@ async def get_connection_token(connection_id: uuid.UUID) -> str:
         return decrypt(row.encrypted_token)
 
 
+async def get_connection_private_key(connection_id: uuid.UUID) -> str:
+    """Decrypt and return the GitHub App private key PEM. Returns empty string if absent."""
+    from pr_guardian.persistence.crypto import decrypt
+
+    async with async_session() as session:
+        row = await session.get(ConnectionRow, connection_id)
+        if row is None or row.encrypted_private_key is None:
+            return ""
+        return decrypt(row.encrypted_private_key)
+
+
 async def update_connection(
     connection_id: uuid.UUID,
     *,
@@ -593,6 +647,14 @@ async def update_connection(
     health_checked_at: datetime | None = None,
     is_default: bool | None = None,
     actor: str = "system",
+    # GitHub App fields
+    app_id: str | None = None,
+    app_slug: str | None = None,
+    installation_id: str | None = None,
+    installation_account: str | None = None,
+    installation_target_type: str | None = None,
+    private_key: str | None = None,
+    app_permissions: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     from pr_guardian.persistence.crypto import encrypt
 
@@ -632,6 +694,21 @@ async def update_connection(
             row.health_checked_at = health_checked_at
         if is_default is not None:
             row.is_default = is_default
+        if app_id is not None:
+            row.app_id = app_id
+        if app_slug is not None:
+            row.app_slug = app_slug
+        if installation_id is not None:
+            row.installation_id = installation_id
+        if installation_account is not None:
+            row.installation_account = installation_account
+        if installation_target_type is not None:
+            row.installation_target_type = installation_target_type
+        if private_key is not None:
+            row.encrypted_private_key = encrypt(private_key)
+            row.private_key_fingerprint = _private_key_fingerprint(private_key)
+        if app_permissions is not None:
+            row.app_permissions = app_permissions
         row.updated_by = actor
         row.updated_at = _now()
         after = _connection_to_dict(row)
@@ -643,6 +720,13 @@ async def update_connection(
             before_fields["token_secret"] = "changed"
             fields["token_secret"] = "changed"
             diff["token_secret"] = {"before": "changed", "after": "changed"}
+        if private_key is not None and audit_after is not None:
+            diff = audit_after.setdefault("diff", {})
+            fields = audit_after.setdefault("fields", {})
+            before_fields = audit_before.setdefault("fields", {}) if audit_before else {}
+            before_fields["private_key_secret"] = "changed"
+            fields["private_key_secret"] = "changed"
+            diff["private_key_secret"] = {"before": "changed", "after": "changed"}
         session.add(
             ProfileAuditEventRow(
                 actor=actor,
@@ -1616,9 +1700,7 @@ async def mark_review_failed(
             if pipeline_log is not None:
                 row.pipeline_log = pipeline_log
             if row.started_at:
-                row.duration_ms = int(
-                    (now - _ensure_aware(row.started_at)).total_seconds() * 1000
-                )
+                row.duration_ms = int((now - _ensure_aware(row.started_at)).total_seconds() * 1000)
             await session.commit()
 
 
@@ -1657,10 +1739,10 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.cost_usd = result.cost_usd
         row.stage = "complete"
         row.finished_at = now
+        if result.postback_meta:
+            row.postback_meta = result.postback_meta
         if row.started_at:
-            row.duration_ms = int(
-                (now - _ensure_aware(row.started_at)).total_seconds() * 1000
-            )
+            row.duration_ms = int((now - _ensure_aware(row.started_at)).total_seconds() * 1000)
 
         # Mechanical results
         for mech in result.mechanical_results:
@@ -2008,9 +2090,13 @@ async def delete_global_config(key: str) -> bool:
 
 
 async def resolve_github_token(pat_name: str | None = None) -> str:
-    """Resolve a GitHub token from unified Connections, falling back to env."""
-    import os
+    """Deprecated: GitHub runtime auth uses App Connections.
 
+    Use ``build_github_adapter_from_connection()`` from
+    ``pr_guardian.platform.github_auth`` instead.  The GITHUB_TOKEN env
+    fallback has been removed — this function now raises ``LookupError`` when
+    no stored token is found.
+    """
     from pr_guardian.persistence.crypto import decrypt
 
     try:
@@ -2048,9 +2134,13 @@ async def resolve_github_token(pat_name: str | None = None) -> str:
     except Exception:
         log.warning(
             "resolve_github_token_failed",
-            hint="DB unavailable or decrypt error; falling back to env var",
+            hint="DB unavailable or decrypt error",
         )
-    return os.environ.get("GITHUB_TOKEN", "")
+    raise LookupError(
+        "No GitHub token found in stored Connections. "
+        "GITHUB_TOKEN env fallback has been removed — "
+        "add a GitHub App Connection via the Connections UI."
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -2707,6 +2797,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "started_at": row.started_at.isoformat() if row.started_at else None,
         "finished_at": row.finished_at.isoformat() if row.finished_at else None,
         "duration_ms": row.duration_ms,
+        "postback_meta": row.postback_meta or {},
         "mechanical_results": [
             {
                 "tool": m.tool,
@@ -2939,6 +3030,83 @@ async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
             )
         ).all()
         return [r.platform_comment_id for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# Guidance comment helpers
+# ---------------------------------------------------------------------------
+
+
+async def load_guidance_comment_id(platform: str, repo: str, pr_id: str) -> str | None:
+    """Return the stored platform comment ID for the sticky guidance comment, or None."""
+    async with async_session() as session:
+        row = (
+            await session.scalars(
+                select(GuidanceCommentRow).where(
+                    GuidanceCommentRow.platform == platform,
+                    GuidanceCommentRow.repo == repo,
+                    GuidanceCommentRow.pr_id == pr_id,
+                )
+            )
+        ).first()
+        return row.comment_id if row else None
+
+
+async def save_guidance_comment_id(platform: str, repo: str, pr_id: str, comment_id: str) -> None:
+    """Upsert the guidance comment ID for a PR.
+
+    Uses an atomic UPDATE-then-INSERT for non-PostgreSQL backends and
+    INSERT … ON CONFLICT DO UPDATE for PostgreSQL, avoiding the TOCTOU
+    race inherent in a SELECT-then-INSERT pattern.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    now = datetime.now(timezone.utc)
+    async with async_session() as session:
+        if _get_engine().dialect.name != "postgresql":
+            result = await session.execute(
+                sa_update(GuidanceCommentRow)
+                .where(
+                    GuidanceCommentRow.platform == platform,
+                    GuidanceCommentRow.repo == repo,
+                    GuidanceCommentRow.pr_id == pr_id,
+                )
+                .values(comment_id=comment_id, updated_at=now)
+            )
+            if result.rowcount == 0:
+                try:
+                    session.add(
+                        GuidanceCommentRow(
+                            platform=platform,
+                            repo=repo,
+                            pr_id=pr_id,
+                            comment_id=comment_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    await session.commit()
+                except IntegrityError:
+                    # Concurrent INSERT won the race; tolerate — the comment ID is the same.
+                    await session.rollback()
+            else:
+                await session.commit()
+        else:
+            stmt = pg_insert(GuidanceCommentRow).values(
+                id=uuid.uuid4(),
+                platform=platform,
+                repo=repo,
+                pr_id=pr_id,
+                comment_id=comment_id,
+                created_at=now,
+                updated_at=now,
+            )
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_guidance_comment_pr",
+                set_={"comment_id": comment_id, "updated_at": now},
+            )
+            await session.execute(stmt)
+            await session.commit()
 
 
 # ---------------------------------------------------------------------------

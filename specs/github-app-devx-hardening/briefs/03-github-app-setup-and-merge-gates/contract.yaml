@@ -1,0 +1,63 @@
+contract_version: 1
+title: "Build GitHub App setup UI and additive merge gate enforcement"
+depends_on:
+  - 01-github-app-connection-data-model
+  - 02-github-installation-token-adapter
+scenarios:
+  - id: required-check-added-additively
+    given:
+      - "a GitHub repo already requires ci/test and lint checks"
+      - "Guardian has Administration write permission"
+    when:
+      - "Guardian enforces the merge gate"
+    then:
+      - "guardian/review is added as a required check"
+      - "ci/test and lint are still required"
+      - "other protection settings are preserved"
+  - id: repo-link-enforces-gate-before-auto-review
+    given:
+      - "a Profile Manager links a GitHub repo with auto-review enabled"
+    when:
+      - "the selected GitHub App Connection validates healthy"
+    then:
+      - "Guardian attempts to enforce guardian/review"
+      - "the repo link exposes merge_gate_status=enforced before auto-review can run"
+    and_when:
+      - "the App lacks Administration write permission"
+    then_also:
+      - "auto-review cannot be enabled"
+      - "the API/UI returns a clear permission error"
+  - id: github-app-setup-browser-flow
+    given:
+      - "a Profile Manager opens /profiles"
+    when:
+      - "they add a GitHub App, validate it, and link a repository"
+    then:
+      - "the GitHub Apps tab shows health, installation, permissions, repos, and merge gate"
+      - "the Repositories tab shows the selected App Connection and gate state"
+      - "no raw private key or token appears in the DOM"
+required_facts:
+  - id: fact-required-check-added-additively
+    proves:
+      - required-check-added-additively
+    kind: unit-test
+    artifact:
+      path: tests/test_github_branch_protection.py
+      change: create
+    command: python -m pytest tests/test_github_branch_protection.py::test_guardian_review_required_check_is_added_without_dropping_existing_requirements
+  - id: fact-repo-link-enforces-gate-before-auto-review
+    proves:
+      - repo-link-enforces-gate-before-auto-review
+    kind: integration-test
+    artifact:
+      path: tests/test_profiles_api.py
+      change: update
+    command: python -m pytest tests/test_profiles_api.py::test_github_repo_link_requires_enforced_guardian_review_gate_for_auto_review
+  - id: fact-github-app-setup-browser-flow
+    proves:
+      - github-app-setup-browser-flow
+    kind: browser-test
+    artifact:
+      path: tests/browser/profiles_management.spec.mjs
+      change: update
+    command: node tests/browser/profiles_management.spec.mjs --grep github-app-setup

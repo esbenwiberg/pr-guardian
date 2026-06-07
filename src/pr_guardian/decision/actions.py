@@ -158,6 +158,36 @@ def get_review_labels(result: ReviewResult) -> list[str]:
     return labels
 
 
+GUIDANCE_MARKER = "<!-- guardian-guidance -->"
+
+_GUIDANCE_STATE_DISPLAY: dict[str, str] = {
+    "pending": "pending",
+    "reviewing": "reviewing…",
+    "success": "green ✓",
+    "failure": "changes requested",
+    "blocked": "blocked",
+}
+
+
+def build_guidance_comment_body(state: str, *, review_url: str = "") -> str:
+    """Build the short sticky guidance comment body.
+
+    Always includes the hidden marker so Guardian can recover the comment
+    by scanning PR comments when the stored ID is missing or stale.
+    """
+    label = _GUIDANCE_STATE_DISPLAY.get(state, state)
+    lines: list[str] = [
+        GUIDANCE_MARKER,
+        "Guardian is watching this PR.",
+        "",
+        f"Latest review: {label}",
+    ]
+    if review_url:
+        lines.append(f"[View Guardian review]({review_url})")
+    lines.extend(["", "Need another pass? Comment `@guardian`."])
+    return "\n".join(lines)
+
+
 def build_inline_comment_body(findings: list[Finding]) -> str:
     """Format co-located findings into a single inline comment body, separated by '---'."""
     parts = []

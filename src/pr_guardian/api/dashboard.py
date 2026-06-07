@@ -771,7 +771,10 @@ def _will_fix_findings(review_dict: dict) -> list[dict]:
 
 
 def _build_verdict_body(
-    verdict: str, reviewer_comment: str, decision_counts: dict[str, int], review_url: str | None = None
+    verdict: str,
+    reviewer_comment: str,
+    decision_counts: dict[str, int],
+    review_url: str | None = None,
 ) -> str:
     """Compose the comment body posted to the platform alongside the verdict."""
     accepted = decision_counts.get("acknowledged", 0)

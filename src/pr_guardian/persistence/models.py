@@ -97,6 +97,8 @@ class ReviewRow(Base):
         back_populates="review", cascade="all, delete-orphan", lazy="selectin"
     )
 
+    postback_meta: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
+
 
 class MechanicalResultRow(Base):
     __tablename__ = "mechanical_results"
@@ -357,6 +359,32 @@ class PostedInlineCommentRow(Base):
 
 
 # ---------------------------------------------------------------------------
+# Guidance comment tracking (one sticky comment per PR per platform)
+# ---------------------------------------------------------------------------
+
+
+class GuidanceCommentRow(Base):
+    """Tracks the sticky guidance comment ID posted on a PR."""
+
+    __tablename__ = "guidance_comments"
+    __table_args__ = (
+        UniqueConstraint("platform", "repo", "pr_id", name="uq_guidance_comment_pr"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    platform: Mapped[str] = mapped_column(String(16), index=True)
+    repo: Mapped[str] = mapped_column(String(256), index=True)
+    pr_id: Mapped[str] = mapped_column(String(64), index=True)
+    comment_id: Mapped[str] = mapped_column(String(256))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+
+
+# ---------------------------------------------------------------------------
 # ChatOps command tracking
 # ---------------------------------------------------------------------------
 
@@ -448,10 +476,22 @@ class ConnectionRow(Base):
     name: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     description: Mapped[str] = mapped_column(String(256), default="")
     platform: Mapped[str] = mapped_column(String(16), index=True)
+    # auth_kind is None for legacy PAT rows; "github_app" for GitHub App Connections
+    auth_kind: Mapped[str | None] = mapped_column(String(32), nullable=True)
     org_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Legacy PAT / ADO token storage
     encrypted_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_secret_ref: Mapped[str | None] = mapped_column(Text, nullable=True)
     token_prefix: Mapped[str] = mapped_column(String(20), default="")
+    # GitHub App credential fields
+    app_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    app_slug: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    installation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    installation_account: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    installation_target_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    encrypted_private_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    private_key_fingerprint: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    app_permissions: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     health_status: Mapped[str] = mapped_column(String(16), default="unknown")
     health_message: Mapped[str] = mapped_column(Text, default="")
     health_checked_at: Mapped[datetime | None] = mapped_column(

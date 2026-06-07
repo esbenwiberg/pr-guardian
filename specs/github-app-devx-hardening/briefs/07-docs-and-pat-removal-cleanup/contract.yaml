@@ -1,0 +1,45 @@
+contract_version: 1
+title: "Clean docs and remove GitHub PAT runtime references"
+depends_on:
+  - 01-github-app-connection-data-model
+  - 02-github-installation-token-adapter
+  - 03-github-app-setup-and-merge-gates
+  - 04-review-postback-guidance-and-approvals
+  - 05-chatops-mention-reactions-and-rereview
+  - 06-deterministic-github-app-e2e
+scenarios:
+  - id: docs-describe-github-app-only-runtime
+    given:
+      - "a new operator reads current setup docs"
+    when:
+      - "they follow GitHub setup instructions"
+    then:
+      - "they are guided to create/install a GitHub App"
+      - "they are not told to configure GITHUB_TOKEN for Guardian runtime"
+      - "they see required permissions and merge gate behavior"
+      - "they see how to run deterministic sandbox E2E"
+  - id: no-github-token-runtime-fallback
+    given:
+      - "the source tree is scanned"
+    when:
+      - "GitHub runtime adapter and storage code are inspected"
+    then:
+      - "there is no GITHUB_TOKEN fallback for Guardian runtime GitHub calls"
+      - "ADO_PAT references remain allowed for ADO"
+required_facts:
+  - id: fact-docs-describe-github-app-only-runtime
+    proves:
+      - docs-describe-github-app-only-runtime
+    kind: custom-command
+    artifact:
+      path: docs/github-app-setup.md
+      change: create
+    command: python -m pytest tests/test_no_github_pat_runtime.py::test_current_docs_describe_github_app_only_runtime
+  - id: fact-no-github-token-runtime-fallback
+    proves:
+      - no-github-token-runtime-fallback
+    kind: unit-test
+    artifact:
+      path: tests/test_no_github_pat_runtime.py
+      change: create
+    command: python -m pytest tests/test_no_github_pat_runtime.py::test_no_github_token_runtime_fallback_remains
