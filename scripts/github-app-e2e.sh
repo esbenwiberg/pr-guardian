@@ -45,25 +45,6 @@ warn()  { echo -e "${YLW}[WARN]${RST}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${RST}  $*" >&2; }
 fatal() { fail "$*"; exit 1; }
 
-# ─── JSON helper (python3 instead of jq) ─────────────────────────────────────
-jq_get() {
-    # Usage: jq_get <json_string> <dot_key>
-    # Example: jq_get "$json" ".id"
-    local json="$1"
-    local key="$2"
-    python3 -c "
-import sys, json
-data = json.loads(sys.argv[1])
-keys = sys.argv[2].lstrip('.').split('.')
-for k in keys:
-    if isinstance(data, list):
-        data = data[int(k)]
-    else:
-        data = data.get(k, '')
-print(data if data is not None else '')
-" "$json" "$key"
-}
-
 # ─── prerequisite check (--check mode, no network) ───────────────────────────
 # Always exits 0 — it is a local diagnostic, not a gate.
 # The full run calls check_prerequisites() and aborts if errors > 0.
@@ -535,8 +516,9 @@ print(base64.b64encode(content.encode()).decode())
     ok "Profile created: ${profile_id}"
 
     # Create GitHub App Connection
+    # Pipe the PEM key via stdin to keep it off the process argument list.
     local pem_json
-    pem_json=$(python3 -c "import sys,json; print(json.dumps(sys.argv[1]))" "$pem_key")
+    pem_json=$(printf '%s' "$pem_key" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
     local conn_response
     conn_response=$(guardian_api POST /api/profiles/connections \
