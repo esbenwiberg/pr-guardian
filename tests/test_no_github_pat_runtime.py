@@ -17,6 +17,7 @@ ROOT = pathlib.Path(__file__).parent.parent
 #   os.environ.get("GITHUB_TOKEN"   os.environ["GITHUB_TOKEN"]   os.getenv("GITHUB_TOKEN"
 _GITHUB_TOKEN_ENV_RE = re.compile(
     r"""os\.environ(?:\.get)?\(\s*['"]GITHUB_TOKEN['"]"""
+    r"""|os\.environ\[\s*['"]GITHUB_TOKEN['"]"""
     r"""|os\.getenv\(\s*['"]GITHUB_TOKEN['"]"""
 )
 
