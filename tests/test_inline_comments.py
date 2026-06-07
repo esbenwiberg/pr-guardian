@@ -920,3 +920,53 @@ async def test_inline_mode_mech_findings_warning_passes_medium_threshold():
     adapter.post_inline_comments.assert_called_once()
     passed_findings = adapter.post_inline_comments.call_args[0][1]
     assert any(f.line == 7 for f in passed_findings)
+
+
+# ---------------------------------------------------------------------------
+# Automatic GitHub review: inline comments + sticky guidance both posted
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_automatic_github_review_posts_inline_comments_and_sticky_guidance():
+    """Auto-review in inline mode posts inline findings AND updates the guidance comment."""
+    from pr_guardian.decision.actions import GUIDANCE_MARKER
+
+    pr = _make_github_pr()
+    high_finding = _inline_finding(Severity.HIGH, line=5)
+    result = _make_result([high_finding])
+    result.review_id = "review-auto-001"
+
+    adapter = _mock_adapter()
+    # Add guidance comment support to the adapter mock
+    adapter.upsert_guidance_comment = AsyncMock(return_value="guidance-comment-42")
+
+    storage = _mock_storage()
+    storage.load_guidance_comment_id = AsyncMock(return_value=None)
+    storage.save_guidance_comment_id = AsyncMock()
+
+    config = GuardianConfig()
+    config.platform_approval_enabled = False
+
+    await _post_results(
+        adapter,
+        pr,
+        result,
+        config,
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
+        manual_comment_override=True,
+    )
+
+    # Inline comments were posted
+    adapter.post_inline_comments.assert_called_once()
+
+    # Sticky guidance was also posted (independent of comment_mode)
+    adapter.upsert_guidance_comment.assert_awaited_once()
+    guidance_body = adapter.upsert_guidance_comment.await_args[0][1]
+    assert GUIDANCE_MARKER in guidance_body
+
+    # postback_meta records both
+    assert result.postback_meta.get("inline_comments_posted", 0) > 0
+    assert result.postback_meta.get("guidance_posted") is True

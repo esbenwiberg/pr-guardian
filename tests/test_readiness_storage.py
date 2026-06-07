@@ -189,6 +189,19 @@ sa.Table(
     sa.Column("started_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     sa.Column("finished_at", sa.DateTime(timezone=True)),
     sa.Column("duration_ms", sa.Integer),
+    sa.Column("postback_meta", sa.JSON),
+)
+sa.Table(
+    "guidance_comments",
+    _meta,
+    sa.Column("id", sa.Text, primary_key=True),
+    sa.Column("platform", sa.String(16), nullable=False),
+    sa.Column("repo", sa.String(256), nullable=False),
+    sa.Column("pr_id", sa.String(64), nullable=False),
+    sa.Column("comment_id", sa.String(256), nullable=False),
+    sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+    sa.UniqueConstraint("platform", "repo", "pr_id", name="uq_guidance_comment_pr"),
 )
 sa.Table(
     "scans",
