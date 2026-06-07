@@ -119,6 +119,62 @@ async def test_handle_github_comment_dedupes_seen_comment(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_fresh_adapter_raises_when_no_connection_id_on_review(monkeypatch):
+    """_fresh_adapter_for_review raises ValueError when review has no connection_id."""
+    with pytest.raises(ValueError, match="No GitHub App Connection found"):
+        await github_chatops._fresh_adapter_for_review({"id": "review-abc"})
+
+
+@pytest.mark.asyncio
+async def test_fresh_adapter_raises_when_connection_is_not_app_typed(monkeypatch):
+    """_fresh_adapter_for_review raises ValueError when connection is not a GitHub App."""
+    import uuid
+
+    conn_id = uuid.uuid4()
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "get_connection",
+        AsyncMock(return_value={"id": str(conn_id), "auth_kind": None, "platform": "github"}),
+    )
+
+    with pytest.raises(ValueError, match="not a GitHub App connection"):
+        await github_chatops._fresh_adapter_for_review(
+            {"id": "review-abc", "connection_id": str(conn_id)}
+        )
+
+
+@pytest.mark.asyncio
+async def test_fresh_adapter_resolves_app_connection_successfully(monkeypatch):
+    """_fresh_adapter_for_review returns a GitHubAdapter when connection is App-typed."""
+    import uuid
+
+    conn_id = uuid.uuid4()
+    fake_adapter = _FakeGitHubAdapter()
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "get_connection",
+        AsyncMock(
+            return_value={
+                "id": str(conn_id),
+                "auth_kind": "github_app",
+                "platform": "github",
+                "app_id": "12345",
+                "installation_id": "98765",
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        "pr_guardian.platform.github_auth.build_github_adapter_from_connection",
+        AsyncMock(return_value=fake_adapter),
+    )
+
+    adapter = await github_chatops._fresh_adapter_for_review(
+        {"id": "review-abc", "connection_id": str(conn_id)}
+    )
+    assert adapter is fake_adapter
+
+
+@pytest.mark.asyncio
 async def test_poll_github_pr_comments_dispatches_poll_source(monkeypatch):
     adapter = _FakeGitHubAdapter()
     adapter.issue_comments = [
