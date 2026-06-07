@@ -1517,6 +1517,8 @@ async def _post_results(
 def _decision_to_status_state(result: ReviewResult) -> str:
     if result.decision == Decision.AUTO_APPROVE:
         return "success"
+    if result.decision == Decision.HARD_BLOCK:
+        return "blocked"
     return "failure"
 
 

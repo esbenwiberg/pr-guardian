@@ -20,7 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pr_guardian.models.output import ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.persistence import exclusions as _exclusions
-from pr_guardian.persistence.database import async_session
+from pr_guardian.persistence.database import _get_engine, async_session
 from pr_guardian.persistence.models import (
     AdminRow,
     AgentResultRow,
@@ -3055,7 +3055,7 @@ async def save_guidance_comment_id(platform: str, repo: str, pr_id: str, comment
 
     now = datetime.now(timezone.utc)
     async with async_session() as session:
-        if session.get_bind().dialect.name != "postgresql":
+        if _get_engine().dialect.name != "postgresql":
             result = await session.execute(
                 sa_update(GuidanceCommentRow)
                 .where(

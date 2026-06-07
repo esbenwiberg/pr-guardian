@@ -11,6 +11,7 @@ import structlog
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.platform.factory import create_adapter
+from pr_guardian.platform.guidance import upsert_guidance_comment
 from pr_guardian.platform.protocol import PlatformAdapter, PlatformReadinessSignal
 
 log = structlog.get_logger()
@@ -276,8 +277,6 @@ async def create_or_update_candidate_from_pr(
     if is_new:
         await _post_review_pending(adapter, pr)
         # Post initial sticky guidance comment (no review deeplink yet)
-        from pr_guardian.platform.guidance import upsert_guidance_comment
-
         await upsert_guidance_comment(adapter, pr, "pending", storage=storage)
     return await evaluate_candidate(
         uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url

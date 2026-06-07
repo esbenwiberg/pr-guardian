@@ -332,8 +332,8 @@ function render(d) {
   const pm = d.postback_meta || {};
   const postbackItems = [];
   if (pm.status_state !== undefined) {
-    const stateLabel = { success: '✓ cleared', failure: '✗ changes requested', pending: '… pending' }[pm.status_state] || pm.status_state;
-    const stateColor = pm.status_state === 'success' ? 'text-emerald-400' : pm.status_state === 'failure' ? 'text-red-400' : 'text-slate-400';
+    const stateLabel = { success: '✓ cleared', failure: '✗ changes requested', blocked: '✗ hard blocked', pending: '… pending' }[pm.status_state] || pm.status_state;
+    const stateColor = pm.status_state === 'success' ? 'text-emerald-400' : (pm.status_state === 'failure' || pm.status_state === 'blocked') ? 'text-red-400' : 'text-slate-400';
     postbackItems.push({ label: 'guardian/review', value: pm.status_posted ? stateLabel : 'not posted', color: pm.status_posted ? stateColor : 'text-slate-500' });
   }
   if (pm.inline_comments_posted !== undefined) {
