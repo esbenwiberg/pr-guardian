@@ -231,6 +231,55 @@ async def test_guardian_mention_queues_first_review_or_rereview(monkeypatch):
     assert command_adapter.closed is True
 
 
+@pytest.mark.asyncio
+async def test_handle_github_comment_ignores_when_repo_not_linked(monkeypatch):
+    """@guardian on an unlinked repo is marked ignored; no review is queued."""
+    command_id = uuid.uuid4()
+
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "claim_chatops_command",
+        AsyncMock(return_value=command_id),
+    )
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "find_latest_review_for_pr",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "get_active_repo_link_for_repo",
+        AsyncMock(return_value=None),
+    )
+    update = AsyncMock()
+    monkeypatch.setattr(github_chatops.storage, "update_chatops_command", update)
+
+    created: list[object] = []
+
+    def _capture_task(coro):
+        created.append(coro)
+        coro.close()
+        return object()
+
+    monkeypatch.setattr(github_chatops.asyncio, "create_task", _capture_task)
+
+    result = await github_chatops.handle_github_comment(
+        repo="octo/service",
+        pr_id="42",
+        comment_id="9001",
+        body="@guardian",
+        commenter="alice",
+        author_association="OWNER",
+        source="github:issue_comment",
+    )
+
+    assert result == {"status": "ignored", "reason": "repo_not_linked"}
+    assert not created  # no background task
+    update.assert_any_await(
+        command_id, status="ignored", status_detail="repo not linked", review_id=None
+    )
+
+
 # ---------------------------------------------------------------------------
 # Existing tests (updated for ack copy change and @guardian recognition)
 # ---------------------------------------------------------------------------

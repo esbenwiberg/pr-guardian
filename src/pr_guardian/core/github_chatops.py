@@ -253,7 +253,8 @@ async def handle_github_comment(
     if command_adapter is not None:
         await _add_eyes_reaction(command_adapter, repo, str(comment_id))
 
-    # Repo is not linked — acknowledge if possible, then stop.
+    # Repo is not linked — no adapter is available (we don't know which App installation
+    # to authenticate with), so no ack comment can be posted. Mark ignored and stop.
     if review is None and repo_link is None:
         await _mark_command(command_id, "ignored", "repo not linked")
         log.info(
@@ -262,17 +263,6 @@ async def handle_github_comment(
             pr_id=str(pr_id),
             commenter=commenter,
         )
-        if command_adapter is not None:
-            try:
-                pr_obj = await command_adapter.fetch_pr(repo, pr_id)
-                await command_adapter.post_comment(
-                    pr_obj,
-                    "Guardian: this repository is not linked. "
-                    "Set up a Guardian connection at /profiles to enable reviews.",
-                )
-            except Exception as exc:  # noqa: BLE001
-                log.warning("github_chatops_ack_failed", repo=repo, pr_id=pr_id, error=str(exc))
-            await command_adapter.close()
         return {"status": "ignored", "reason": "repo_not_linked"}
 
     if command_adapter is None:
