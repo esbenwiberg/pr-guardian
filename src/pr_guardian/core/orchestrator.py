@@ -24,7 +24,6 @@ from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import (
     SEVERITY_ORDER,
-    build_guidance_comment_body,
     build_review_detail_url,
     build_summary_comment,
     get_review_labels,
@@ -42,6 +41,7 @@ from pr_guardian.models.context import ArchmapContext, RepoRiskClass, ReviewCont
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
+from pr_guardian.platform.guidance import upsert_guidance_comment as _upsert_guidance_comment
 from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.triage.classifier import classify
 from pr_guardian.triage.hotspots import load_hotspots
@@ -1331,46 +1331,6 @@ _MECH_SEVERITY_MAP: dict[str, Severity] = {
     "info": Severity.LOW,
     "low": Severity.LOW,
 }
-
-
-async def _upsert_guidance_comment(
-    adapter: PlatformAdapter,
-    pr: PlatformPR,
-    state: str,
-    *,
-    review_url: str = "",
-    storage=None,
-) -> str | None:
-    """Post or update the sticky guidance comment on a GitHub PR.
-
-    Returns the comment ID on success, None if the adapter does not support
-    guidance comments or if the call fails.
-    """
-    upsert_fn = getattr(adapter, "upsert_guidance_comment", None)
-    if upsert_fn is None:
-        return None
-    body = build_guidance_comment_body(state, review_url=review_url)
-    stored_id: str | None = None
-    if storage:
-        try:
-            stored_id = await storage.load_guidance_comment_id(
-                pr.platform.value, pr.repo, pr.pr_id
-            )
-        except Exception:
-            pass
-    try:
-        comment_id = await upsert_fn(pr, body, stored_comment_id=stored_id)
-        if storage and comment_id:
-            try:
-                await storage.save_guidance_comment_id(
-                    pr.platform.value, pr.repo, pr.pr_id, comment_id
-                )
-            except Exception as e:
-                log.warning("guidance_comment_id_save_failed", pr_id=pr.pr_id, error=str(e))
-        return comment_id
-    except Exception as e:
-        log.warning("upsert_guidance_comment_failed", pr_id=pr.pr_id, error=str(e))
-        return None
 
 
 async def _post_review_status(

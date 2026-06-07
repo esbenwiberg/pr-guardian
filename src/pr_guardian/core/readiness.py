@@ -276,9 +276,9 @@ async def create_or_update_candidate_from_pr(
     if is_new:
         await _post_review_pending(adapter, pr)
         # Post initial sticky guidance comment (no review deeplink yet)
-        from pr_guardian.core.orchestrator import _upsert_guidance_comment
+        from pr_guardian.platform.guidance import upsert_guidance_comment
 
-        await _upsert_guidance_comment(adapter, pr, "pending", storage=storage)
+        await upsert_guidance_comment(adapter, pr, "pending", storage=storage)
     return await evaluate_candidate(
         uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url
     )

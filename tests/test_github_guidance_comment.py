@@ -10,6 +10,7 @@ import pytest
 from pr_guardian.decision.actions import GUIDANCE_MARKER, build_guidance_comment_body
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.platform.github import GitHubAdapter
+from pr_guardian.platform.guidance import upsert_guidance_comment
 
 
 def _pr() -> PlatformPR:
@@ -191,6 +192,37 @@ async def test_upsert_creates_when_marker_absent_in_comments():
 
     assert comment_id == "101"
     mock_client.post.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# upsert_guidance_comment helper (platform.guidance) — "reviewing" state path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_reviewing_state_body_includes_deeplink():
+    """upsert_guidance_comment with state='reviewing' and review_url passes deeplink to adapter."""
+    pr = _pr()
+    review_url = "http://localhost/reviews/abc-123"
+
+    adapter = MagicMock()
+    adapter.upsert_guidance_comment = AsyncMock(return_value="comment-42")
+
+    fake_storage = MagicMock()
+    fake_storage.load_guidance_comment_id = AsyncMock(return_value=None)
+    fake_storage.save_guidance_comment_id = AsyncMock()
+
+    result_id = await upsert_guidance_comment(
+        adapter, pr, "reviewing", review_url=review_url, storage=fake_storage
+    )
+
+    assert result_id == "comment-42"
+    adapter.upsert_guidance_comment.assert_awaited_once()
+    body = adapter.upsert_guidance_comment.await_args[0][1]
+    assert GUIDANCE_MARKER in body
+    assert "reviewing" in body
+    assert review_url in body
+    assert "@guardian" in body
 
 
 # ---------------------------------------------------------------------------

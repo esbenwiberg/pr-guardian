@@ -3045,32 +3045,60 @@ async def load_guidance_comment_id(platform: str, repo: str, pr_id: str) -> str 
 
 
 async def save_guidance_comment_id(platform: str, repo: str, pr_id: str, comment_id: str) -> None:
-    """Upsert the guidance comment ID for a PR."""
+    """Upsert the guidance comment ID for a PR.
+
+    Uses an atomic UPDATE-then-INSERT for non-PostgreSQL backends and
+    INSERT … ON CONFLICT DO UPDATE for PostgreSQL, avoiding the TOCTOU
+    race inherent in a SELECT-then-INSERT pattern.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+    now = datetime.now(timezone.utc)
     async with async_session() as session:
-        row = (
-            await session.scalars(
-                select(GuidanceCommentRow).where(
+        if session.get_bind().dialect.name != "postgresql":
+            result = await session.execute(
+                sa_update(GuidanceCommentRow)
+                .where(
                     GuidanceCommentRow.platform == platform,
                     GuidanceCommentRow.repo == repo,
                     GuidanceCommentRow.pr_id == pr_id,
                 )
+                .values(comment_id=comment_id, updated_at=now)
             )
-        ).first()
-        if row:
-            row.comment_id = comment_id
-            row.updated_at = datetime.now(timezone.utc)
+            if result.rowcount == 0:
+                try:
+                    session.add(
+                        GuidanceCommentRow(
+                            platform=platform,
+                            repo=repo,
+                            pr_id=pr_id,
+                            comment_id=comment_id,
+                            created_at=now,
+                            updated_at=now,
+                        )
+                    )
+                    await session.commit()
+                except IntegrityError:
+                    # Concurrent INSERT won the race; tolerate — the comment ID is the same.
+                    await session.rollback()
+            else:
+                await session.commit()
         else:
-            session.add(
-                GuidanceCommentRow(
-                    platform=platform,
-                    repo=repo,
-                    pr_id=pr_id,
-                    comment_id=comment_id,
-                    created_at=datetime.now(timezone.utc),
-                    updated_at=datetime.now(timezone.utc),
-                )
+            stmt = pg_insert(GuidanceCommentRow).values(
+                id=uuid.uuid4(),
+                platform=platform,
+                repo=repo,
+                pr_id=pr_id,
+                comment_id=comment_id,
+                created_at=now,
+                updated_at=now,
             )
-        await session.commit()
+            stmt = stmt.on_conflict_do_update(
+                constraint="uq_guidance_comment_pr",
+                set_={"comment_id": comment_id, "updated_at": now},
+            )
+            await session.execute(stmt)
+            await session.commit()
 
 
 # ---------------------------------------------------------------------------
