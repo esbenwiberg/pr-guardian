@@ -126,6 +126,24 @@ async def test_fresh_adapter_raises_when_no_connection_id_on_review(monkeypatch)
 
 
 @pytest.mark.asyncio
+async def test_fresh_adapter_raises_when_connection_is_deleted(monkeypatch):
+    """_fresh_adapter_for_review raises ValueError when connection_id is set but deleted."""
+    import uuid
+
+    conn_id = uuid.uuid4()
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "get_connection",
+        AsyncMock(return_value=None),
+    )
+
+    with pytest.raises(ValueError, match="No GitHub App Connection found"):
+        await github_chatops._fresh_adapter_for_review(
+            {"id": "review-abc", "connection_id": str(conn_id)}
+        )
+
+
+@pytest.mark.asyncio
 async def test_fresh_adapter_raises_when_connection_is_not_app_typed(monkeypatch):
     """_fresh_adapter_for_review raises ValueError when connection is not a GitHub App."""
     import uuid
