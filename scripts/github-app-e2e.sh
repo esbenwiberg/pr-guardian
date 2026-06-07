@@ -530,20 +530,26 @@ print(base64.b64encode(content.encode()).decode())
     ok "Profile created: ${profile_id}"
 
     # Create GitHub App Connection
-    # Pipe the PEM key via stdin to keep it off the process argument list.
+    # Write the full JSON body — which contains the PEM key — to a tmpfile and
+    # pass it via @file so the key never appears in curl's argv (/proc/<pid>/cmdline or ps).
     local pem_json
     pem_json=$(printf '%s' "$pem_key" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
-    local conn_response
-    conn_response=$(guardian_api POST /api/profiles/connections \
-        -d "{
+    local conn_body_file
+    conn_body_file=$(mktemp)
+    printf '%s' "{
             \"name\": \"E2E GitHub App ${ts}\",
             \"platform\": \"github\",
             \"app_id\": \"${app_id}\",
             \"private_key\": ${pem_json},
             \"installation_id\": \"${installation_id}\",
             \"installation_account\": \"esbenwiberg\"
-        }") || fatal "Failed to create GitHub App Connection"
+        }" > "${conn_body_file}"
+
+    local conn_response
+    conn_response=$(guardian_api POST /api/profiles/connections \
+        -d "@${conn_body_file}") || { rm -f "${conn_body_file}"; fatal "Failed to create GitHub App Connection"; }
+    rm -f "${conn_body_file}"
     local conn_id
     conn_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$conn_response")
     ok "Connection created: ${conn_id}"
