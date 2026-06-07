@@ -21,8 +21,11 @@ async def test_fake_llm_provider_returns_stable_review_json_without_network():
     """Fake provider emits identical JSON on every call with no network traffic."""
     client = FakeLLMClient()
 
-    # Patch socket to guarantee no network access is attempted
-    with patch("socket.socket") as mock_socket:
+    # Block httpx.AsyncClient.send — the transport used by both the anthropic and openai SDKs.
+    # If complete() attempted any HTTP request this side_effect would raise, failing the test.
+    with patch(
+        "httpx.AsyncClient.send", side_effect=RuntimeError("network call detected")
+    ) as mock_send:
         resp1 = await client.complete(system="you are a reviewer", user="here is the diff")
         resp2 = await client.complete(system="you are a reviewer", user="here is the diff")
 
@@ -34,8 +37,8 @@ async def test_fake_llm_provider_returns_stable_review_json_without_network():
     assert data["verdict"] == "pass"
     assert data["findings"] == []
 
-    # socket was never touched
-    mock_socket.assert_not_called()
+    # httpx transport was never invoked — meaningful because the side_effect would have raised
+    mock_send.assert_not_called()
 
 
 @pytest.mark.asyncio
