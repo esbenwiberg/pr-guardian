@@ -13,6 +13,7 @@ class _FakeGitHubAdapter:
     def __init__(self, author: str = "alice"):
         self.author = author
         self.comments: list[str] = []
+        self.reactions: list[tuple[str, str, str]] = []
         self.issue_comments: list[dict] = []
         self.closed = False
 
@@ -33,11 +34,206 @@ class _FakeGitHubAdapter:
     async def post_comment(self, pr: PlatformPR, body: str) -> None:
         self.comments.append(body)
 
+    async def create_issue_comment_reaction(
+        self, repo: str, comment_id: str, content: str
+    ) -> None:
+        self.reactions.append((repo, comment_id, content))
+
     async def list_issue_comments(self, repo: str, pr_id: str | int) -> list[dict]:
         return self.issue_comments
 
     async def close(self) -> None:
         self.closed = True
+
+
+# ---------------------------------------------------------------------------
+# Required fact: fact-chatops-guardian-aliases
+# ---------------------------------------------------------------------------
+
+
+def test_is_github_command_accepts_guardian_and_legacy_aliases():
+    """@guardian and @pr-guardian (with or without re-review) are all valid commands."""
+    assert github_chatops.is_github_command("@guardian")
+    assert github_chatops.is_github_command("@guardian re-review")
+    assert github_chatops.is_github_command("@pr-guardian")
+    assert github_chatops.is_github_command("@pr-guardian re-review")
+    # Mid-sentence mentions are also recognized
+    assert github_chatops.is_github_command("please @guardian take a look")
+    assert github_chatops.is_github_command("hey @pr-guardian re-review this")
+    # Unrelated text must not trigger
+    assert not github_chatops.is_github_command("mentioning guardian without the at-sign")
+    assert not github_chatops.is_github_command("@guardianstuff do something")
+    assert not github_chatops.is_github_command("@guardian-app")
+
+
+# ---------------------------------------------------------------------------
+# Required fact: fact-chatops-eyes-reaction
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_handle_github_comment_reacts_with_eyes_when_claimed(monkeypatch):
+    """Guardian adds an eyes reaction to the triggering comment when it claims the command."""
+    command_id = uuid.uuid4()
+    review_id = uuid.uuid4()
+    command_adapter = _FakeGitHubAdapter()
+    created: list[object] = []
+
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "claim_chatops_command",
+        AsyncMock(return_value=command_id),
+    )
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "find_latest_review_for_pr",
+        AsyncMock(return_value={"id": str(review_id), "agent_results": []}),
+    )
+    monkeypatch.setattr(github_chatops.storage, "update_chatops_command", AsyncMock())
+    monkeypatch.setattr(
+        github_chatops,
+        "_fresh_adapter_for_review",
+        AsyncMock(return_value=command_adapter),
+    )
+
+    def _capture_task(coro):
+        created.append(coro)
+        coro.close()
+        return object()
+
+    monkeypatch.setattr(github_chatops.asyncio, "create_task", _capture_task)
+
+    result = await github_chatops.handle_github_comment(
+        repo="octo/service",
+        pr_id="42",
+        comment_id="9001",
+        body="@guardian",
+        commenter="bob",
+        author_association="MEMBER",
+        source="github:issue_comment",
+    )
+
+    assert result["status"] == "queued"
+    # Eyes reaction must have been posted on the triggering comment
+    assert ("octo/service", "9001", "eyes") in command_adapter.reactions
+    assert command_adapter.closed is True
+
+
+@pytest.mark.asyncio
+async def test_handle_github_comment_eyes_reaction_error_does_not_fail_command(monkeypatch):
+    """Eyes reaction errors (403, 429) are logged but do not abort the command."""
+    command_id = uuid.uuid4()
+    review_id = uuid.uuid4()
+    created: list[object] = []
+
+    failing_adapter = _FakeGitHubAdapter()
+
+    async def _raise_reaction(repo: str, comment_id: str, content: str) -> None:
+        raise RuntimeError("forbidden")
+
+    failing_adapter.create_issue_comment_reaction = _raise_reaction  # type: ignore[method-assign]
+
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "claim_chatops_command",
+        AsyncMock(return_value=command_id),
+    )
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "find_latest_review_for_pr",
+        AsyncMock(return_value={"id": str(review_id), "agent_results": []}),
+    )
+    monkeypatch.setattr(github_chatops.storage, "update_chatops_command", AsyncMock())
+    monkeypatch.setattr(
+        github_chatops,
+        "_fresh_adapter_for_review",
+        AsyncMock(return_value=failing_adapter),
+    )
+
+    def _capture_task(coro):
+        created.append(coro)
+        coro.close()
+        return object()
+
+    monkeypatch.setattr(github_chatops.asyncio, "create_task", _capture_task)
+
+    # Must not raise even though reaction creation fails
+    result = await github_chatops.handle_github_comment(
+        repo="octo/service",
+        pr_id="42",
+        comment_id="9001",
+        body="@guardian",
+        commenter="bob",
+        author_association="MEMBER",
+        source="github:issue_comment",
+    )
+
+    assert result["status"] == "queued"
+    assert created  # background task was still scheduled
+
+
+# ---------------------------------------------------------------------------
+# Required fact: fact-chatops-first-review-or-rereview
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_guardian_mention_queues_first_review_or_rereview(monkeypatch):
+    """@guardian on a linked PR with no prior Guardian review queues a first review."""
+    command_id = uuid.uuid4()
+    command_adapter = _FakeGitHubAdapter()
+    created: list[object] = []
+
+    repo_link = {"id": str(uuid.uuid4()), "connection_id": str(uuid.uuid4())}
+
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "claim_chatops_command",
+        AsyncMock(return_value=command_id),
+    )
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "find_latest_review_for_pr",
+        AsyncMock(return_value=None),
+    )
+    monkeypatch.setattr(
+        github_chatops.storage,
+        "get_active_repo_link_for_repo",
+        AsyncMock(return_value=repo_link),
+    )
+    monkeypatch.setattr(github_chatops.storage, "update_chatops_command", AsyncMock())
+    monkeypatch.setattr(
+        github_chatops,
+        "_adapter_for_repo_link",
+        AsyncMock(return_value=command_adapter),
+    )
+
+    def _capture_task(coro):
+        created.append(coro)
+        coro.close()
+        return object()
+
+    monkeypatch.setattr(github_chatops.asyncio, "create_task", _capture_task)
+
+    result = await github_chatops.handle_github_comment(
+        repo="octo/service",
+        pr_id="42",
+        comment_id="9001",
+        body="@guardian",
+        commenter="alice",
+        author_association="OWNER",
+        source="github:issue_comment",
+    )
+
+    assert result == {"status": "queued", "first_review": True}
+    assert created  # first-review background task was scheduled
+    assert command_adapter.comments == ["Guardian: first review queued."]
+    assert command_adapter.closed is True
+
+
+# ---------------------------------------------------------------------------
+# Existing tests (updated for ack copy change and @guardian recognition)
+# ---------------------------------------------------------------------------
 
 
 def test_is_github_re_review_command_accepts_mention_forms():
@@ -89,7 +285,7 @@ async def test_handle_github_comment_queues_re_review(monkeypatch):
     )
 
     assert result == {"status": "queued", "review_id": str(review_id)}
-    assert command_adapter.comments == ["PR Guardian: re-review queued."]
+    assert command_adapter.comments == ["Guardian: re-review queued."]
     assert command_adapter.closed is True
     assert created
     update.assert_any_await(

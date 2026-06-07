@@ -127,6 +127,7 @@ async def github_webhook(
             body=comment.get("body") or "",
             commenter=(comment.get("user") or {}).get("login") or "",
             author_association=comment.get("author_association") or "",
+            pr_author=(issue.get("user") or {}).get("login") or "",
             source="github:issue_comment",
             base_url=str(request.base_url).rstrip("/"),
         )

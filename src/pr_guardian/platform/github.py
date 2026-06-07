@@ -926,6 +926,17 @@ class GitHubAdapter:
         if resp.status_code not in (200, 201):
             resp.raise_for_status()
 
+    async def create_issue_comment_reaction(
+        self, repo: str, comment_id: str | int, content: str
+    ) -> None:
+        """Add a reaction to an issue comment. 200 (already exists) and 201 are both success."""
+        client = self._get_client()
+        resp = await client.post(
+            f"/repos/{repo}/issues/comments/{comment_id}/reactions",
+            json={"content": content},
+        )
+        resp.raise_for_status()
+
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()
