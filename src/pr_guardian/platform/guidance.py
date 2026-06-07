@@ -39,8 +39,8 @@ async def upsert_guidance_comment(
             stored_id = await storage.load_guidance_comment_id(
                 pr.platform.value, pr.repo, pr.pr_id
             )
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("guidance_comment_id_load_failed", pr_id=pr.pr_id, error=str(e))
     try:
         comment_id = await upsert_fn(pr, body, stored_comment_id=stored_id)
         if storage and comment_id:
