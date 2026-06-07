@@ -230,6 +230,7 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
 
     # Self-assign on the platform
     if body.assign_self and email:
+        adapter = None
         try:
             user_id = await storage.get_user_identity(email)
             if user_id and pr["platform"] == "github":
@@ -238,13 +239,13 @@ async def start_wizard_review(pr_uuid: str, body: StartWizardRequest, request: R
                     from pr_guardian.platform.factory import create_github_adapter
 
                     adapter = await create_github_adapter()
-                    try:
-                        await adapter.add_pr_reviewer(pr["repo"], pr["pr_id"], github_handle)
-                        await adapter.add_pr_assignee(pr["repo"], pr["pr_id"], github_handle)
-                    finally:
-                        await adapter.close()
+                    await adapter.add_pr_reviewer(pr["repo"], pr["pr_id"], github_handle)
+                    await adapter.add_pr_assignee(pr["repo"], pr["pr_id"], github_handle)
         except Exception as exc:
             log.warning("start_wizard_assign_failed", error=str(exc))
+        finally:
+            if adapter is not None:
+                await adapter.close()
 
     # Check for an existing completed review
     try:
