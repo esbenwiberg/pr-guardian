@@ -3044,9 +3044,7 @@ async def load_guidance_comment_id(platform: str, repo: str, pr_id: str) -> str 
         return row.comment_id if row else None
 
 
-async def save_guidance_comment_id(
-    platform: str, repo: str, pr_id: str, comment_id: str
-) -> None:
+async def save_guidance_comment_id(platform: str, repo: str, pr_id: str, comment_id: str) -> None:
     """Upsert the guidance comment ID for a PR."""
     async with async_session() as session:
         row = (

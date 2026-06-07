@@ -305,9 +305,7 @@ async def create_or_update_candidate_from_pr(
                             error=str(_e),
                         )
             except Exception as _e:
-                log.warning(
-                    "guidance_comment_pending_failed", pr_id=pr.pr_id, error=str(_e)
-                )
+                log.warning("guidance_comment_pending_failed", pr_id=pr.pr_id, error=str(_e))
     return await evaluate_candidate(
         uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url
     )

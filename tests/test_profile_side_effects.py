@@ -158,5 +158,3 @@ async def test_github_app_formal_approval_requires_profile_switches_and_non_fork
 
     fork_adapter.approve_pr.assert_not_awaited()
     assert result_fork.postback_meta.get("formal_approval") == "skipped_fork"
-
-
