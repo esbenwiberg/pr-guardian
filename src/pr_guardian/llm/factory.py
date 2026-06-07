@@ -7,6 +7,7 @@ import structlog
 from pr_guardian.config.schema import GuardianConfig, LLMProviderConfig
 from pr_guardian.llm.anthropic import AnthropicClient
 from pr_guardian.llm.azure_foundry import AzureFoundryClient
+from pr_guardian.llm.fake import FakeLLMClient
 from pr_guardian.llm.openai_compat import OpenAICompatClient
 from pr_guardian.llm.protocol import LLMClient
 
@@ -73,6 +74,9 @@ def _build_client(cfg: LLMProviderConfig, timeout_seconds: int = 120) -> LLMClie
             default_model=cfg.default_model,
             timeout_seconds=timeout_seconds,
         )
+
+    if cfg.type == "fake":
+        return FakeLLMClient()
 
     raise ValueError(f"Unknown LLM provider type: {cfg.type}")
 
