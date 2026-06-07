@@ -84,16 +84,20 @@ comment after a re-review command so it can pass the stored ID to `upsert_guidan
 Keys are optional; callers should use `.get(key)` not direct access. The dict is
 persisted as JSON in `ReviewRow.postback_meta` and returned by `_review_to_dict()`.
 
-### `_upsert_guidance_comment` in orchestrator
+### `upsert_guidance_comment` in `platform/guidance.py`
 
 ```python
-async def _upsert_guidance_comment(
-    adapter, pr: PlatformPR, state: str, *, review_url: str = "", storage=None
+from pr_guardian.platform.guidance import upsert_guidance_comment
+
+async def upsert_guidance_comment(
+    adapter: Any, pr: PlatformPR, state: str, *, review_url: str = "", storage: Any = None
 ) -> str | None
 ```
 
-Brief 05 should call the same helper (or replicate the pattern) when posting
-post-re-review guidance updates. The helper handles missing-method gracefully.
+Brief 05 should import and call this public function when posting post-re-review
+guidance updates. The helper handles missing-method gracefully (duck-typed
+`getattr(adapter, "upsert_guidance_comment", None)`). Both `readiness.py` and
+`orchestrator.py` already use it — do not inline the recovery chain elsewhere.
 
 ### `test_readiness_storage.py` hand-rolled schema includes `guidance_comments`
 
@@ -107,6 +111,7 @@ fail with `OperationalError: no such column`.
 
 - `alembic/versions/023_add_guidance_comments_and_postback.py` — append-only
 - `src/pr_guardian/decision/actions.py` — `GUIDANCE_MARKER` and `build_guidance_comment_body`
+- `src/pr_guardian/platform/guidance.py` — the shared `upsert_guidance_comment` helper
 - `src/pr_guardian/platform/github.py` — `upsert_guidance_comment` method (lines around 200–260)
 - `tests/test_github_guidance_comment.py` — fact test for sticky guidance
 - `tests/browser/review_detail_postback.spec.mjs` — fact test for postback panel
