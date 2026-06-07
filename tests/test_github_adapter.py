@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -349,11 +349,14 @@ async def test_readiness_signals_propagate_non_auth_errors():
 
 @pytest.mark.asyncio
 async def test_github_adapter_uses_installation_token_for_platform_actions():
-    """Adapter created with app_auth sends Bearer <installation-token> on every
-    request.  No PAT or GITHUB_TOKEN value is read from the environment."""
+    """_get_client() app_auth branch is exercised: _InstallationBearerAuth is
+    instantiated by _get_client() itself and injects Bearer tokens on every request.
+    No PAT or GITHUB_TOKEN value is read from the environment."""
     from pr_guardian.platform.github_auth import _InstallationBearerAuth
 
     captured_auth_headers: list[str] = []
+    captured_auth_instances: list[object] = []
+    _orig_async_client = httpx.AsyncClient
 
     class _CapturingTransport(httpx.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
@@ -363,24 +366,27 @@ async def test_github_adapter_uses_installation_token_for_platform_actions():
     mock_app_auth = MagicMock()
     mock_app_auth.get_token = AsyncMock(return_value="ghs-installation-token-abc123")
 
-    adapter = GitHubAdapter(app_auth=mock_app_auth)
-    # Inject a capturing client that exercises the real _InstallationBearerAuth flow
-    adapter._client = httpx.AsyncClient(
-        base_url="https://api.github.com",
-        headers={
-            "Accept": "application/vnd.github.v3+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-        auth=_InstallationBearerAuth(mock_app_auth.get_token),
-        transport=_CapturingTransport(),
-        timeout=30.0,
-    )
+    def _capturing_client(*args, **kwargs):
+        # Record the auth instance _get_client() supplies, then inject our transport
+        captured_auth_instances.append(kwargs.get("auth"))
+        kwargs["transport"] = _CapturingTransport()
+        return _orig_async_client(*args, **kwargs)
 
+    adapter = GitHubAdapter(app_auth=mock_app_auth)
     pr = _pr()
-    # Exercise several platform actions
-    await adapter.post_comment(pr, "Guardian review complete")
-    await adapter.set_status(pr, "success", "All checks passed", context="guardian/review")
-    await adapter.approve_pr(pr)
+
+    # Patch httpx.AsyncClient in the github module so _get_client() runs naturally
+    # through the app_auth branch while requests are captured by _CapturingTransport.
+    with patch("pr_guardian.platform.github.httpx.AsyncClient", side_effect=_capturing_client):
+        await adapter.post_comment(pr, "Guardian review complete")
+        await adapter.set_status(pr, "success", "All checks passed", context="guardian/review")
+        await adapter.approve_pr(pr)
+
+    # _get_client() created the client exactly once (cached thereafter)
+    assert len(captured_auth_instances) == 1
+    assert isinstance(captured_auth_instances[0], _InstallationBearerAuth), (
+        f"Expected _InstallationBearerAuth, got {type(captured_auth_instances[0])!r}"
+    )
 
     # Every request must carry Bearer auth with the installation token
     assert len(captured_auth_headers) == 3
@@ -389,7 +395,7 @@ async def test_github_adapter_uses_installation_token_for_platform_actions():
             f"Expected Bearer installation token, got: {auth_header!r}"
         )
 
-    # get_token() called once per request (auth flow is per-request)
+    # get_token() is called per-request by the auth flow
     assert mock_app_auth.get_token.call_count == 3
 
     # GITHUB_TOKEN env var must not appear in any auth header
