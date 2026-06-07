@@ -276,36 +276,9 @@ async def create_or_update_candidate_from_pr(
     if is_new:
         await _post_review_pending(adapter, pr)
         # Post initial sticky guidance comment (no review deeplink yet)
-        upsert_fn = getattr(adapter, "upsert_guidance_comment", None)
-        if upsert_fn is not None:
-            from pr_guardian.decision.actions import build_guidance_comment_body
+        from pr_guardian.core.orchestrator import _upsert_guidance_comment
 
-            stored_id: str | None = None
-            try:
-                stored_id = await storage.load_guidance_comment_id(
-                    pr.platform.value, pr.repo, pr.pr_id
-                )
-            except Exception:
-                pass
-            try:
-                comment_id = await upsert_fn(
-                    pr,
-                    build_guidance_comment_body("pending"),
-                    stored_comment_id=stored_id,
-                )
-                if comment_id:
-                    try:
-                        await storage.save_guidance_comment_id(
-                            pr.platform.value, pr.repo, pr.pr_id, comment_id
-                        )
-                    except Exception as _e:
-                        log.warning(
-                            "guidance_comment_id_save_failed",
-                            pr_id=pr.pr_id,
-                            error=str(_e),
-                        )
-            except Exception as _e:
-                log.warning("guidance_comment_pending_failed", pr_id=pr.pr_id, error=str(_e))
+        await _upsert_guidance_comment(adapter, pr, "pending", storage=storage)
     return await evaluate_candidate(
         uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url
     )

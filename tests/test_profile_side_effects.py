@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from unittest.mock import AsyncMock, MagicMock
 
 from pr_guardian.config.schema import GuardianConfig
@@ -53,6 +54,7 @@ def _adapter() -> MagicMock:
     return adapter
 
 
+@pytest.mark.asyncio
 async def test_auto_approve_is_guardian_clearance_unless_profile_enables_platform_approval():
     disabled = GuardianConfig()
     disabled.platform_approval_enabled = False
@@ -90,6 +92,7 @@ async def test_auto_approve_is_guardian_clearance_unless_profile_enables_platfor
     second.approve_pr.assert_awaited_once()
 
 
+@pytest.mark.asyncio
 async def test_github_app_formal_approval_requires_profile_switches_and_non_fork():
     """Formal approval is gated on Profile switches and fork check.
 
