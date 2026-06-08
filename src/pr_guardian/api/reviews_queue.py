@@ -274,6 +274,8 @@ def _shape_review(
         "author": author,
         "branch": row.get("source_branch"),
         "decision": row.get("decision") or "pending",
+        "stage": row.get("stage") or "",
+        "stage_detail": row.get("stage_detail") or "",
         "risk_tier": row.get("risk_tier") or "medium",
         "findings": findings,
         "estimated_review_minutes": _estimated_minutes(findings, files_changed),
@@ -282,6 +284,7 @@ def _shape_review(
         "triggered_by": row.get("triggered_by"),
         "stale": _is_stale(row),
         "started_at": row.get("started_at"),
+        "finished_at": row.get("finished_at"),
         # Platform-side PR status (merged | approved | changes_requested | pending | draft).
         # Sourced from the synced_prs cache; None when the PR isn't in the cache.
         "pr_status": pr_status,
@@ -675,6 +678,18 @@ async def _run_candidate_review(
             manual_comment_override=manual_comment_override,
         )
     except Exception as exc:  # noqa: BLE001
+        try:
+            await storage.mark_review_failed(
+                review_id,
+                f"Candidate review failed: {exc}",
+            )
+        except Exception as mark_exc:  # noqa: BLE001
+            log.warning(
+                "candidate_manual_review_mark_failed",
+                candidate_id=candidate.get("id"),
+                review_id=str(review_id),
+                error=str(mark_exc),
+            )
         log.error(
             "candidate_manual_review_failed",
             candidate_id=candidate.get("id"),

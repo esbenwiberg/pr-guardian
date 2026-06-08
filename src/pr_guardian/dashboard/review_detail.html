@@ -219,8 +219,8 @@
 
 <script>
 const REVIEW_ID = location.pathname.split('/reviews/')[1]?.split('/')[0] || '';
-const DECISION_EMOJI = { auto_approve: '\u2705', human_review: '\ud83d\udc40', reject: '\u274c', hard_block: '\ud83d\udeab' };
-const DECISION_LABEL = { auto_approve: 'Auto-Approved', human_review: 'Human Review Required', reject: 'Changes Requested', hard_block: 'Blocked' };
+const DECISION_EMOJI = { auto_approve: '\u2705', human_review: '\ud83d\udc40', reject: '\u274c', hard_block: '\ud83d\udeab', error: '!' };
+const DECISION_LABEL = { auto_approve: 'Auto-Approved', human_review: 'Human Review Required', reject: 'Changes Requested', hard_block: 'Blocked', error: 'Review Failed' };
 const AGENT_LABELS = {
   security_privacy: 'Security & Privacy',
   performance: 'Performance',
@@ -232,6 +232,10 @@ const AGENT_LABELS = {
 
 let reviewData = null;
 let selectedFindings = new Set(); // "agentIdx-findingIdx"
+
+function isReviewFailed(d) {
+  return d.decision === 'error' || d.stage === 'error';
+}
 
 async function loadReview() {
   if (!REVIEW_ID) { showError('No review ID in URL.'); return; }
@@ -259,12 +263,14 @@ function render(d) {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('content').style.display = 'block';
   document.title = `PR Guardian — ${d.repo} #${d.pr_id}`;
+  const failed = isReviewFailed(d);
+  const displayDecision = failed ? 'error' : (d.decision || '');
 
   // Banner
   const banner = document.getElementById('banner');
-  banner.className = 'flex items-center gap-4 p-5 rounded-xl mb-6 banner-' + (d.decision || '');
-  document.getElementById('banner-emoji').textContent = DECISION_EMOJI[d.decision] || '\u2753';
-  document.getElementById('banner-label').textContent = DECISION_LABEL[d.decision] || d.decision || 'Pending';
+  banner.className = 'flex items-center gap-4 p-5 rounded-xl mb-6 banner-' + displayDecision;
+  document.getElementById('banner-emoji').textContent = DECISION_EMOJI[displayDecision] || '\u2753';
+  document.getElementById('banner-label').textContent = DECISION_LABEL[displayDecision] || displayDecision || 'Pending';
   const metaParts = [`${d.repo} #${d.pr_id}`];
   if (d.title) metaParts.push(d.title);
   if (d.author) metaParts.push(`by ${d.author}`);
@@ -300,15 +306,15 @@ function render(d) {
   const tierTextClass = { high: 'text-red-400', medium: 'text-orange-400', low: 'text-blue-400', trivial: 'text-emerald-400' };
 
   const riskEl = document.getElementById('v-risk');
-  riskEl.textContent = (d.risk_tier || '-').toUpperCase();
-  if (d.risk_tier && tierTextClass[d.risk_tier]) {
+  riskEl.textContent = failed ? '-' : (d.risk_tier || '-').toUpperCase();
+  if (!failed && d.risk_tier && tierTextClass[d.risk_tier]) {
     riskEl.className = 'stat-card-value ' + tierTextClass[d.risk_tier];
     riskEl.closest('.stat-card').style.borderTop = `2px solid ${tierColors[d.risk_tier]}`;
   }
 
   const scoreEl = document.getElementById('v-score');
-  scoreEl.textContent = d.combined_score != null ? `${d.combined_score.toFixed(1)} / 10` : '-';
-  if (d.combined_score != null) {
+  scoreEl.textContent = !failed && d.combined_score != null ? `${d.combined_score.toFixed(1)} / 10` : '-';
+  if (!failed && d.combined_score != null) {
     // Traffic light: green (<3) → yellow (3-5) → orange (5-7) → red (7+)
     const scoreColor = d.combined_score >= 7 ? '#f87171' : d.combined_score >= 5 ? '#fb923c' : d.combined_score >= 3 ? '#eab308' : '#34d399';
     scoreEl.style.color = scoreColor;
@@ -452,6 +458,9 @@ function render(d) {
           </div>
         </div>`;
     }).join('');
+  } else if (failed) {
+    const message = d.stage_detail || 'Review failed before agent results were produced.';
+    document.getElementById('agents-container').innerHTML = `<div class="empty-state"><div class="empty-state-text text-red-400/80">${esc(message)}</div></div>`;
   } else if (d.decision === 'pending') {
     startProgressTracker(d);
   } else {
@@ -1056,12 +1065,13 @@ async function loadReviewHistory() {
     document.getElementById('history-section').style.display = '';
     document.getElementById('history-count').textContent = `${prRuns.length + 1} total runs`;
 
-    const dl = { auto_approve: 'Approved', human_review: 'Review', reject: 'Rejected', hard_block: 'Blocked' };
+    const dl = { auto_approve: 'Approved', human_review: 'Review', reject: 'Rejected', hard_block: 'Blocked', error: 'Failed' };
     const dc = {
       auto_approve: 'bg-emerald-400/[0.08] text-emerald-400 border-emerald-400/20',
       human_review: 'bg-orange-400/[0.08] text-orange-400 border-orange-400/20',
       reject: 'bg-red-400/[0.08] text-red-400 border-red-400/20',
       hard_block: 'bg-red-400/[0.08] text-red-400 border-red-400/20',
+      error: 'bg-red-400/[0.08] text-red-400 border-red-400/20',
     };
 
     document.getElementById('history-list').innerHTML = prRuns.map(r => {

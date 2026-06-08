@@ -1692,7 +1692,7 @@ async def mark_review_failed(
     async with async_session() as session:
         row = await session.get(ReviewRow, review_id)
         if row:
-            now = datetime.now(timezone.utc)
+            now = _now()
             row.stage = "error"
             row.stage_detail = error[:500]
             row.decision = "error"
@@ -1701,6 +1701,39 @@ async def mark_review_failed(
                 row.pipeline_log = pipeline_log
             if row.started_at:
                 row.duration_ms = int((now - _ensure_aware(row.started_at)).total_seconds() * 1000)
+            if row.candidate_id is not None:
+                candidate = await session.get(ReadinessCandidateRow, row.candidate_id)
+                if (
+                    candidate is not None
+                    and candidate.state == "reviewing"
+                    and (
+                        not candidate.head_sha
+                        or not row.head_commit_sha
+                        or candidate.head_sha == row.head_commit_sha
+                    )
+                ):
+                    snapshot = {
+                        **(candidate.readiness_snapshot or {}),
+                        "review_failure": {
+                            "review_id": str(review_id),
+                            "failed_at": now.isoformat(),
+                            "error": error[:500],
+                        },
+                    }
+                    transition = ReadinessCandidateTransitionRow(
+                        candidate_id=candidate.id,
+                        from_state=candidate.state,
+                        to_state="error",
+                        source="review_failure",
+                        actor="guardian",
+                        reason="review_failed",
+                        readiness_snapshot=snapshot,
+                    )
+                    candidate.state = "error"
+                    candidate.reason = "review_failed"
+                    candidate.readiness_snapshot = snapshot
+                    candidate.updated_at = now
+                    session.add(transition)
             await session.commit()
 
 

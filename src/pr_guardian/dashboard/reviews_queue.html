@@ -148,7 +148,9 @@
   .status-chip.approved { color: rgb(110 231 183); border: 1px solid rgb(110 231 183 / 0.45); background: rgb(110 231 183 / 0.06); }
   .status-chip.changes_requested { color: rgb(248 113 113); border: 1px solid rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.06); }
   .status-chip.draft { color: rgb(148 163 184); border: 1px solid rgb(71 85 105); background: rgb(15 23 42 / 0.6); }
+  .status-chip.error { color: rgb(248 113 113); border: 1px solid rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.06); }
   .risk-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+  .risk-dot.error { background: rgb(248 113 113); }
   .risk-dot.high { background: rgb(248 113 113); }
   .risk-dot.medium { background: rgb(251 191 36); }
   .risk-dot.low { background: rgb(110 231 183); }
@@ -218,6 +220,7 @@
   function escape(s) { const d = document.createElement('div'); d.textContent = s ?? ''; return d.innerHTML; }
   function rowKey(item) { return item.row_key || `${item.subject_type}:${item.id}`; }
   function isCandidate(item) { return item.subject_type === 'candidate'; }
+  function isFailed(item) { return item.decision === 'error' || item.stage === 'error'; }
 
   function timeAgo(iso) {
     if (!iso) return '';
@@ -230,6 +233,7 @@
   }
 
   function riskDots(item) {
+    if (isFailed(item)) return '<span class="risk-dot error"></span>';
     const map = { critical: item.findings?.critical || 0, high: item.findings?.high || 0, medium: item.findings?.medium || 0, low: item.findings?.low || 0 };
     const sum = map.critical + map.high;
     if (item.risk_tier === 'trivial' && !sum) return '<span class="text-2xs text-slate-500">clean</span>';
@@ -241,6 +245,7 @@
   }
 
   function findingSummary(item) {
+    if (isFailed(item)) return '<span class="text-red-400">failed</span>';
     const f = item.findings || {};
     const high = (f.critical || 0) + (f.high || 0);
     const med = f.medium || 0;
@@ -286,6 +291,7 @@
     const origin = originLabel(item);
     const staleBadge = item.stale ? '<span class="stale-chip">&#9888; updated</span>' : '';
     const statusBadge = isPR ? statusChip(item) : '';
+    const failureBadge = isFailed(item) ? '<span class="status-chip error">failed</span>' : '';
     const subject = candidate
       ? `<span class="subject-icon candidate">PR</span>`
       : isPR
@@ -298,7 +304,11 @@
     const subtitle = subtitleParts.join(' &middot; ');
     const filesText = candidate ? readinessShort(item) : item.files_changed ? `${item.files_changed} files` : 'full';
     const selected = candidate && item.id === SELECTED_CANDIDATE_ID ? ' selected' : '';
-    const statusLine = candidate ? `<div class="mt-1 text-2xs text-slate-400">${escape(readinessDetail(item))}</div>` : '';
+    const statusLine = candidate
+      ? `<div class="mt-1 text-2xs text-slate-400">${escape(readinessDetail(item))}</div>`
+      : isFailed(item)
+      ? `<div class="mt-1 text-2xs text-red-400/80 truncate">${escape(item.stage_detail || 'Review failed before results were produced.')}</div>`
+      : '';
     return `
       <div class="queue-row${selected}" data-id="${escape(item.id)}" data-row-key="${escape(rowKey(item))}" data-subject-type="${escape(item.subject_type)}">
         ${subject}
@@ -308,6 +318,7 @@
             ${(isPR || candidate) ? `<span class="text-2xs text-slate-500">#${escape(item.pr_id || item.id.replace(/^demo-pr-/,''))}</span>` : ''}
             <span class="text-sm font-medium text-slate-100 truncate">${escape(item.title)}</span>
             ${statusBadge}
+            ${failureBadge}
             ${staleBadge}
           </div>
           <div class="text-2xs text-slate-500">${subtitle}</div>

@@ -3,6 +3,29 @@ from __future__ import annotations
 from pr_guardian.api import reviews_queue
 
 
+def test_shape_review_preserves_failed_review_state():
+    row = reviews_queue._shape_review(
+        {
+            "id": "review-failed",
+            "platform": "github",
+            "repo": "repo/api",
+            "pr_id": "118",
+            "title": "failed review row",
+            "decision": "error",
+            "stage": "error",
+            "stage_detail": "Candidate review failed: provider unavailable",
+            "agent_results": [],
+            "started_at": "2026-06-02T10:00:00Z",
+            "finished_at": "2026-06-02T10:01:00Z",
+        }
+    )
+
+    assert row["decision"] == "error"
+    assert row["stage"] == "error"
+    assert row["stage_detail"] == "Candidate review failed: provider unavailable"
+    assert row["findings"] == {"critical": 0, "high": 0, "medium": 0, "low": 0}
+
+
 async def test_reviews_queue_merges_actionable_candidates_and_hides_drafts(monkeypatch):
     async def fake_list_reviews(limit: int = 100):
         return [

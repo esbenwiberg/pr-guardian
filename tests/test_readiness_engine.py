@@ -495,6 +495,12 @@ async def test_automatic_review_startup_failure_is_marked_and_reported(monkeypat
             assert review["stage"] == "error"
             assert review["decision"] == "error"
             assert "Automatic review startup failed" in review["stage_detail"]
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["state"] == "error"
+            assert updated["reason"] == "review_failed"
+            recoverable = await storage.list_recoverable_readiness_candidates()
+            assert candidate["id"] not in {c["id"] for c in recoverable}
             assert (
                 "guardian/review",
                 "failure",

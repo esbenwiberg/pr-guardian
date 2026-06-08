@@ -265,3 +265,51 @@ async def test_manual_bypass_and_manager_override_have_distinct_readiness_audit(
             assert audits[-1]["after"]["reason"] == "CI outage acknowledged"
     finally:
         await engine.dispose()
+
+
+async def test_manual_candidate_review_failure_is_marked_and_not_recovered(monkeypatch):
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            candidate = await _linked_candidate(state="blocked", reason="checks_failed")
+            started = await storage.try_start_candidate_review(
+                uuid.UUID(candidate["id"]),
+                _pr(repo=candidate["repo"]),
+                source="manual_bypass",
+                actor="reviewer@example.test",
+                reason="manual_bypass",
+                readiness_snapshot={"manual": True},
+                review_source="manual_bypass",
+            )
+            assert started is not None
+            review_id, claimed = started
+            monkeypatch.setattr(
+                "pr_guardian.config.profile_resolver.resolve_profile_snapshot_config",
+                AsyncMock(return_value=SimpleNamespace(config=GuardianConfig())),
+            )
+            monkeypatch.setattr(
+                "pr_guardian.core.orchestrator.run_review",
+                AsyncMock(side_effect=RuntimeError("provider unavailable")),
+            )
+
+            await reviews_queue._run_candidate_review(
+                claimed,
+                review_id,
+                AsyncMock(),
+                comment_mode="summary",
+                manual_comment_override=True,
+            )
+
+            review = await storage.get_review(review_id)
+            assert review is not None
+            assert review["stage"] == "error"
+            assert review["decision"] == "error"
+            assert "Candidate review failed" in review["stage_detail"]
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["state"] == "error"
+            assert updated["reason"] == "review_failed"
+            recoverable = await storage.list_recoverable_readiness_candidates()
+            assert candidate["id"] not in {c["id"] for c in recoverable}
+    finally:
+        await engine.dispose()
