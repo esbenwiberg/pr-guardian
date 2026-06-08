@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from pr_guardian.models.pr import Platform, PlatformPR
-from pr_guardian.platform.github import GitHubAdapter
+from pr_guardian.platform.github import GitHubAdapter, _compute_ci_status
 
 
 # ---------------------------------------------------------------------------
@@ -56,6 +56,26 @@ def _adapter(*responses: MagicMock) -> GitHubAdapter:
 # ---------------------------------------------------------------------------
 # Happy-path
 # ---------------------------------------------------------------------------
+
+
+def test_ci_status_combines_check_runs_and_commit_statuses():
+    check_runs = [{"name": "Build", "status": "completed", "conclusion": "success"}]
+    statuses = [{"context": "guardian/review", "state": "failure"}]
+
+    assert _compute_ci_status(check_runs, statuses, combined_status_state="failure") == "failure"
+
+
+def test_ci_status_does_not_treat_absent_statuses_as_passing():
+    assert _compute_ci_status([], [], combined_status_state=None) == "unknown"
+
+
+def test_ci_status_trusts_combined_commit_status_state_when_present():
+    statuses = [
+        {"context": "guardian/review", "state": "success"},
+        {"context": "guardian/review", "state": "failure"},
+    ]
+
+    assert _compute_ci_status([], statuses, combined_status_state="success") == "success"
 
 
 @pytest.mark.asyncio
@@ -211,6 +231,29 @@ async def test_empty_body_already_hydrated_skips_pr_get():
     body, commits = await _adapter(_resp(commits_json)).fetch_pr_body_and_commits(pr_empty_body)
     assert body == ""
     assert commits == ["feat: no-desc commit"]
+
+
+@pytest.mark.asyncio
+async def test_list_repo_open_prs_surfaces_failed_guardian_commit_status():
+    adapter = _adapter(
+        _resp([{"number": 8, "head": {"sha": "abc123"}}]),
+        _resp([]),
+        _resp({"check_runs": [{"name": "Build", "status": "completed", "conclusion": "success"}]}),
+        _resp(
+            {
+                "state": "failure",
+                "total_count": 2,
+                "statuses": [
+                    {"context": "guardian/readiness", "state": "success"},
+                    {"context": "guardian/review", "state": "failure"},
+                ],
+            }
+        ),
+    )
+
+    prs = await adapter.list_repo_open_prs("owner/repo")
+
+    assert prs[0]["_ci_status"] == "failure"
 
 
 # ---------------------------------------------------------------------------

@@ -52,10 +52,11 @@ const linkedPr = {
   repo: "repo/api",
   title: "Linked opted-in pull request",
   pr_url: "https://github.com/repo/api/pull/124",
+  ci_status: "failure",
   repo_link_id: "repo-link-1",
   has_guardian_review: true,
   guardian_review_id: "review-linked",
-  guardian_decision: "human_review",
+  guardian_decision: "error",
   connection_snapshot: { name: "Linked GitHub" },
 };
 
@@ -144,6 +145,7 @@ async function sourceAssertions(baseUrl) {
     "Pull Requests",
     "/api/prs?",
     "connection_snapshot?.name",
+    "ciStatusLabel",
     "Start Review Now",
     "Hide repo from browse",
     "Linked repo",
@@ -191,6 +193,27 @@ async function browserAssertions(baseUrl) {
     const panel = await page.locator("#pr-panel").textContent();
     if (!panel.includes("Linked repo") || !panel.includes("Guardian") || !panel.includes("Browse Only GitHub")) {
       throw new Error("Pull request panel does not show linked, Guardian, and Connection status");
+    }
+
+    await page.click("text=Linked opted-in pull request");
+    const linkedRow = await page.locator(".pr-row", { hasText: "Linked opted-in pull request" }).textContent();
+    if (!linkedRow.includes("CI failing") || !linkedRow.includes("Guardian error")) {
+      throw new Error(`Linked PR row did not show failed CI and Guardian error. Got: ${linkedRow}`);
+    }
+    if (linkedRow.includes("pending · Guardian error")) {
+      throw new Error(`Linked PR row collapsed failed CI to pending. Got: ${linkedRow}`);
+    }
+    const linkedDetails = await page.locator("#pr-panel .detail-line").evaluateAll((lines) =>
+      lines.map((line) =>
+        Array.from(line.querySelectorAll("span"))
+          .map((span) => span.textContent.trim())
+          .join(":"),
+      ),
+    );
+    if (!linkedDetails.includes("CI:failing") || !linkedDetails.includes("Review:review pending")) {
+      throw new Error(
+        `Linked PR panel did not separate CI from review status. Got: ${linkedDetails.join(", ")}`,
+      );
     }
 
     await fs.mkdir(".autopod/evidence/fact-browse-prs-separated", { recursive: true });

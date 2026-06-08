@@ -27,19 +27,39 @@ _ARCHMAP_ARTIFACT_MAX_BYTES = 2_000_000
 _ARCHMAP_ARTIFACT_FILE = "archmap.json"
 
 
-def _compute_ci_status(runs: list[dict]) -> str:
-    """Derive overall CI status from GitHub check-runs list."""
-    if not runs:
+def _compute_ci_status(
+    runs: list[dict],
+    statuses: list[dict] | None = None,
+    *,
+    combined_status_state: str | None = None,
+) -> str:
+    """Derive overall CI status from GitHub check runs and commit statuses."""
+    statuses = statuses or []
+    if not runs and not statuses and not combined_status_state:
         return "unknown"
     in_progress = any(r.get("status") != "completed" for r in runs)
     conclusions = {
         r.get("conclusion") for r in runs if r.get("status") == "completed" and r.get("conclusion")
     }
-    if any(c in ("failure", "timed_out", "action_required") for c in conclusions):
+    status_states = {s.get("state") for s in statuses if s.get("state")}
+    effective_status_states = {combined_status_state} if combined_status_state else status_states
+    failure_conclusions = {"failure", "timed_out", "action_required", "cancelled", "startup_failure"}
+    failure_states = {"failure", "error"}
+    if any(c in failure_conclusions for c in conclusions):
         return "failure"
-    if in_progress:
+    if any(s in failure_states for s in effective_status_states):
+        return "failure"
+    if in_progress or "pending" in effective_status_states:
         return "pending"
-    if conclusions and all(c in ("success", "neutral", "skipped") for c in conclusions):
+    has_checks = bool(runs)
+    has_statuses = bool(statuses) or combined_status_state is not None
+    checks_success = (not has_checks) or (
+        conclusions and all(c in ("success", "neutral", "skipped") for c in conclusions)
+    )
+    statuses_success = (not has_statuses) or (
+        effective_status_states.issubset({"success"})
+    )
+    if (has_checks or has_statuses) and checks_success and statuses_success:
         return "success"
     return "unknown"
 
@@ -891,17 +911,33 @@ class GitHubAdapter:
 
             head_sha = pr.get("head", {}).get("sha", "")
             if head_sha:
+                check_runs: list[dict] = []
+                commit_statuses: list[dict] = []
+                combined_state: str | None = None
                 try:
                     ci_resp = await client.get(
                         f"/repos/{repo}/commits/{head_sha}/check-runs",
                         params={"per_page": 100},
                     )
                     if ci_resp.status_code == 200:
-                        pr["_ci_status"] = _compute_ci_status(ci_resp.json().get("check_runs", []))
-                    else:
-                        pr["_ci_status"] = "unknown"
+                        check_runs = ci_resp.json().get("check_runs", [])
                 except Exception:
-                    pr["_ci_status"] = "unknown"
+                    check_runs = []
+                try:
+                    status_resp = await client.get(f"/repos/{repo}/commits/{head_sha}/status")
+                    if status_resp.status_code == 200:
+                        status_data = status_resp.json()
+                        commit_statuses = status_data.get("statuses", []) or []
+                        total_statuses = status_data.get("total_count", len(commit_statuses))
+                        if total_statuses:
+                            combined_state = status_data.get("state")
+                except Exception:
+                    commit_statuses = []
+                pr["_ci_status"] = _compute_ci_status(
+                    check_runs,
+                    commit_statuses,
+                    combined_status_state=combined_state,
+                )
             else:
                 pr["_ci_status"] = "unknown"
         return prs
