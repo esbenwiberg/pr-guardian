@@ -4,6 +4,7 @@ import asyncio
 import json
 from unittest.mock import AsyncMock, patch
 
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -190,27 +191,27 @@ def test_github_app_validation_marks_connection_healthy():
         asyncio.run(engine.dispose())
 
 
-def test_github_repo_link_enforces_gate_before_auto_review():
+async def _seed_manager_and_github_connection(factory) -> tuple[str, str]:
+    with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+        await storage.add_profile_manager("manager@example.com")
+        profile = await storage.create_profile("Standard", actor="manager@example.com")
+        connection = await storage.create_connection(
+            "Healthy GitHub App",
+            platform="github",
+            auth_kind="github_app",
+            app_id="12345",
+            installation_id="98765",
+            private_key="-----BEGIN RSA PRIVATE KEY-----\nfixture\n-----END RSA PRIVATE KEY-----",
+            health_status="healthy",
+            actor="manager@example.com",
+        )
+        return profile["id"], connection["id"]
+
+
+def test_github_repo_link_requires_enforced_guardian_review_gate_for_auto_review():
     engine, factory = asyncio.run(_make_session_factory())
     try:
-
-        async def seed_manager_and_connection() -> tuple[str, str]:
-            with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
-                await storage.add_profile_manager("manager@example.com")
-                profile = await storage.create_profile("Standard", actor="manager@example.com")
-                connection = await storage.create_connection(
-                    "Healthy GitHub App",
-                    platform="github",
-                    auth_kind="github_app",
-                    app_id="12345",
-                    installation_id="98765",
-                    private_key="-----BEGIN RSA PRIVATE KEY-----\nfixture\n-----END RSA PRIVATE KEY-----",
-                    health_status="healthy",
-                    actor="manager@example.com",
-                )
-                return profile["id"], connection["id"]
-
-        profile_id, connection_id = asyncio.run(seed_manager_and_connection())
+        profile_id, connection_id = asyncio.run(_seed_manager_and_github_connection(factory))
         gate = AsyncMock(return_value=_github_gate_result())
         with (
             patch("pr_guardian.auth.identity._db_available", return_value=True),
@@ -232,10 +233,84 @@ def test_github_repo_link_enforces_gate_before_auto_review():
                 },
             )
             assert response.status_code == 201, response.text
-            assert response.json()["auto_review_enabled"] is True
+            body = response.json()
+            assert body["auto_review_enabled"] is True
+            # The gate must be enforced before auto-review and persisted on the link.
+            assert body["require_review_check"] is True
             gate.assert_awaited_once()
             assert gate.await_args.kwargs["repo_owner"] == "octo"
             assert gate.await_args.kwargs["repo_name"] == "service"
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_github_repo_link_blocks_auto_review_when_app_lacks_admin():
+    """When the App can't enforce guardian/review (e.g. no Administration write),
+    the repo link is rejected with a clear error and never persisted."""
+    engine, factory = asyncio.run(_make_session_factory())
+    try:
+        profile_id, connection_id = asyncio.run(_seed_manager_and_github_connection(factory))
+        gate = AsyncMock(
+            side_effect=HTTPException(
+                422, "guardian/review is not a required status check on main"
+            )
+        )
+        with (
+            patch("pr_guardian.auth.identity._db_available", return_value=True),
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch("pr_guardian.api.profiles._ensure_github_gate_for_repo", gate),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            response = client.post(
+                "/api/profiles/repo-links",
+                headers=_manager_headers(),
+                json={
+                    "platform": "github",
+                    "repo_owner": "octo",
+                    "repo_name": "service",
+                    "profile_id": profile_id,
+                    "connection_id": connection_id,
+                    "auto_review_enabled": True,
+                    "require_review_check": True,
+                },
+            )
+            assert response.status_code == 422, response.text
+            assert "guardian/review" in response.json()["detail"]
+            listing = client.get("/api/profiles/repo-links", headers=_manager_headers())
+            assert listing.json() == []
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_github_repo_link_skips_gate_when_require_review_check_disabled():
+    """require_review_check=false is an explicit opt-out: the gate is not
+    enforced and the choice is persisted on the link."""
+    engine, factory = asyncio.run(_make_session_factory())
+    try:
+        profile_id, connection_id = asyncio.run(_seed_manager_and_github_connection(factory))
+        gate = AsyncMock(return_value=_github_gate_result())
+        with (
+            patch("pr_guardian.auth.identity._db_available", return_value=True),
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch("pr_guardian.api.profiles._ensure_github_gate_for_repo", gate),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            response = client.post(
+                "/api/profiles/repo-links",
+                headers=_manager_headers(),
+                json={
+                    "platform": "github",
+                    "repo_owner": "octo",
+                    "repo_name": "service",
+                    "profile_id": profile_id,
+                    "connection_id": connection_id,
+                    "auto_review_enabled": True,
+                    "require_review_check": False,
+                },
+            )
+            assert response.status_code == 201, response.text
+            assert response.json()["require_review_check"] is False
+            gate.assert_not_awaited()
     finally:
         asyncio.run(engine.dispose())
 

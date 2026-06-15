@@ -94,6 +94,7 @@ sa.Table(
     sa.Column("connection_id", sa.Text, nullable=False),
     sa.Column("auto_review_enabled", sa.Boolean, nullable=False, server_default="false"),
     sa.Column("paused", sa.Boolean, nullable=False, server_default="false"),
+    sa.Column("require_review_check", sa.Boolean, nullable=False, server_default="true"),
     sa.Column("archived_at", sa.DateTime(timezone=True)),
     sa.Column("created_by", sa.String(256), nullable=False, server_default="system"),
     sa.Column("updated_by", sa.String(256), nullable=False, server_default="system"),
