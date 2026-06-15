@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    true,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -539,6 +540,9 @@ class RepoLinkRow(Base):
     )
     auto_review_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     paused: Mapped[bool] = mapped_column(Boolean, default=False)
+    require_review_check: Mapped[bool] = mapped_column(
+        Boolean, default=True, server_default=true(), nullable=False
+    )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_by: Mapped[str] = mapped_column(String(256), default="system")
     updated_by: Mapped[str] = mapped_column(String(256), default="system")

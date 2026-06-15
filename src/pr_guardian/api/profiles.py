@@ -782,6 +782,7 @@ async def create_repo_link(
             connection_id=body.connection_id,
             auto_review_enabled=body.auto_review_enabled,
             paused=body.paused,
+            require_review_check=body.require_review_check,
             actor=_actor(identity),
         )
     except HTTPException:
@@ -809,7 +810,9 @@ async def update_repo_link(
         )
         paused = body.paused if body.paused is not None else current["paused"]
         require_review_check = (
-            body.require_review_check if body.require_review_check is not None else True
+            body.require_review_check
+            if body.require_review_check is not None
+            else current.get("require_review_check", True)
         )
         if platform == "github" and auto_review_enabled and not paused and require_review_check:
             await _ensure_github_gate_for_repo(
@@ -828,6 +831,7 @@ async def update_repo_link(
             repo_url=body.repo_url,
             auto_review_enabled=body.auto_review_enabled,
             paused=body.paused,
+            require_review_check=body.require_review_check,
             actor=_actor(identity),
         )
     except HTTPException:
@@ -869,7 +873,11 @@ async def set_repo_link_auto_review(
             link = await storage.get_repo_link(repo_link_id)
             if link is None:
                 raise HTTPException(404, "Repo link not found")
-            if link["platform"] == "github" and not link.get("paused"):
+            if (
+                link["platform"] == "github"
+                and not link.get("paused")
+                and link.get("require_review_check", True)
+            ):
                 await _ensure_github_gate_for_repo(
                     connection_id=uuid.UUID(str(link["connection_id"])),
                     repo_owner=link["repo_owner"],

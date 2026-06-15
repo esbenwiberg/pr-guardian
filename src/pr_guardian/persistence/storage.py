@@ -304,6 +304,7 @@ def _repo_link_to_dict(row: RepoLinkRow) -> dict[str, Any]:
         "connection_id": str(row.connection_id),
         "auto_review_enabled": row.auto_review_enabled,
         "paused": row.paused,
+        "require_review_check": row.require_review_check,
         "archived_at": row.archived_at.isoformat() if row.archived_at else None,
         "created_by": row.created_by,
         "updated_by": row.updated_by,
@@ -790,6 +791,7 @@ async def create_repo_link(
     repo_url: str = "",
     auto_review_enabled: bool = False,
     paused: bool = False,
+    require_review_check: bool = True,
     actor: str = "system",
 ) -> dict[str, Any]:
     canonical = _canonical_repo_key(
@@ -832,6 +834,7 @@ async def create_repo_link(
             connection_id=connection_id,
             auto_review_enabled=auto_review_enabled,
             paused=paused,
+            require_review_check=require_review_check,
             created_by=actor,
             updated_by=actor,
         )
@@ -914,6 +917,7 @@ async def update_repo_link(
     repo_url: str | None = None,
     auto_review_enabled: bool | None = None,
     paused: bool | None = None,
+    require_review_check: bool | None = None,
     actor: str = "system",
 ) -> dict[str, Any] | None:
     async with async_session() as session:
@@ -966,6 +970,8 @@ async def update_repo_link(
             row.auto_review_enabled = auto_review_enabled
         if paused is not None:
             row.paused = paused
+        if require_review_check is not None:
+            row.require_review_check = require_review_check
         if row.auto_review_enabled and not row.paused:
             profile = await session.get(ProfileRow, row.profile_id)
             connection = await session.get(ConnectionRow, row.connection_id)
