@@ -77,6 +77,7 @@ def _patch_deps(monkeypatch, fake_review, diff=None):
     adapter.fetch_diff = AsyncMock(return_value=diff or _fake_diff())
 
     monkeypatch.setattr(dash, "create_github_adapter", AsyncMock(return_value=adapter))
+    monkeypatch.setattr(dash, "create_adapter_for_review", AsyncMock(return_value=adapter))
 
     from pr_guardian.api import review as rv
 
