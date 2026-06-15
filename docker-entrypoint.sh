@@ -35,6 +35,15 @@ else
 fi
 
 alembic upgrade head
+
+# Reconcile any model columns missing from existing tables. The baseline stamp
+# above marks the DB as current without applying columns from migrations a
+# behind database never ran; create_all (on app startup) only adds missing
+# tables, not columns. This closes that gap idempotently (no-op on a correct
+# schema). See ADR-010 and src/pr_guardian/persistence/reconcile.py.
+echo "Reconciling schema columns..."
+python -m pr_guardian.persistence.reconcile
+
 echo "Migrations complete."
 
 exec "$@"

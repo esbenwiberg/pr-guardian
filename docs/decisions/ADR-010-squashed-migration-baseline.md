@@ -54,3 +54,11 @@ empty database.
 - Pre-baseline migration files are gone from the tree (still in git history), so
   one-time data-migration helpers they exported (the `github_pats` → connections
   backfill) and their tests are removed.
+- A database that had not run every pre-squash migration gets stamped at the
+  baseline without those columns (the stamp does not apply them, and `create_all`
+  only adds missing tables, not columns). This bit one deployment whose
+  `repo_links` table was missing `require_review_check` from migration 024. To
+  close it, `docker-entrypoint.sh` runs `pr_guardian.persistence.reconcile` after
+  `alembic upgrade head`: it idempotently `ADD COLUMN`s any model column missing
+  from an existing table when safe (nullable or has a server default), and logs
+  loudly for unsafe gaps (NOT NULL without a default) rather than crashing.
