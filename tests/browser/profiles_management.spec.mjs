@@ -63,10 +63,16 @@ function initialState() {
     connections: [
       {
         id: "connection-seeded",
-        name: "Seeded GitHub",
+        name: "Seeded GitHub App",
         platform: "github",
+        auth_kind: "github_app",
         org_url: null,
-        token_prefix: "ghp_seed...",
+        token_prefix: "",
+        app_id: "12345",
+        installation_id: "98765",
+        installation_account: "octo",
+        installation_target_type: "Organization",
+        private_key_fingerprint: "sha256:seeded",
         health_status: "healthy",
         health_message: "fixture validation passed",
         sync_enabled: true,
@@ -81,7 +87,7 @@ function initialState() {
         action: "connection.updated",
         target_type: "connection",
         target_id: "connection-seeded",
-        diff: { token_secret: { before: "changed", after: "changed" } },
+        diff: { private_key_secret: { before: "changed", after: "changed" } },
         created_at: "2026-06-02T00:00:30Z",
       },
       {
@@ -196,8 +202,14 @@ async function startServer({ admin = false } = {}) {
         id: `connection-${state.connections.length + 1}`,
         name: body.name,
         platform: body.platform,
+        auth_kind: body.platform === "github" ? "github_app" : null,
         org_url: body.org_url || null,
-        token_prefix: `${String(body.token || "").slice(0, 7)}...`,
+        token_prefix: body.platform === "ado" ? `${String(body.token || "").slice(0, 7)}...` : "",
+        app_id: body.app_id || "",
+        installation_id: body.installation_id || "",
+        installation_account: body.installation_account || "",
+        installation_target_type: body.installation_target_type || "",
+        private_key_fingerprint: body.platform === "github" ? "sha256:created" : "",
         health_status: "healthy",
         health_message: "fixture validation passed",
         sync_enabled: Boolean(body.sync_enabled),
@@ -210,7 +222,7 @@ async function startServer({ admin = false } = {}) {
         action: "connection.created",
         target_type: "connection",
         target_id: connection.id,
-        diff: { token_secret: { before: "changed", after: "changed" } },
+        diff: { private_key_secret: { before: "changed", after: "changed" } },
         created_at: "2026-06-02T00:03:00Z",
       });
       json(res, 201, connection);
@@ -250,13 +262,23 @@ async function startServer({ admin = false } = {}) {
       json(res, 201, link);
       return;
     }
+    const gateMatch = url.pathname.match(/^\/api\/profiles\/repo-links\/([^/]+)\/(gate|fix-gate)$/);
+    if (gateMatch && (req.method === "GET" || req.method === "POST")) {
+      json(res, 200, {
+        state: "enforced",
+        message: "guardian/review is required on main",
+        repo: "octo/service",
+        branch: "main",
+        context: "guardian/review",
+      });
+      return;
+    }
     if (url.pathname === "/api/profiles/audit") {
       json(res, 200, state.audit);
       return;
     }
     if (url.pathname === "/api/profiles/env-imports") {
       json(res, 200, {
-        GITHUB_TOKEN: { available: true },
         ADO_PAT: { available: false },
         ADO_ORG_URL: { available: false },
       });
@@ -320,13 +342,16 @@ const fallbackTests = {
         'id="new-profile-btn"',
         'id="link-repo-btn"',
         'data-tab="connections"',
+        "GitHub Apps",
         'id="connection-form"',
         'id="repo-link-form"',
         "/api/profiles",
         "/connections",
         "/repo-links",
+        "/fix-gate",
         "health_status",
         "auto_review_enabled",
+        "require_review_check",
         "paused",
         "target_type",
         "target_id",
@@ -342,15 +367,18 @@ const fallbackTests = {
   },
 
   async "structured-controls-and-secret-redaction"() {
-    if (/<textarea\b/i.test(html)) {
-      throw new Error("Profile UI must not use YAML/JSON textareas");
+    const profileFormSource = html.split('<form id="profile-form"')[1].split("</form>")[0];
+    if (/<textarea\b/i.test(profileFormSource)) {
+      throw new Error("Profile policy UI must not use YAML/JSON textareas");
     }
     assertSourceIncludes(
       [
         'type="number"',
         'type="checkbox"',
         "data-side-effect",
-        "token_prefix",
+        "private_key_fingerprint",
+        "input name=\"app_id\"",
+        "textarea name=\"private_key\"",
         "input name=\"token\" type=\"password\"",
         "scrubSecret",
         "[redacted]",
@@ -368,13 +396,16 @@ const fallbackTests = {
 const tests = {
   async "profile-manager-creates-setup-in-ui"() {
     await withPage({ admin: false }, async (page) => {
-      await page.getByRole("button", { name: "Connections" }).click();
+      await page.getByRole("button", { name: "GitHub Apps" }).click();
       await page.getByRole("button", { name: "New Connection" }).click();
-      const runtimeToken = `tok_${crypto.randomUUID().replaceAll("-", "")}`;
-      await page.locator("#connection-form input[name='name']").fill("Runtime GitHub");
-      await page.locator("#connection-form input[name='token']").fill(runtimeToken);
+      const runtimePrivateKey = `-----BEGIN RSA PRIVATE KEY-----\n${crypto.randomUUID().replaceAll("-", "")}\n-----END RSA PRIVATE KEY-----`;
+      await page.locator("#connection-form input[name='name']").fill("Runtime GitHub App");
+      await page.locator("#connection-form input[name='app_id']").fill("67890");
+      await page.locator("#connection-form input[name='installation_id']").fill("24680");
+      await page.locator("#connection-form input[name='installation_account']").fill("octo");
+      await page.locator("#connection-form textarea[name='private_key']").fill(runtimePrivateKey);
       await page.locator("#connection-form").getByRole("button", { name: "Create Connection" }).click();
-      await page.getByRole("cell", { name: "Runtime GitHub" }).waitFor();
+      await page.getByRole("cell", { name: "Runtime GitHub App" }).waitFor();
 
       await page.getByRole("button", { name: "New Profile" }).click();
       await page.locator("#profile-tabs").getByRole("button", { name: "Profiles" }).click();
@@ -393,11 +424,12 @@ const tests = {
       await page.locator("#repo-link-form").getByRole("button", { name: "Link Repository" }).click();
 
       await page.locator("#repo-link-rows").getByText("github:octo/service").waitFor();
+      await page.locator("#repo-link-rows").getByText("enforced").waitFor();
       await page.getByRole("button", { name: "Audit" }).click();
       await page.getByText("repo_link.created").waitFor();
       await page.getByText("connection.created").waitFor();
       const dom = await page.locator("body").textContent();
-      if (dom.includes(runtimeToken)) throw new Error("transient token leaked into DOM");
+      if (dom.includes(runtimePrivateKey)) throw new Error("transient private key leaked into DOM");
       if (await page.getByRole("button", { name: "Managers" }).isVisible()) {
         throw new Error("Profile Manager must not see Managers tab");
       }
@@ -408,7 +440,7 @@ const tests = {
   async "structured-controls-and-secret-redaction"() {
     await withPage({ admin: false }, async (page) => {
       if ((await page.locator("textarea").count()) !== 0) {
-        throw new Error("Profile UI must not use YAML/JSON textareas");
+        throw new Error("Profile policy UI must not render YAML/JSON textareas by default");
       }
       await page.locator("#quiet-period-seconds").fill("20");
       await page.locator("#archmap-expected").check();
@@ -416,8 +448,8 @@ const tests = {
       await page.locator("[data-side-effect='formal_approve']").check();
       await page.locator("#profile-form").getByRole("button", { name: "Save Profile" }).click();
 
-      await page.getByRole("button", { name: "Connections" }).click();
-      await page.getByText("ghp_seed...").waitFor();
+      await page.getByRole("button", { name: "GitHub Apps" }).click();
+      await page.getByText("sha256:seeded").waitFor();
       const secretLikeText = await page.locator("body").textContent();
       const forbiddenMarkers = [
         ["Clear", "Text", "Password"].join(""),

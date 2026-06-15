@@ -29,6 +29,28 @@ class PlatformReadinessSignal:
     description: str = ""
 
 
+@dataclass(frozen=True)
+class GateResult:
+    """Repository-side merge gate state for Guardian's required review check."""
+
+    state: str
+    message: str
+    repo: str
+    branch: str = ""
+    context: str = "guardian/review"
+
+
+@dataclass(frozen=True)
+class InstallationMetadata:
+    """GitHub App installation metadata safe to expose in setup flows."""
+
+    installation_id: str
+    account: str = ""
+    target_type: str = ""
+    repository_selection: str = ""
+    permissions: dict | None = None
+
+
 @dataclass
 class InlinePostResult:
     """Result of a post_inline_comments call."""

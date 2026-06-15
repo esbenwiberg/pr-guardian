@@ -6,8 +6,6 @@ param location string
 @secure()
 param anthropicApiKey string
 @secure()
-param githubToken string
-@secure()
 param githubWebhookSecret string
 @secure()
 param dbPassword string
@@ -32,14 +30,6 @@ resource secretAnthropicKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if 
   name: 'anthropic-api-key'
   properties: {
     value: anthropicApiKey
-  }
-}
-
-resource secretGithubToken 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = if (!empty(githubToken)) {
-  parent: keyVault
-  name: 'github-token'
-  properties: {
-    value: githubToken
   }
 }
 

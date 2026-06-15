@@ -36,11 +36,6 @@ if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
     echo ""
 fi
 
-if [ -z "${GITHUB_TOKEN:-}" ]; then
-    read -s -p "GitHub token (or press Enter to skip): " GITHUB_TOKEN
-    echo ""
-fi
-
 if [ -z "${GITHUB_WEBHOOK_SECRET:-}" ]; then
     read -s -p "GitHub webhook secret (or press Enter to skip): " GITHUB_WEBHOOK_SECRET
     echo ""
@@ -74,7 +69,6 @@ DEPLOY_OUTPUT=$(az deployment group create \
         imageTag="$IMAGE_TAG" \
         dbPassword="$DB_PASSWORD" \
         anthropicApiKey="${ANTHROPIC_API_KEY:-}" \
-        githubToken="${GITHUB_TOKEN:-}" \
         githubWebhookSecret="${GITHUB_WEBHOOK_SECRET:-}" \
         entraClientId="${ENTRA_CLIENT_ID:-}" \
         entraClientSecret="${ENTRA_CLIENT_SECRET:-}" \

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from pr_guardian.main import app
 from pr_guardian.persistence import models
 from pr_guardian.persistence import storage
+from pr_guardian.platform.protocol import GateResult
 
 
 async def _make_session_factory():
@@ -40,6 +41,15 @@ def _admin_api_key_identity():
     )
 
 
+def _github_gate_result() -> GateResult:
+    return GateResult(
+        state="enforced",
+        message="guardian/review is required on main",
+        repo="octo/service",
+        branch="main",
+    )
+
+
 def test_profile_manager_can_create_connection_profile_and_repo_link():
     engine, factory = asyncio.run(_make_session_factory())
     try:
@@ -52,6 +62,10 @@ def test_profile_manager_can_create_connection_profile_and_repo_link():
         with (
             patch("pr_guardian.auth.identity._db_available", return_value=True),
             patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch(
+                "pr_guardian.api.profiles._ensure_github_gate_for_repo",
+                AsyncMock(return_value=_github_gate_result()),
+            ),
             TestClient(app, raise_server_exceptions=False) as client,
         ):
             connection_response = client.post(
@@ -121,6 +135,107 @@ def test_profile_manager_can_create_connection_profile_and_repo_link():
             me_response = client.get("/api/me", headers=_manager_headers())
             assert me_response.status_code == 200
             assert me_response.json()["can_manage_profiles"] is True
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_github_app_validation_marks_connection_healthy():
+    engine, factory = asyncio.run(_make_session_factory())
+    try:
+
+        async def seed_manager() -> None:
+            with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+                await storage.add_profile_manager("manager@example.com")
+
+        class FakeGitHubAdapter:
+            async def list_installation_repositories(self, *, per_page: int = 1) -> dict:
+                return {"total_count": 3}
+
+            async def close(self) -> None:
+                return None
+
+        asyncio.run(seed_manager())
+        with (
+            patch("pr_guardian.auth.identity._db_available", return_value=True),
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch(
+                "pr_guardian.platform.github_auth.build_github_adapter_from_connection",
+                AsyncMock(return_value=FakeGitHubAdapter()),
+            ),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            created = client.post(
+                "/api/profiles/connections",
+                headers=_manager_headers(),
+                json={
+                    "name": "Valid GitHub App",
+                    "platform": "github",
+                    "app_id": "12345",
+                    "installation_id": "98765",
+                    "private_key": "-----BEGIN RSA PRIVATE KEY-----\nfixture\n-----END RSA PRIVATE KEY-----",
+                },
+            )
+            assert created.status_code == 201, created.text
+            assert created.json()["health_status"] == "unknown"
+
+            validated = client.post(
+                f"/api/profiles/connections/{created.json()['id']}/validate",
+                headers=_manager_headers(),
+            )
+            assert validated.status_code == 200, validated.text
+            body = validated.json()
+            assert body["health_status"] == "healthy"
+            assert "installation token validated" in body["health_message"]
+    finally:
+        asyncio.run(engine.dispose())
+
+
+def test_github_repo_link_enforces_gate_before_auto_review():
+    engine, factory = asyncio.run(_make_session_factory())
+    try:
+
+        async def seed_manager_and_connection() -> tuple[str, str]:
+            with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+                await storage.add_profile_manager("manager@example.com")
+                profile = await storage.create_profile("Standard", actor="manager@example.com")
+                connection = await storage.create_connection(
+                    "Healthy GitHub App",
+                    platform="github",
+                    auth_kind="github_app",
+                    app_id="12345",
+                    installation_id="98765",
+                    private_key="-----BEGIN RSA PRIVATE KEY-----\nfixture\n-----END RSA PRIVATE KEY-----",
+                    health_status="healthy",
+                    actor="manager@example.com",
+                )
+                return profile["id"], connection["id"]
+
+        profile_id, connection_id = asyncio.run(seed_manager_and_connection())
+        gate = AsyncMock(return_value=_github_gate_result())
+        with (
+            patch("pr_guardian.auth.identity._db_available", return_value=True),
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch("pr_guardian.api.profiles._ensure_github_gate_for_repo", gate),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            response = client.post(
+                "/api/profiles/repo-links",
+                headers=_manager_headers(),
+                json={
+                    "platform": "github",
+                    "repo_owner": "octo",
+                    "repo_name": "service",
+                    "profile_id": profile_id,
+                    "connection_id": connection_id,
+                    "auto_review_enabled": True,
+                    "require_review_check": True,
+                },
+            )
+            assert response.status_code == 201, response.text
+            assert response.json()["auto_review_enabled"] is True
+            gate.assert_awaited_once()
+            assert gate.await_args.kwargs["repo_owner"] == "octo"
+            assert gate.await_args.kwargs["repo_name"] == "service"
     finally:
         asyncio.run(engine.dispose())
 

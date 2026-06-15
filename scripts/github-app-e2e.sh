@@ -31,6 +31,19 @@ GUARDIAN_PID=""
 TEST_BRANCH=""
 TEST_PR_NUMBER=""
 WEBHOOK_SECRET=""
+PYTHON_BIN="${PYTHON_BIN:-}"
+PYTHON_BIN_DIR=""
+
+if [[ -z "${PYTHON_BIN}" ]]; then
+    if [[ -x ".venv/bin/python" ]]; then
+        PYTHON_BIN=".venv/bin/python"
+    else
+        PYTHON_BIN="python3"
+    fi
+fi
+if [[ "${PYTHON_BIN}" == */* ]]; then
+    PYTHON_BIN_DIR="$(cd "$(dirname "${PYTHON_BIN}")" && pwd)"
+fi
 
 # ─── colour helpers ───────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -58,7 +71,7 @@ check_prerequisites() {
     echo ""
 
     # ── required tools ────────────────────────────────────────────────────────
-    for tool in python3 bash curl openssl; do
+    for tool in bash curl openssl; do
         if command -v "$tool" &>/dev/null; then
             ok "Tool present: $tool"
         else
@@ -67,6 +80,13 @@ check_prerequisites() {
             errors=$((errors + 1))
         fi
     done
+    if [[ -x "${PYTHON_BIN}" ]] || command -v "${PYTHON_BIN}" &>/dev/null; then
+        ok "Tool present: ${PYTHON_BIN}"
+    else
+        fail "Missing tool: ${PYTHON_BIN}"
+        echo "    Install Python or set PYTHON_BIN to a working interpreter."
+        errors=$((errors + 1))
+    fi
 
     # gh CLI — needed for sandbox actor actions (optional for --check)
     if command -v gh &>/dev/null; then
@@ -80,7 +100,7 @@ check_prerequisites() {
     echo ""
 
     # ── Python package ────────────────────────────────────────────────────────
-    if python3 -c "import pr_guardian" 2>/dev/null; then
+    if "${PYTHON_BIN}" -c "import pr_guardian" 2>/dev/null; then
         ok "Python package: pr_guardian is importable"
     else
         fail "Python package not installed: pr_guardian"
@@ -196,7 +216,7 @@ check_prerequisites() {
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
 find_free_port() {
-    python3 -c "
+    "${PYTHON_BIN}" -c "
 import socket
 with socket.socket() as s:
     s.bind(('', 0))
@@ -369,11 +389,11 @@ run_e2e() {
     repo_data=$(gh_api_get "https://api.github.com/repos/${SANDBOX_REPO}") || \
         fatal "Cannot access ${SANDBOX_REPO}. Check GH_TOKEN or run 'gh auth login'."
     local repo_name
-    repo_name=$(python3 -c "import sys,json; d=json.loads(sys.argv[1]); print(d['full_name'])" "$repo_data")
+    repo_name=$("${PYTHON_BIN}" -c "import sys,json; d=json.loads(sys.argv[1]); print(d['full_name'])" "$repo_data")
     ok "Sandbox repo accessible: ${repo_name}"
 
     local default_branch
-    default_branch=$(python3 -c "import sys,json; d=json.loads(sys.argv[1]); print(d['default_branch'])" "$repo_data")
+    default_branch=$("${PYTHON_BIN}" -c "import sys,json; d=json.loads(sys.argv[1]); print(d['default_branch'])" "$repo_data")
 
     # ── Step 2: discover installation ID ──────────────────────────────────────
     info "Step 2: Discovering GitHub App installation for ${SANDBOX_REPO}..."
@@ -389,7 +409,7 @@ run_e2e() {
 
     # Generate App JWT using cryptography lib (same as github_auth.py)
     local jwt
-    jwt=$(python3 - "$app_id" <<EOF
+    jwt=$("${PYTHON_BIN}" - "$app_id" <<EOF
 import time, base64, json, sys
 
 app_id = sys.argv[1]
@@ -425,7 +445,7 @@ EOF
         fatal "Failed to fetch installation for ${SANDBOX_REPO}"
 
     local installation_id
-    installation_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$install_data")
+    installation_id=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$install_data")
     ok "Installation ID: ${installation_id}"
 
     # ── Step 3: generate webhook secret ───────────────────────────────────────
@@ -439,8 +459,9 @@ EOF
 
     GUARDIAN_LLM_PROVIDER=fake \
     GUARDIAN_DEV_ADMIN=1 \
-    GUARDIAN_WEBHOOK_SECRET="${WEBHOOK_SECRET}" \
+    GITHUB_WEBHOOK_SECRET="${WEBHOOK_SECRET}" \
     PORT="${GUARDIAN_PORT}" \
+    PATH="${PYTHON_BIN_DIR:+${PYTHON_BIN_DIR}:}${PATH}" \
     bash scripts/agent-serve.sh &>"${TMPDIR:-/tmp}/guardian-e2e.log" &
     GUARDIAN_PID=$!
 
@@ -469,7 +490,7 @@ EOF
     ref_data=$(gh_api_get \
         "https://api.github.com/repos/${SANDBOX_REPO}/git/ref/heads/${default_branch}")
     local main_sha
-    main_sha=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['object']['sha'])" "$ref_data")
+    main_sha=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['object']['sha'])" "$ref_data")
 
     # Create branch
     gh_api_post \
@@ -479,7 +500,7 @@ EOF
 
     # Create a file containing the E2E fixture marker
     local file_content
-    file_content=$(python3 -c "
+    file_content=$("${PYTHON_BIN}" -c "
 import base64
 content = '''# GUARDIAN_E2E_FINDING: deterministic E2E fixture marker
 # This file is created by the Guardian E2E harness for sandbox validation.
@@ -509,11 +530,11 @@ print(base64.b64encode(content.encode()).decode())
             \"base\": \"${default_branch}\"
         }") || fatal "Failed to create PR"
 
-    TEST_PR_NUMBER=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['number'])" "$pr_response")
+    TEST_PR_NUMBER=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['number'])" "$pr_response")
     local pr_node_id
-    pr_node_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['node_id'])" "$pr_response")
+    pr_node_id=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['node_id'])" "$pr_response")
     local pr_head_sha
-    pr_head_sha=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['head']['sha'])" "$pr_response")
+    pr_head_sha=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['head']['sha'])" "$pr_response")
 
     ok "Created PR #${TEST_PR_NUMBER} on branch ${TEST_BRANCH}"
 
@@ -526,14 +547,14 @@ print(base64.b64encode(content.encode()).decode())
         -d "{\"name\": \"E2E Profile ${ts}\", \"risk_class\": \"standard\"}") || \
         fatal "Failed to create Guardian profile"
     local profile_id
-    profile_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$profile_response")
+    profile_id=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$profile_response")
     ok "Profile created: ${profile_id}"
 
     # Create GitHub App Connection
     # Write the full JSON body — which contains the PEM key — to a tmpfile and
     # pass it via @file so the key never appears in curl's argv (/proc/<pid>/cmdline or ps).
     local pem_json
-    pem_json=$(printf '%s' "$pem_key" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read()))")
+    pem_json=$(printf '%s' "$pem_key" | "${PYTHON_BIN}" -c "import sys,json; print(json.dumps(sys.stdin.read()))")
 
     local conn_body_file
     conn_body_file=$(mktemp)
@@ -551,7 +572,7 @@ print(base64.b64encode(content.encode()).decode())
         -d "@${conn_body_file}") || { rm -f "${conn_body_file}"; fatal "Failed to create GitHub App Connection"; }
     rm -f "${conn_body_file}"
     local conn_id
-    conn_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$conn_response")
+    conn_id=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$conn_response")
     ok "Connection created: ${conn_id}"
 
     # Link repo
@@ -567,7 +588,7 @@ print(base64.b64encode(content.encode()).decode())
     # ── Step 8: replay pull_request opened webhook ────────────────────────────
     info "Step 8: Replaying pull_request webhook..."
     local pr_payload
-    pr_payload=$(python3 -c "
+    pr_payload=$("${PYTHON_BIN}" -c "
 import json, sys
 payload = {
     'action': 'opened',
@@ -607,13 +628,13 @@ print(json.dumps(payload))
 
     if [[ -n "${comment_response}" ]]; then
         local comment_id
-        comment_id=$(python3 -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$comment_response")
+        comment_id=$("${PYTHON_BIN}" -c "import sys,json; print(json.loads(sys.argv[1])['id'])" "$comment_response")
         ok "Posted @guardian comment (ID: ${comment_id})"
 
         # Replay issue_comment webhook
         info "Replaying issue_comment webhook..."
         local comment_payload
-        comment_payload=$(python3 -c "
+        comment_payload=$("${PYTHON_BIN}" -c "
 import json, sys
 payload = {
     'action': 'created',
@@ -647,7 +668,7 @@ print(json.dumps(payload))
         local statuses
         statuses=$(gh_api_get \
             "https://api.github.com/repos/${SANDBOX_REPO}/commits/${pr_head_sha}/statuses" \
-            2>/dev/null | python3 -c "
+            2>/dev/null | "${PYTHON_BIN}" -c "
 import sys, json
 data = json.loads(sys.stdin.read())
 matches = [s['state'] for s in data if s.get('context') == 'guardian/review']
@@ -662,7 +683,7 @@ print(matches[0] if matches else '')
         local comments
         comments=$(gh_api_get \
             "https://api.github.com/repos/${SANDBOX_REPO}/issues/${TEST_PR_NUMBER}/comments" \
-            2>/dev/null | python3 -c "
+            2>/dev/null | "${PYTHON_BIN}" -c "
 import sys, json
 data = json.loads(sys.stdin.read())
 matches = [str(c['id']) for c in data if 'guardian-guidance' in c.get('body', '')]
@@ -682,7 +703,7 @@ print(matches[0] if matches else '')
     local review_comments_count
     review_comments_count=$(gh_api_get \
         "https://api.github.com/repos/${SANDBOX_REPO}/pulls/${TEST_PR_NUMBER}/comments" \
-        2>/dev/null | python3 -c "import sys,json; print(len(json.loads(sys.stdin.read())))" || echo "0")
+        2>/dev/null | "${PYTHON_BIN}" -c "import sys,json; print(len(json.loads(sys.stdin.read())))" || echo "0")
     if [[ "${review_comments_count:-0}" -gt 0 ]]; then
         ok "Inline comments found: ${review_comments_count}"
     fi

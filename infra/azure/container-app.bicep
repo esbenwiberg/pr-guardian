@@ -12,9 +12,6 @@ param keyVaultName string
 param anthropicApiKey string = ''
 
 @secure()
-param githubToken string = ''
-
-@secure()
 param githubWebhookSecret string = ''
 
 @description('Entra ID (Azure AD) application client ID — leave empty to disable auth')
@@ -93,10 +90,6 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
           value: anthropicApiKey
         }
         {
-          name: 'github-token'
-          value: githubToken
-        }
-        {
           name: 'github-webhook-secret'
           value: githubWebhookSecret
         }
@@ -123,10 +116,6 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'ANTHROPIC_API_KEY'
               secretRef: 'anthropic-api-key'
-            }
-            {
-              name: 'GITHUB_TOKEN'
-              secretRef: 'github-token'
             }
             {
               name: 'GITHUB_WEBHOOK_SECRET'

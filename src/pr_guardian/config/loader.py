@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import structlog
@@ -13,10 +14,40 @@ log = structlog.get_logger()
 _SERVICE_DEFAULTS_PATH = Path(__file__).parent / "defaults.yml"
 
 
+def _ensure_env_provider_dict(base: dict) -> dict:
+    provider = os.environ.get("GUARDIAN_LLM_PROVIDER", "").strip()
+    if not provider:
+        return base
+    llm = base.setdefault("llm", {})
+    providers = llm.setdefault("providers", {})
+    llm["default_provider"] = provider
+    if provider == "fake" and "fake" not in providers:
+        providers["fake"] = {
+            "type": "fake",
+            "default_model": "fake-deterministic-v1",
+            "models": ["fake-deterministic-v1"],
+        }
+    return base
+
+
+def _ensure_env_provider_config(config: GuardianConfig) -> GuardianConfig:
+    provider = os.environ.get("GUARDIAN_LLM_PROVIDER", "").strip()
+    if not provider:
+        return config
+    config.llm.default_provider = provider
+    if provider == "fake" and "fake" not in config.llm.providers:
+        config.llm.providers["fake"] = LLMProviderConfig(
+            type="fake",
+            default_model="fake-deterministic-v1",
+            models=["fake-deterministic-v1"],
+        )
+    return config
+
+
 def load_service_defaults() -> dict:
     if _SERVICE_DEFAULTS_PATH.exists():
-        return yaml.safe_load(_SERVICE_DEFAULTS_PATH.read_text()) or {}
-    return {}
+        return _ensure_env_provider_dict(yaml.safe_load(_SERVICE_DEFAULTS_PATH.read_text()) or {})
+    return _ensure_env_provider_dict({})
 
 
 def load_repo_config(repo_path: Path) -> GuardianConfig:
@@ -41,10 +72,10 @@ async def apply_global_settings(config: GuardianConfig) -> GuardianConfig:
 
         settings = await get_global_config()
     except Exception:
-        return config
+        return _ensure_env_provider_config(config)
 
     if not settings:
-        return config
+        return _ensure_env_provider_config(config)
 
     # Active provider
     active = settings.get("llm.active_provider")
@@ -85,6 +116,7 @@ async def apply_global_settings(config: GuardianConfig) -> GuardianConfig:
         if active_provider:
             active_provider.default_model = default_model
 
+    config = _ensure_env_provider_config(config)
     log.debug("global_settings_applied", active_provider=config.llm.default_provider)
     return config
 

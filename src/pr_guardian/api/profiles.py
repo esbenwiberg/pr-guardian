@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from pr_guardian.auth.dependencies import require_human_admin, require_profile_manager
 from pr_guardian.auth.identity import Identity
 from pr_guardian.persistence import storage
+from pr_guardian.platform.protocol import GateResult
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -260,6 +261,7 @@ class RepoLinkPayload(BaseModel):
     repo_url: str = ""
     auto_review_enabled: bool = False
     paused: bool = False
+    require_review_check: bool = True
 
     @field_validator("repo_name")
     @classmethod
@@ -291,6 +293,7 @@ class RepoLinkUpdatePayload(BaseModel):
     repo_url: str | None = None
     auto_review_enabled: bool | None = None
     paused: bool | None = None
+    require_review_check: bool | None = None
 
     @field_validator("repo_url")
     @classmethod
@@ -364,6 +367,113 @@ async def _validate_and_persist_connection(
     if updated is None:
         raise HTTPException(404, "Connection not found")
     return updated
+
+
+def _github_repo(owner: str, name: str) -> str:
+    owner = owner.strip()
+    name = name.strip()
+    if not owner or not name:
+        raise HTTPException(400, "GitHub repo owner and repo name are required")
+    return f"{owner}/{name}"
+
+
+def _gate_result_to_dict(result: GateResult) -> dict[str, str]:
+    return {
+        "state": result.state,
+        "message": result.message,
+        "repo": result.repo,
+        "branch": result.branch,
+        "context": result.context,
+    }
+
+
+async def _build_github_app_adapter(connection_id: uuid.UUID):
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+    connection = await storage.get_connection(connection_id)
+    if connection is None:
+        raise HTTPException(404, "Connection not found")
+    if connection.get("platform") != "github" or connection.get("auth_kind") != "github_app":
+        raise HTTPException(422, "Repo link requires a GitHub App Connection")
+    return await build_github_adapter_from_connection(connection)
+
+
+async def _validate_github_app_connection(
+    connection: dict[str, Any],
+    *,
+    requested_sync_enabled: bool | None,
+    actor: str,
+) -> dict[str, Any]:
+    from pr_guardian.platform.github_auth import build_github_adapter_from_connection
+
+    adapter = None
+    health_status = "unhealthy"
+    health_message = "GitHub App validation failed"
+    try:
+        adapter = await build_github_adapter_from_connection(connection)
+        data = await adapter.list_installation_repositories(per_page=1)
+        total_count = data.get("total_count")
+        count_text = f"{total_count} accessible repos" if total_count is not None else "access ok"
+        health_status = "healthy"
+        health_message = f"GitHub App installation token validated ({count_text})"
+    except httpx.HTTPStatusError as exc:
+        health_message = f"GitHub App validation returned HTTP {exc.response.status_code}"
+    except Exception as exc:
+        health_message = f"GitHub App validation failed: {exc.__class__.__name__}"
+    finally:
+        if adapter is not None:
+            await adapter.close()
+
+    if requested_sync_enabled is None:
+        sync_enabled = bool(connection.get("sync_enabled")) and health_status == "healthy"
+    else:
+        sync_enabled = bool(requested_sync_enabled) and health_status == "healthy"
+
+    updated = await storage.update_connection(
+        uuid.UUID(str(connection["id"])),
+        sync_enabled=sync_enabled,
+        health_status=health_status,
+        health_message=health_message,
+        health_checked_at=datetime.now(UTC),
+        actor=actor,
+    )
+    if updated is None:
+        raise HTTPException(404, "Connection not found")
+    return updated
+
+
+async def _github_gate_for_repo(
+    *,
+    connection_id: uuid.UUID,
+    repo_owner: str,
+    repo_name: str,
+    ensure: bool,
+) -> GateResult:
+    adapter = await _build_github_app_adapter(connection_id)
+    try:
+        repo = _github_repo(repo_owner, repo_name)
+        if ensure:
+            return await adapter.ensure_required_review_check(repo)
+        return await adapter.get_required_review_check_state(repo)
+    finally:
+        await adapter.close()
+
+
+async def _ensure_github_gate_for_repo(
+    *,
+    connection_id: uuid.UUID,
+    repo_owner: str,
+    repo_name: str,
+) -> GateResult:
+    result = await _github_gate_for_repo(
+        connection_id=connection_id,
+        repo_owner=repo_owner,
+        repo_name=repo_name,
+        ensure=True,
+    )
+    if result.state != "enforced":
+        raise HTTPException(422, result.message)
+    return result
 
 
 @router.get("/env-imports")
@@ -499,6 +609,8 @@ async def create_connection(
             requested_sync_enabled=body.sync_enabled,
             actor=_actor(identity),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _map_storage_error(exc) from exc
 
@@ -525,7 +637,9 @@ async def update_connection(
     ado_credential_changed = not is_github_app and (
         body.token is not None or body.org_url is not None
     )
-    github_app_credential_changed = is_github_app and body.private_key is not None
+    github_app_credential_changed = is_github_app and any(
+        value is not None for value in (body.private_key, body.app_id, body.installation_id)
+    )
     credential_changed = ado_credential_changed or github_app_credential_changed
 
     if (
@@ -565,6 +679,14 @@ async def update_connection(
                 ),
                 actor=_actor(identity),
             )
+        elif github_app_credential_changed:
+            updated = await _validate_github_app_connection(
+                updated,
+                requested_sync_enabled=(
+                    body.sync_enabled if body.sync_enabled is not None else current["sync_enabled"]
+                ),
+                actor=_actor(identity),
+            )
         elif body.sync_enabled is not None:
             updated = await storage.update_connection(
                 connection_id,
@@ -587,9 +709,11 @@ async def validate_connection(
         raise HTTPException(404, "Connection not found")
     is_github_app = current.get("auth_kind") == "github_app"
     if is_github_app:
-        # GitHub App validation requires installation token auth (Brief 02).
-        # Return current state; the health probe will be wired up by the auth adapter.
-        return current
+        return await _validate_github_app_connection(
+            current,
+            requested_sync_enabled=current.get("sync_enabled"),
+            actor=_actor(identity),
+        )
     token = await storage.get_connection_token(connection_id)
     if not token:
         updated = await storage.update_connection(
@@ -636,6 +760,17 @@ async def create_repo_link(
     body: RepoLinkPayload, identity: Identity = Depends(require_profile_manager)
 ):
     try:
+        if (
+            body.platform == "github"
+            and body.auto_review_enabled
+            and not body.paused
+            and body.require_review_check
+        ):
+            await _ensure_github_gate_for_repo(
+                connection_id=body.connection_id,
+                repo_owner=body.repo_owner,
+                repo_name=body.repo_name,
+            )
         return await storage.create_repo_link(
             platform=body.platform,
             org_url=body.org_url,
@@ -649,6 +784,8 @@ async def create_repo_link(
             paused=body.paused,
             actor=_actor(identity),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _map_storage_error(exc) from exc
 
@@ -661,6 +798,25 @@ async def update_repo_link(
     identity: Identity = Depends(require_profile_manager),
 ):
     try:
+        current = await storage.get_repo_link(repo_link_id)
+        if current is None:
+            raise HTTPException(404, "Repo link not found")
+        platform = current["platform"]
+        auto_review_enabled = (
+            body.auto_review_enabled
+            if body.auto_review_enabled is not None
+            else current["auto_review_enabled"]
+        )
+        paused = body.paused if body.paused is not None else current["paused"]
+        require_review_check = (
+            body.require_review_check if body.require_review_check is not None else True
+        )
+        if platform == "github" and auto_review_enabled and not paused and require_review_check:
+            await _ensure_github_gate_for_repo(
+                connection_id=body.connection_id or uuid.UUID(str(current["connection_id"])),
+                repo_owner=body.repo_owner if body.repo_owner is not None else current["repo_owner"],
+                repo_name=body.repo_name if body.repo_name is not None else current["repo_name"],
+            )
         updated = await storage.update_repo_link(
             repo_link_id,
             profile_id=body.profile_id,
@@ -674,6 +830,8 @@ async def update_repo_link(
             paused=body.paused,
             actor=_actor(identity),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _map_storage_error(exc) from exc
     if updated is None:
@@ -707,16 +865,76 @@ async def set_repo_link_auto_review(
     identity: Identity = Depends(require_profile_manager),
 ):
     try:
+        if enabled:
+            link = await storage.get_repo_link(repo_link_id)
+            if link is None:
+                raise HTTPException(404, "Repo link not found")
+            if link["platform"] == "github" and not link.get("paused"):
+                await _ensure_github_gate_for_repo(
+                    connection_id=uuid.UUID(str(link["connection_id"])),
+                    repo_owner=link["repo_owner"],
+                    repo_name=link["repo_name"],
+                )
         updated = await storage.update_repo_link_state(
             repo_link_id,
             auto_review_enabled=enabled,
             actor=_actor(identity),
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise _map_storage_error(exc) from exc
     if updated is None:
         raise HTTPException(404, "Repo link not found")
     return updated
+
+
+@router.get("/repo-links/{repo_link_id}/gate")
+async def get_repo_link_gate(
+    repo_link_id: uuid.UUID, identity: Identity = Depends(require_profile_manager)
+):
+    link = await storage.get_repo_link(repo_link_id)
+    if link is None:
+        raise HTTPException(404, "Repo link not found")
+    if link["platform"] != "github":
+        raise HTTPException(422, "Merge gate checks are only available for GitHub repo links")
+    try:
+        result = await _github_gate_for_repo(
+            connection_id=uuid.UUID(str(link["connection_id"])),
+            repo_owner=link["repo_owner"],
+            repo_name=link["repo_name"],
+            ensure=False,
+        )
+        return _gate_result_to_dict(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map_storage_error(exc) from exc
+
+
+@router.post("/repo-links/{repo_link_id}/fix-gate")
+async def fix_repo_link_gate(
+    repo_link_id: uuid.UUID, identity: Identity = Depends(require_profile_manager)
+):
+    link = await storage.get_repo_link(repo_link_id)
+    if link is None:
+        raise HTTPException(404, "Repo link not found")
+    if link["platform"] != "github":
+        raise HTTPException(422, "Merge gate fixes are only available for GitHub repo links")
+    try:
+        result = await _github_gate_for_repo(
+            connection_id=uuid.UUID(str(link["connection_id"])),
+            repo_owner=link["repo_owner"],
+            repo_name=link["repo_name"],
+            ensure=True,
+        )
+        if result.state != "enforced":
+            raise HTTPException(422, result.message)
+        return _gate_result_to_dict(result)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise _map_storage_error(exc) from exc
 
 
 @router.delete("/repo-links/{repo_link_id}")

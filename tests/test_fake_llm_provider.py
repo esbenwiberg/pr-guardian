@@ -14,6 +14,7 @@ import pytest
 from pr_guardian.llm.fake import E2E_FINDING_MARKER, FakeLLMClient
 from pr_guardian.llm.factory import _build_client
 from pr_guardian.config.schema import LLMProviderConfig
+from pr_guardian.config.loader import load_service_defaults
 
 
 @pytest.mark.asyncio
@@ -105,3 +106,13 @@ def test_fake_llm_factory_builds_from_config():
     cfg = LLMProviderConfig(type="fake", default_model="fake-deterministic-v1")
     client = _build_client(cfg)
     assert isinstance(client, FakeLLMClient)
+
+
+def test_guardian_llm_provider_env_enables_fake_provider(monkeypatch):
+    """E2E harness can activate fake provider through GUARDIAN_LLM_PROVIDER."""
+    monkeypatch.setenv("GUARDIAN_LLM_PROVIDER", "fake")
+
+    defaults = load_service_defaults()
+
+    assert defaults["llm"]["default_provider"] == "fake"
+    assert defaults["llm"]["providers"]["fake"]["type"] == "fake"
