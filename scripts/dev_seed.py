@@ -448,8 +448,15 @@ async def _seed_reviews() -> None:
         )
     )
 
+    # PostedInlineCommentRow has a FK to reviews but no ORM relationship(), so the
+    # unit-of-work has no dependency edge to order parent-before-child. Flush the
+    # review/agent/finding rows first, then the comments.
+    comment_rows = [r for r in rows if isinstance(r, PostedInlineCommentRow)]
+    parent_rows = [r for r in rows if not isinstance(r, PostedInlineCommentRow)]
     async with async_session() as s:
-        s.add_all(rows)
+        s.add_all(parent_rows)
+        await s.flush()
+        s.add_all(comment_rows)
         await s.commit()
 
 
