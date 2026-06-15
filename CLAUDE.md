@@ -90,7 +90,9 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
 - **Prompts live in `prompts/<agent>/`** as templates. Don't inline LLM
   prompts in Python — render them.
 - **Migrations are append-only and numbered.** Never edit a merged
-  migration; add a new one.
+  migration; add a new one. The chain was squashed to `001_baseline.py`
+  (generated from the models, which are the schema source of truth — see
+  ADR-010); new migrations layer on top from `002`.
 - **Commits follow Conventional Commits** (`feat: …`, `fix: …`, `chore: …`).
   Commit-msg hook is recommended.
 - **PR Guardian never auto-merges.** Authors still click merge.
