@@ -21,10 +21,6 @@ param dbPassword string
 param anthropicApiKey string = ''
 
 @secure()
-@description('GitHub token for API access')
-param githubToken string = ''
-
-@secure()
 @description('GitHub webhook secret')
 param githubWebhookSecret string = ''
 
@@ -67,7 +63,6 @@ module keyvault 'keyvault.bicep' = {
     prefix: prefix
     location: location
     anthropicApiKey: anthropicApiKey
-    githubToken: githubToken
     githubWebhookSecret: githubWebhookSecret
     dbPassword: dbPassword
   }
@@ -85,7 +80,6 @@ module containerApp 'container-app.bicep' = {
     databaseUrl: database.outputs.connectionString
     keyVaultName: keyvault.outputs.keyVaultName
     anthropicApiKey: anthropicApiKey
-    githubToken: githubToken
     githubWebhookSecret: githubWebhookSecret
     entraClientId: entraClientId
     entraClientSecret: entraClientSecret

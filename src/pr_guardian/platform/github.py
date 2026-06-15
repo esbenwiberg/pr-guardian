@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 from io import BytesIO
+from urllib.parse import quote
 from typing import TYPE_CHECKING
 from zipfile import BadZipFile, ZipFile
 
@@ -13,7 +14,9 @@ from pr_guardian.models.pr import Diff, DiffFile, FileStatus, Platform, Platform
 from pr_guardian.platform._utils import inline_comment_body
 from pr_guardian.platform.models import WebhookPayload
 from pr_guardian.platform.protocol import (
+    GateResult,
     InlinePostResult,
+    InstallationMetadata,
     PlatformPRMetadata,
     PlatformReadinessSignal,
 )
@@ -25,6 +28,7 @@ log = structlog.get_logger()
 
 _ARCHMAP_ARTIFACT_MAX_BYTES = 2_000_000
 _ARCHMAP_ARTIFACT_FILE = "archmap.json"
+_GUARDIAN_REVIEW_CONTEXT = "guardian/review"
 
 
 def _compute_ci_status(
@@ -81,6 +85,17 @@ def _extract_archmap_json(zip_bytes: bytes) -> str | None:
             return archive.read(info).decode("utf-8", errors="replace")
     except BadZipFile:
         return None
+
+
+def _status_check_contexts(required_status_checks: dict | None) -> set[str]:
+    if not required_status_checks:
+        return set()
+    contexts = set(required_status_checks.get("contexts") or [])
+    for check in required_status_checks.get("checks") or []:
+        context = check.get("context")
+        if context:
+            contexts.add(context)
+    return contexts
 
 
 class GitHubAdapter:
@@ -972,6 +987,136 @@ class GitHubAdapter:
             json={"content": content},
         )
         resp.raise_for_status()
+
+    async def list_installation_repositories(self, *, per_page: int = 1) -> dict:
+        """List repositories visible to the current GitHub App installation token."""
+        client = self._get_client()
+        resp = await client.get(
+            "/installation/repositories",
+            params={"per_page": max(1, min(per_page, 100))},
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def get_installation_for_repo(self, repo: str) -> InstallationMetadata:
+        """Fetch safe installation metadata for a repository the App can access."""
+        client = self._get_client()
+        repo_resp = await client.get(f"/repos/{repo}")
+        repo_resp.raise_for_status()
+        repo_data = repo_resp.json()
+        install_data = await self.list_installation_repositories(per_page=1)
+        creds = getattr(self._app_auth, "_creds", None)
+        return InstallationMetadata(
+            installation_id=getattr(creds, "installation_id", ""),
+            account=(repo_data.get("owner") or {}).get("login") or "",
+            target_type=(repo_data.get("owner") or {}).get("type") or "",
+            repository_selection=install_data.get("repository_selection") or "",
+            permissions=install_data.get("permissions") or {},
+        )
+
+    async def _default_branch(self, repo: str) -> str:
+        client = self._get_client()
+        resp = await client.get(f"/repos/{repo}")
+        resp.raise_for_status()
+        return resp.json().get("default_branch") or "main"
+
+    async def get_required_review_check_state(
+        self,
+        repo: str,
+        branch: str = "",
+        context: str = _GUARDIAN_REVIEW_CONTEXT,
+    ) -> GateResult:
+        """Return whether ``context`` is currently required by branch protection."""
+        client = self._get_client()
+        branch_name = branch or await self._default_branch(repo)
+        encoded_branch = quote(branch_name, safe="")
+        resp = await client.get(f"/repos/{repo}/branches/{encoded_branch}/protection")
+        if resp.status_code == 404:
+            return GateResult(
+                state="missing",
+                message="Branch protection is not enabled for this branch",
+                repo=repo,
+                branch=branch_name,
+                context=context,
+            )
+        resp.raise_for_status()
+        protection = resp.json()
+        required_status_checks = protection.get("required_status_checks")
+        if context in _status_check_contexts(required_status_checks):
+            return GateResult(
+                state="enforced",
+                message=f"{context} is required on {branch_name}",
+                repo=repo,
+                branch=branch_name,
+                context=context,
+            )
+        return GateResult(
+            state="missing",
+            message=f"{context} is not a required status check on {branch_name}",
+            repo=repo,
+            branch=branch_name,
+            context=context,
+        )
+
+    async def ensure_required_review_check(
+        self,
+        repo: str,
+        branch: str = "",
+        context: str = _GUARDIAN_REVIEW_CONTEXT,
+    ) -> GateResult:
+        """Add ``context`` to branch protection status checks without removing existing ones."""
+        client = self._get_client()
+        branch_name = branch or await self._default_branch(repo)
+        encoded_branch = quote(branch_name, safe="")
+        protection_resp = await client.get(f"/repos/{repo}/branches/{encoded_branch}/protection")
+        if protection_resp.status_code == 404:
+            return GateResult(
+                state="unsupported",
+                message="Branch protection is not enabled; enable branch protection first",
+                repo=repo,
+                branch=branch_name,
+                context=context,
+            )
+        protection_resp.raise_for_status()
+        protection = protection_resp.json()
+        required_status_checks = protection.get("required_status_checks") or {}
+        contexts = _status_check_contexts(required_status_checks)
+        if context in contexts:
+            return GateResult(
+                state="enforced",
+                message=f"{context} is already required on {branch_name}",
+                repo=repo,
+                branch=branch_name,
+                context=context,
+            )
+        contexts.add(context)
+        payload: dict = {
+            "strict": bool(required_status_checks.get("strict", False)),
+            "contexts": sorted(contexts),
+        }
+        checks = required_status_checks.get("checks") or []
+        if checks:
+            payload["checks"] = checks
+        update_resp = await client.patch(
+            f"/repos/{repo}/branches/{encoded_branch}/protection/required_status_checks",
+            json=payload,
+        )
+        if update_resp.status_code == 404:
+            return GateResult(
+                state="unsupported",
+                message="Required status check protection is unavailable for this branch",
+                repo=repo,
+                branch=branch_name,
+                context=context,
+            )
+        update_resp.raise_for_status()
+        return GateResult(
+            state="enforced",
+            message=f"{context} was added as a required status check on {branch_name}",
+            repo=repo,
+            branch=branch_name,
+            context=context,
+        )
 
     async def close(self) -> None:
         if self._client:

@@ -28,7 +28,7 @@
     <div class="flex flex-wrap items-center gap-2 mb-4" id="profile-tabs">
       <button class="tab tab-active" data-tab="profiles">Profiles</button>
       <button class="tab" data-tab="repositories">Repositories</button>
-      <button class="tab" data-tab="connections">Connections</button>
+      <button class="tab" data-tab="connections">GitHub Apps</button>
       <button class="tab" data-tab="audit">Audit</button>
       <button class="tab hidden" data-tab="managers" id="managers-tab">Managers</button>
     </div>
@@ -153,7 +153,7 @@
     <section id="tab-repositories" class="tab-panel hidden panel overflow-hidden">
       <div class="table-wrap">
         <table class="mgmt-table">
-          <thead><tr><th>Platform</th><th>Org / Project</th><th>Repo</th><th>Profile</th><th>Connection</th><th>Auto-review</th><th>Paused</th><th>Last readiness</th></tr></thead>
+          <thead><tr><th>Platform</th><th>Org / Project</th><th>Repo</th><th>Profile</th><th>Connection</th><th>Auto-review</th><th>Paused</th><th>Merge gate</th><th>Last readiness</th><th>Actions</th></tr></thead>
           <tbody id="repo-link-rows"></tbody>
         </table>
       </div>
@@ -163,15 +163,15 @@
       <div class="panel p-4">
         <div class="flex items-center justify-between gap-4 mb-3">
           <div>
-            <h2 class="text-sm font-semibold text-slate-100">Connections</h2>
-            <p class="text-xs text-slate-500">Tokens are accepted only during save and are never displayed after save.</p>
+            <h2 class="text-sm font-semibold text-slate-100">GitHub Apps and ADO Connections</h2>
+            <p class="text-xs text-slate-500">GitHub uses encrypted App credentials. ADO still uses a PAT.</p>
           </div>
           <button id="new-connection-btn" class="btn btn-primary text-xs">New Connection</button>
         </div>
         <div id="env-imports" class="mb-3 text-xs text-slate-400"></div>
         <div class="table-wrap">
           <table class="mgmt-table">
-            <thead><tr><th>Name</th><th>Platform</th><th>Org / URL</th><th>Token prefix</th><th>Health</th><th>Sync</th><th>Linked repos</th><th>Updated</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Name</th><th>Platform</th><th>Installation / URL</th><th>Credential</th><th>Health</th><th>Sync</th><th>Linked repos</th><th>Updated</th><th>Actions</th></tr></thead>
             <tbody id="connection-rows"></tbody>
           </table>
         </div>
@@ -249,7 +249,9 @@
   .mgmt-table td { color: rgb(203 213 225); padding: 10px 12px; border-bottom: 1px solid rgb(30 41 59 / 0.75); vertical-align: top; }
   .health { font-size: 10px; padding: 2px 7px; border-radius: 5px; border: 1px solid rgb(71 85 105); color: rgb(148 163 184); }
   .health.healthy { color: rgb(110 231 183); border-color: rgb(16 185 129 / 0.45); background: rgb(16 185 129 / 0.08); }
+  .health.enforced { color: rgb(110 231 183); border-color: rgb(16 185 129 / 0.45); background: rgb(16 185 129 / 0.08); }
   .health.unhealthy { color: rgb(248 113 113); border-color: rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.08); }
+  .health.missing, .health.unsupported { color: rgb(251 191 36); border-color: rgb(251 191 36 / 0.45); background: rgb(251 191 36 / 0.08); }
   @media (max-width: 900px) {
     .section-grid, .toggle-grid { grid-template-columns: 1fr; }
   }
@@ -268,6 +270,7 @@
     audit: [],
     managers: [],
     envImports: {},
+    gates: {},
     selectedProfileId: null,
     activeTab: 'profiles',
   };
@@ -349,6 +352,25 @@
 
   function tokenPrefix(value) {
     return value ? escapeHtml(value) : '<span class="text-slate-500">none</span>';
+  }
+
+  function credentialSummary(connection) {
+    if (connection.platform === 'github') {
+      return connection.private_key_fingerprint
+        ? escapeHtml(connection.private_key_fingerprint)
+        : '<span class="text-slate-500">private key stored</span>';
+    }
+    return tokenPrefix(connection.token_prefix);
+  }
+
+  function installationSummary(connection) {
+    if (connection.platform === 'github') {
+      const account = connection.installation_account || 'unknown account';
+      const install = connection.installation_id ? `#${connection.installation_id}` : 'missing installation';
+      const app = connection.app_id ? `App ${connection.app_id}` : 'missing App ID';
+      return `<div>${escapeHtml(account)} · ${escapeHtml(install)}</div><div class="text-2xs text-slate-500">${escapeHtml(app)}</div>`;
+    }
+    return escapeHtml(connection.org_url || '');
   }
 
   function healthBadge(connection) {
@@ -535,6 +557,11 @@
       const orgProject = link.platform === 'ado'
         ? `${link.org_url || ''}${link.project ? ' / ' + link.project : ''}`
         : link.repo_owner || '';
+      const gate = state.gates[link.id];
+      const gateState = link.platform === 'github'
+        ? (gate ? gate.state : 'unknown')
+        : 'n/a';
+      const gateMessage = gate ? gate.message : 'Check current merge gate state';
       return `
         <tr data-repo-link-id="${escapeHtml(link.id)}">
           <td>${escapeHtml(link.platform)}</td>
@@ -544,10 +571,14 @@
           <td><select class="form-select text-xs py-1" data-link-field="connection_id">${connectionOptions(link.connection_id, link.platform)}</select></td>
           <td><input type="checkbox" data-link-field="auto_review_enabled" ${link.auto_review_enabled ? 'checked' : ''}></td>
           <td><input type="checkbox" data-link-field="paused" ${link.paused ? 'checked' : ''}></td>
+          <td><span class="health ${escapeHtml(gateState)}" title="${escapeHtml(gateMessage)}">${escapeHtml(gateState)}</span></td>
           <td><span class="text-slate-500">No candidate yet</span></td>
-          <td class="whitespace-nowrap"><button class="link-btn" data-edit-repo-link>Edit</button></td>
+          <td class="whitespace-nowrap">
+            <button class="link-btn" data-edit-repo-link>Edit</button>
+            ${link.platform === 'github' ? '<button class="link-btn" data-check-gate>Check</button><button class="link-btn" data-fix-gate>Fix gate</button>' : ''}
+          </td>
         </tr>`;
-    }).join('') || '<tr><td colspan="8" class="text-center text-slate-500 py-10">No linked repositories</td></tr>';
+    }).join('') || '<tr><td colspan="10" class="text-center text-slate-500 py-10">No linked repositories</td></tr>';
   }
 
   function renderConnections() {
@@ -558,8 +589,8 @@
         <tr data-connection-id="${escapeHtml(connection.id)}">
           <td>${escapeHtml(connection.name)}</td>
           <td>${escapeHtml(connection.platform)}</td>
-          <td>${escapeHtml(connection.org_url || '')}</td>
-          <td data-token-prefix>${tokenPrefix(connection.token_prefix)}</td>
+          <td>${installationSummary(connection)}</td>
+          <td data-credential-summary>${credentialSummary(connection)}</td>
           <td>${healthBadge(connection)}<div class="text-2xs text-slate-500 mt-1">${escapeHtml(connection.health_message || '')}</div></td>
           <td><input type="checkbox" data-connection-sync ${connection.sync_enabled ? 'checked' : ''} ${syncDisabled ? 'disabled' : ''} title="${syncDisabled ? 'Validate healthy before enabling sync' : ''}"></td>
           <td>${linkedCount}</td>
@@ -644,6 +675,8 @@
   function closeModal() {
     const tokenInput = els.modal.querySelector('input[name="token"]');
     if (tokenInput) tokenInput.value = '';
+    const privateKeyInput = els.modal.querySelector('[name="private_key"]');
+    if (privateKeyInput) privateKeyInput.value = '';
     els.modal.classList.add('hidden');
     els.modalBody.innerHTML = '';
   }
@@ -660,8 +693,21 @@
               <option value="ado" ${connection?.platform === 'ado' ? 'selected' : ''}>Azure DevOps</option>
             </select>
           </label>
-          <label class="field md:col-span-2">ADO org URL<input name="org_url" class="form-input" autocomplete="off" value="${escapeHtml(connection?.org_url || '')}" placeholder="https://dev.azure.com/org"></label>
-          <label class="field md:col-span-2">Token<input name="token" type="password" class="form-input" autocomplete="new-password" ${isEdit ? '' : 'required'} placeholder="${isEdit ? 'Leave blank to keep existing token' : 'Token is cleared after save'}"></label>
+          <label class="field" data-github-field>App ID<input name="app_id" class="form-input" autocomplete="off" value="${escapeHtml(connection?.app_id || '')}" placeholder="123456"></label>
+          <label class="field" data-github-field>Installation ID<input name="installation_id" class="form-input" autocomplete="off" value="${escapeHtml(connection?.installation_id || '')}" placeholder="987654"></label>
+          <label class="field" data-github-field>Installation account<input name="installation_account" class="form-input" autocomplete="off" value="${escapeHtml(connection?.installation_account || '')}" placeholder="org-or-user"></label>
+          <label class="field" data-github-field>Target type
+            <select name="installation_target_type" class="form-select">
+              <option value="" ${!connection?.installation_target_type ? 'selected' : ''}>Unknown</option>
+              <option value="User" ${connection?.installation_target_type === 'User' ? 'selected' : ''}>User</option>
+              <option value="Organization" ${connection?.installation_target_type === 'Organization' ? 'selected' : ''}>Organization</option>
+            </select>
+          </label>
+          <label class="field md:col-span-2" data-github-field>Private key
+            <textarea name="private_key" class="form-input min-h-[120px] font-mono text-xs" autocomplete="new-password" placeholder="${isEdit ? 'Leave blank to keep existing private key' : 'Paste GitHub App private key PEM'}"></textarea>
+          </label>
+          <label class="field md:col-span-2" data-ado-field>ADO org URL<input name="org_url" class="form-input" autocomplete="off" value="${escapeHtml(connection?.org_url || '')}" placeholder="https://dev.azure.com/org"></label>
+          <label class="field md:col-span-2" data-ado-field>ADO token<input name="token" type="password" class="form-input" autocomplete="new-password" placeholder="${isEdit ? 'Leave blank to keep existing token' : 'Token is cleared after save'}"></label>
           <label class="field md:col-span-2">Description<input name="description" class="form-input" autocomplete="off" value="${escapeHtml(connection?.description || '')}"></label>
         </div>
         <label class="toggle-line"><input name="sync_enabled" type="checkbox" ${connection?.sync_enabled ? 'checked' : ''} ${connection && connection.health_status !== 'healthy' ? 'disabled' : ''}> <span>Enable broad PR sync when healthy</span></label>
@@ -694,6 +740,7 @@
         </div>
         <div class="flex flex-wrap gap-4">
           <label class="toggle-line"><input name="auto_review_enabled" type="checkbox" ${link ? (link.auto_review_enabled ? 'checked' : '') : 'checked'}> <span>Auto-review enabled</span></label>
+          <label id="repo-link-review-check" class="toggle-line"><input name="require_review_check" type="checkbox" checked> <span>Require guardian/review check</span></label>
           <label class="toggle-line"><input name="paused" type="checkbox" ${link?.paused ? 'checked' : ''}> <span>Paused</span></label>
         </div>
         <div class="flex justify-end gap-2 pt-2">
@@ -779,27 +826,50 @@
     return name;
   }
 
+  function applyConnectionPlatform(platform) {
+    const isGitHub = platform === 'github';
+    document.querySelectorAll('[data-github-field]').forEach(el => { el.style.display = isGitHub ? '' : 'none'; });
+    document.querySelectorAll('[data-ado-field]').forEach(el => { el.style.display = isGitHub ? 'none' : ''; });
+  }
+
   function openConnectionModal(connection = null) {
     openModal(connection ? 'Edit Connection' : 'New Connection', connectionForm(connection));
     const form = document.getElementById('connection-form');
+    const platformSelect = form.querySelector('[name="platform"]');
+    applyConnectionPlatform(connection?.platform || platformSelect.value);
+    if (!connection) platformSelect.addEventListener('change', () => applyConnectionPlatform(platformSelect.value));
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const data = new FormData(form);
+      const platform = connection?.platform || data.get('platform');
       const payload = {
         name: data.get('name'),
-        platform: connection?.platform || data.get('platform'),
-        org_url: data.get('org_url') || null,
+        platform,
         description: data.get('description') || '',
         sync_enabled: Boolean(data.get('sync_enabled')),
       };
-      const token = String(data.get('token') || '');
-      if (token) payload.token = token;
-      if (!connection && !payload.token) throw new Error('Token is required');
+      if (platform === 'github') {
+        payload.app_id = String(data.get('app_id') || '').trim();
+        payload.installation_id = String(data.get('installation_id') || '').trim();
+        payload.installation_account = String(data.get('installation_account') || '').trim();
+        payload.installation_target_type = String(data.get('installation_target_type') || '').trim();
+        const privateKey = String(data.get('private_key') || '').trim();
+        if (privateKey) payload.private_key = privateKey;
+        if (!connection && !payload.private_key) throw new Error('Private key is required');
+      } else {
+        payload.org_url = data.get('org_url') || null;
+        const token = String(data.get('token') || '');
+        if (token) payload.token = token;
+        if (!connection && !payload.token) throw new Error('ADO token is required');
+      }
       const saved = await api(connection ? `/connections/${connection.id}` : '/connections', {
         method: connection ? 'PATCH' : 'POST',
         body: JSON.stringify(payload),
       });
-      form.querySelector('input[name="token"]').value = '';
+      const tokenInput = form.querySelector('input[name="token"]');
+      if (tokenInput) tokenInput.value = '';
+      const privateKeyInput = form.querySelector('[name="private_key"]');
+      if (privateKeyInput) privateKeyInput.value = '';
       state.connections = connection
         ? state.connections.map(item => item.id === saved.id ? saved : item)
         : [...state.connections, saved];
@@ -815,6 +885,7 @@
     document.getElementById('repo-link-field-owner').style.display = isGitHub ? '' : 'none';
     document.getElementById('repo-link-field-org-url').style.display = isGitHub ? 'none' : '';
     document.getElementById('repo-link-field-project').style.display = isGitHub ? 'none' : '';
+    document.getElementById('repo-link-review-check').style.display = isGitHub ? '' : 'none';
     const connSelect = document.getElementById('repo-link-connection-select');
     const currentConn = connSelect.value;
     connSelect.innerHTML = connectionOptions(currentConn, platform);
@@ -841,10 +912,14 @@
           profile_id: data.get('profile_id'),
           connection_id: data.get('connection_id'),
           auto_review_enabled: Boolean(data.get('auto_review_enabled')),
+          require_review_check: Boolean(data.get('require_review_check')),
           paused: Boolean(data.get('paused')),
         };
         saved = await api(`/repo-links/${link.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
         state.repoLinks = state.repoLinks.map(item => item.id === saved.id ? saved : item);
+        if (saved.platform === 'github' && payload.auto_review_enabled && payload.require_review_check) {
+          state.gates[saved.id] = { state: 'enforced', message: 'guardian/review merge gate enforced' };
+        }
         showToast('Repository link updated');
       } else {
         const payload = {
@@ -857,10 +932,14 @@
           profile_id: data.get('profile_id'),
           connection_id: data.get('connection_id'),
           auto_review_enabled: Boolean(data.get('auto_review_enabled')),
+          require_review_check: Boolean(data.get('require_review_check')),
           paused: Boolean(data.get('paused')),
         };
         saved = await api('/repo-links', { method: 'POST', body: JSON.stringify(payload) });
         state.repoLinks.push(saved);
+        if (saved.platform === 'github' && payload.auto_review_enabled && payload.require_review_check) {
+          state.gates[saved.id] = { state: 'enforced', message: 'guardian/review merge gate enforced' };
+        }
         showToast('Repository linked');
       }
       await refreshAudit();
@@ -905,12 +984,24 @@
     renderAll();
   }
 
-  function handleRepoLinkClick(event) {
-    if (!event.target.matches('[data-edit-repo-link]')) return;
+  async function handleRepoLinkClick(event) {
     const row = event.target.closest('[data-repo-link-id]');
     if (!row) return;
     const link = state.repoLinks.find(item => item.id === row.dataset.repoLinkId);
-    if (link) openRepoLinkModal(link);
+    if (!link) return;
+    if (event.target.matches('[data-edit-repo-link]')) {
+      openRepoLinkModal(link);
+    } else if (event.target.matches('[data-check-gate]')) {
+      const result = await api(`/repo-links/${link.id}/gate`);
+      state.gates[link.id] = result;
+      renderRepoLinks();
+      showToast(result.message || 'Merge gate checked');
+    } else if (event.target.matches('[data-fix-gate]')) {
+      const result = await api(`/repo-links/${link.id}/fix-gate`, { method: 'POST' });
+      state.gates[link.id] = result;
+      renderRepoLinks();
+      showToast(result.message || 'Merge gate fixed');
+    }
   }
 
   async function handleRepoLinkChange(event) {

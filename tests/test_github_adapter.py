@@ -48,6 +48,7 @@ def _adapter(*responses: MagicMock) -> GitHubAdapter:
     adapter = GitHubAdapter(token="test-token")
     mock_client = AsyncMock()
     mock_client.post = AsyncMock()
+    mock_client.patch = AsyncMock()
     mock_client.get = AsyncMock(side_effect=list(responses))
     adapter._client = mock_client
     return adapter
@@ -94,6 +95,48 @@ async def test_set_review_status_links_to_guardian_review():
     payload = adapter._client.post.await_args.kwargs["json"]
     assert payload["context"] == "guardian/review"
     assert payload["target_url"] == "https://guardian.example/reviews/abc"
+
+
+@pytest.mark.asyncio
+async def test_ensure_required_review_check_adds_guardian_context_additively():
+    adapter = _adapter(
+        _resp({"default_branch": "main"}),
+        _resp({"required_status_checks": {"strict": True, "contexts": ["ci/build"]}}),
+    )
+    adapter._client.patch.return_value = _resp({"contexts": ["ci/build", "guardian/review"]})
+
+    result = await adapter.ensure_required_review_check("owner/repo")
+
+    assert result.state == "enforced"
+    adapter._client.patch.assert_awaited_once()
+    assert (
+        adapter._client.patch.await_args.args[0]
+        == "/repos/owner/repo/branches/main/protection/required_status_checks"
+    )
+    payload = adapter._client.patch.await_args.kwargs["json"]
+    assert payload["strict"] is True
+    assert payload["contexts"] == ["ci/build", "guardian/review"]
+
+
+@pytest.mark.asyncio
+async def test_required_review_check_state_detects_existing_checks_entry():
+    adapter = _adapter(
+        _resp({"default_branch": "main"}),
+        _resp(
+            {
+                "required_status_checks": {
+                    "strict": False,
+                    "contexts": [],
+                    "checks": [{"context": "guardian/review", "app_id": 123}],
+                }
+            }
+        ),
+    )
+
+    result = await adapter.get_required_review_check_state("owner/repo")
+
+    assert result.state == "enforced"
+    assert result.branch == "main"
 
 
 @pytest.mark.asyncio
