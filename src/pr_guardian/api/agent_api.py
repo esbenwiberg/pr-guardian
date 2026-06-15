@@ -117,7 +117,7 @@ async def trigger_re_review(
     """Trigger a focused re-review of an existing review."""
     import asyncio
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
-    from pr_guardian.platform.factory import create_adapter
+    from pr_guardian.platform.factory import create_adapter_for_review
 
     review = await storage.get_review(review_id)
     if not review:
@@ -126,9 +126,9 @@ async def trigger_re_review(
         raise HTTPException(422, "Review has no PR URL")
 
     stub, platform_name = _parse_pr_url(review["pr_url"])
-    adapter = create_adapter(platform_name)
 
     try:
+        adapter = await create_adapter_for_review(review, platform_name)
         pr = await _hydrate_pr(adapter, stub, platform_name)
     except Exception as e:
         raise HTTPException(422, f"Failed to fetch PR info: {e}")

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import uuid
+from typing import Any, Mapping
+
 from pr_guardian.platform.ado import ADOAdapter
 from pr_guardian.platform.github import GitHubAdapter
 from pr_guardian.platform.models import WebhookPayload
@@ -86,6 +89,45 @@ async def create_github_adapter(connection_id_or_name: str | None = None) -> Git
         connection = app_connections[0]
 
     return await build_github_adapter_from_connection(connection)
+
+
+async def create_adapter_for_review(
+    review: Mapping[str, Any], platform_name: str
+) -> PlatformAdapter:
+    """Resolve an adapter using the Connection the review originally ran against.
+
+    Re-review, re-evaluate, and on-demand diff/capability fetches must
+    authenticate with the *same* Connection the review used — NOT the
+    ``ADO_PAT`` / ``ADO_ORG_URL`` env fallback. Deployments that authenticate
+    solely via stored Connections leave those env vars empty, so falling back
+    to ``create_adapter(platform)`` builds an ADO adapter with a blank PAT and
+    every API call 401s.
+
+    GitHub is resolved through the standard GitHub App Connection path
+    (``create_github_adapter``), keyed by the review's stored connection id.
+    ADO prefers the stored Connection's PAT + org_url, and only falls back to
+    env vars for legacy reviews that recorded no connection.
+    """
+    connection_id = review.get("connection_id")
+    if platform_name == "github":
+        return await create_github_adapter(connection_id or review.get("pat_name"))
+
+    if connection_id:
+        from pr_guardian.persistence import storage
+
+        cid = uuid.UUID(str(connection_id))
+        token = await storage.get_connection_token(cid)
+        if token:
+            connection = await storage.get_connection(cid)
+            snapshot = review.get("connection_snapshot") or {}
+            org_url = (connection or {}).get("org_url") or snapshot.get("org_url") or ""
+            return create_adapter(
+                platform_name,
+                token_override=token,
+                org_url_override=org_url or None,
+            )
+
+    return create_adapter(platform_name)
 
 
 def normalize_webhook(payload: WebhookPayload) -> PlatformPR | None:

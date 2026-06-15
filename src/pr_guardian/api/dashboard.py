@@ -29,7 +29,11 @@ from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.decision.types import StickyTriggerKind
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import _hash16, finding_signature
-from pr_guardian.platform.factory import create_adapter, create_github_adapter
+from pr_guardian.platform.factory import (
+    create_adapter,
+    create_adapter_for_review,
+    create_github_adapter,
+)
 from pr_guardian.decision.actions import _detail_url
 from pr_guardian.wizard.capability_clusterer import (
     FileSummary,
@@ -273,13 +277,9 @@ async def dashboard_review_diff(
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = (
-        await create_github_adapter(row.get("pat_name"))
-        if platform_name == "github"
-        else create_adapter(platform_name)
-    )
 
     try:
+        adapter = await create_adapter_for_review(row, platform_name)
         pr = await _hydrate_pr(adapter, stub, platform_name)
     except Exception as e:
         raise HTTPException(422, f"Failed to fetch PR info: {e}")
@@ -374,11 +374,7 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     from pr_guardian.models.pr import Diff
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = (
-        await create_github_adapter(row.get("pat_name"))
-        if platform_name == "github"
-        else create_adapter(platform_name)
-    )
+    adapter = await create_adapter_for_review(row, platform_name)
 
     # Best-effort diff + context fetch — when platform credentials are
     # unavailable or the PR is gone, fall back to building a minimal file list
@@ -1007,13 +1003,9 @@ async def re_review(review_id: uuid.UUID, request: Request):
     from pr_guardian.api.review import _parse_pr_url, _hydrate_pr
 
     stub, platform_name = _parse_pr_url(review["pr_url"])
-    adapter = (
-        await create_github_adapter(review.get("pat_name"))
-        if platform_name == "github"
-        else create_adapter(platform_name)
-    )
 
     try:
+        adapter = await create_adapter_for_review(review, platform_name)
         pr = await _hydrate_pr(adapter, stub, platform_name)
     except Exception as e:
         raise HTTPException(422, f"Failed to fetch PR info: {e}")
