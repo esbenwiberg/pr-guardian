@@ -31,6 +31,17 @@ def _manager_headers() -> dict[str, str]:
     return {"X-MS-CLIENT-PRINCIPAL-NAME": "manager@example.com"}
 
 
+def test_github_pat_probe_reports_unhealthy():
+    """A legacy GitHub PAT connection (auth_kind != 'github_app') can never sync or
+    review, so the probe must report it unhealthy rather than validating the PAT and
+    showing a misleading 'healthy'."""
+    from pr_guardian.api.profiles import _probe_connection
+
+    status, message = asyncio.run(_probe_connection("github", "github_pat_fixture", None))
+    assert status == "unhealthy"
+    assert "GitHub App Connection" in message
+
+
 def test_unhealthy_connection_blocks_repo_link_and_sync_enabled():
     """Health gate applies to any connection regardless of platform.
 

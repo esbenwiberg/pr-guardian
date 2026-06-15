@@ -319,15 +319,16 @@ async def _probe_connection(platform: str, token: str, org_url: str | None) -> t
     """Validate platform credentials. Tests patch this function to avoid network calls."""
     try:
         if platform == "github":
-            async with httpx.AsyncClient(
-                base_url="https://api.github.com",
-                headers={
-                    "Accept": "application/vnd.github.v3+json",
-                    "Authorization": f"token {token}",
-                },
-                timeout=10.0,
-            ) as client:
-                response = await client.get("/user")
+            # GitHub integration is GitHub App-only. A token reaching this probe means a
+            # legacy PAT connection (auth_kind != "github_app"): broad sync skips it
+            # (core/pr_sync.py) and review rejects it (_build_github_app_adapter). Validating
+            # the PAT against /user would report a misleading "healthy" for a connection that
+            # can never sync or review. Report it unusable with a recreate hint instead.
+            return (
+                "unhealthy",
+                "Legacy GitHub PAT connection is not supported — recreate this as a "
+                "GitHub App Connection (see docs/github-app-setup.md).",
+            )
         else:
             if not org_url:
                 return "unhealthy", "ADO org_url is required"
