@@ -47,7 +47,13 @@ def _compute_ci_status(
     }
     status_states = {s.get("state") for s in statuses if s.get("state")}
     effective_status_states = {combined_status_state} if combined_status_state else status_states
-    failure_conclusions = {"failure", "timed_out", "action_required", "cancelled", "startup_failure"}
+    failure_conclusions = {
+        "failure",
+        "timed_out",
+        "action_required",
+        "cancelled",
+        "startup_failure",
+    }
     failure_states = {"failure", "error"}
     if any(c in failure_conclusions for c in conclusions):
         return "failure"
@@ -60,9 +66,7 @@ def _compute_ci_status(
     checks_success = (not has_checks) or (
         conclusions and all(c in ("success", "neutral", "skipped") for c in conclusions)
     )
-    statuses_success = (not has_statuses) or (
-        effective_status_states.issubset({"success"})
-    )
+    statuses_success = (not has_statuses) or (effective_status_states.issubset({"success"}))
     if (has_checks or has_statuses) and checks_success and statuses_success:
         return "success"
     return "unknown"

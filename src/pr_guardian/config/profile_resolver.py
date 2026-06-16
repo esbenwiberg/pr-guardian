@@ -34,6 +34,15 @@ ACTIVE_PROFILE_KEYS = {
 
 _DORMANT_THRESHOLD_KEYS = {"human_review_min_score"}
 
+# Active profile keys whose GuardianConfig field is a nested model (must be a dict
+# in settings). The remainder (repo_risk_class, guardian_clearance,
+# platform_approval_enabled) are scalars and are left untouched.
+_STRUCTURED_PROFILE_KEYS = ACTIVE_PROFILE_KEYS - {
+    "repo_risk_class",
+    "guardian_clearance",
+    "platform_approval_enabled",
+}
+
 
 class ProfileResolutionError(RuntimeError):
     """Raised when a run needs a Profile/Connection decision from the caller."""
@@ -83,6 +92,11 @@ def sanitize_profile_settings(settings: dict[str, Any] | None) -> dict[str, Any]
     clean: dict[str, Any] = {}
     for key, value in (settings or {}).items():
         if key not in ACTIVE_PROFILE_KEYS:
+            continue
+        # Heal legacy rows where a structured field was persisted as a scalar
+        # (e.g. severity_floor saved as the level string "medium" by an old UI).
+        # Dropping it lets the model default apply instead of crashing config build.
+        if key in _STRUCTURED_PROFILE_KEYS and not isinstance(value, dict):
             continue
         copied = copy.deepcopy(value)
         if key == "thresholds" and isinstance(copied, dict):

@@ -56,15 +56,6 @@
           <label class="field">Name
             <input id="profile-name" class="form-input" autocomplete="off">
           </label>
-          <label class="field">Severity floor
-            <select id="severity-floor" class="form-select">
-              <option value="">Default</option>
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
-            </select>
-          </label>
           <label class="field md:col-span-2">Description
             <input id="profile-description" class="form-input" autocomplete="off">
           </label>
@@ -301,7 +292,6 @@
   const profileInputs = {
     name: document.getElementById('profile-name'),
     description: document.getElementById('profile-description'),
-    severityFloor: document.getElementById('severity-floor'),
     repoRiskClass: document.getElementById('repo-risk-class'),
     reviewerGroup: document.getElementById('reviewer-group'),
     autoApproveMaxScore: document.getElementById('auto-approve-max-score'),
@@ -483,7 +473,6 @@
     els.archiveProfile.classList.toggle('opacity-50', Boolean(profile.is_default));
     profileInputs.name.value = profile.name || '';
     profileInputs.description.value = profile.description || '';
-    profileInputs.severityFloor.value = settings.severity_floor || '';
     profileInputs.repoRiskClass.value = settings.repo_risk_class || '';
     profileInputs.reviewerGroup.value = humanReview.reviewer_group || '';
     profileInputs.autoApproveMaxScore.value = thresholds.auto_approve_max_score ?? '';
@@ -525,7 +514,6 @@
           auto_approve_max_score: toNumberOrUndefined(profileInputs.autoApproveMaxScore),
           hard_block_score: toNumberOrUndefined(profileInputs.hardBlockScore),
         },
-        severity_floor: profileInputs.severityFloor.value,
         guardian_clearance: profileInputs.guardianClearance.checked,
         platform_approval_enabled: profileInputs.platformApprovalEnabled.checked,
         readiness: {

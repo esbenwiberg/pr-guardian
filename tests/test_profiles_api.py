@@ -106,7 +106,6 @@ def test_profile_manager_can_create_connection_profile_and_repo_link():
                 json={
                     "name": "Standard Service",
                     "settings": {
-                        "severity_floor": "medium",
                         "readiness": {"quiet_period_seconds": 10},
                     },
                 },
@@ -494,3 +493,23 @@ def test_ado_connection_validation_rejects_untrusted_org_url():
             assert "HTTPS Azure DevOps" in response.text
     finally:
         asyncio.run(engine.dispose())
+
+
+def test_validate_profile_settings_rejects_scalar_for_structured_field():
+    import pytest
+
+    from pr_guardian.api.profiles import _validate_profile_settings
+
+    # severity_floor is a structured SeverityFloorConfig; a bare level string must
+    # be rejected on write rather than persisted and crashing reviews later.
+    with pytest.raises(HTTPException) as exc:
+        _validate_profile_settings({"severity_floor": "medium"})
+    assert exc.value.status_code == 422
+    assert "severity_floor" in exc.value.detail
+
+
+def test_validate_profile_settings_accepts_valid_structured_field():
+    from pr_guardian.api.profiles import _validate_profile_settings
+
+    settings = {"severity_floor": {"enabled": False}, "readiness": {"quiet_period_seconds": 5}}
+    assert _validate_profile_settings(settings) == settings

@@ -7,9 +7,11 @@ import pytest
 
 from pr_guardian.config.loader import load_repo_config
 from pr_guardian.config.profile_resolver import (
+    profile_settings_to_config,
     sanitize_profile_settings,
     resolve_profile_config,
 )
+from pr_guardian.config.schema import SeverityFloorConfig
 from pr_guardian.persistence.storage import (
     DEFAULT_PROFILE_ID,
     create_connection,
@@ -123,3 +125,22 @@ def test_profile_schema_excludes_llm_runtime_and_dormant_fields():
     assert "feedback" not in settings
     assert "test_quality" not in settings
     assert "triage" not in settings
+
+
+def test_legacy_scalar_severity_floor_is_healed_not_crashed():
+    # A legacy row persisted severity_floor as the level string "medium" (old UI).
+    # The read path must drop it so config build falls back to the structured default
+    # instead of raising at review time.
+    settings = sanitize_profile_settings({"severity_floor": "medium"})
+    assert "severity_floor" not in settings
+
+    config = profile_settings_to_config({"severity_floor": "medium"})
+    assert isinstance(config.severity_floor, SeverityFloorConfig)
+
+
+def test_valid_structured_severity_floor_survives_sanitize():
+    floor = {"enabled": False, "low_tier_suppress": []}
+    settings = sanitize_profile_settings({"severity_floor": floor})
+    assert settings["severity_floor"] == floor
+    config = profile_settings_to_config({"severity_floor": floor})
+    assert config.severity_floor.enabled is False
