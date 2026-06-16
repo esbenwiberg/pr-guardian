@@ -93,6 +93,18 @@ def _validate_profile_settings(settings: dict[str, Any]) -> dict[str, Any]:
             422,
             "Profile settings must not contain secret fields: " + ", ".join(secret_fields),
         )
+    # Reject settings that cannot build a GuardianConfig (e.g. a structured field
+    # given a scalar). Validate the raw settings against service defaults — not the
+    # sanitized/healed read path — so type drift is caught on write, not at review time.
+    from pydantic import ValidationError
+
+    from pr_guardian.config.loader import _deep_merge, load_service_defaults
+    from pr_guardian.config.schema import GuardianConfig
+
+    try:
+        GuardianConfig(**_deep_merge(load_service_defaults(), settings))
+    except ValidationError as exc:
+        raise HTTPException(422, f"Invalid Profile settings: {exc.errors()}") from exc
     return settings
 
 

@@ -80,7 +80,7 @@ def test_unhealthy_connection_blocks_repo_link_and_sync_enabled():
             profile_response = client.post(
                 "/api/profiles/profiles",
                 headers=_manager_headers(),
-                json={"name": "Blocked Link Profile", "settings": {"severity_floor": "low"}},
+                json={"name": "Blocked Link Profile", "settings": {"repo_risk_class": "standard"}},
             )
             assert profile_response.status_code == 201, profile_response.text
             profile = profile_response.json()
@@ -173,7 +173,7 @@ def test_unhealthy_connection_blocks_enabling_repo_link_auto_review():
             profile = client.post(
                 "/api/profiles/profiles",
                 headers=_manager_headers(),
-                json={"name": "Auto Review Gate", "settings": {"severity_floor": "low"}},
+                json={"name": "Auto Review Gate", "settings": {"repo_risk_class": "standard"}},
             ).json()
             link = client.post(
                 "/api/profiles/repo-links",
