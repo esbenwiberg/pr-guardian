@@ -51,7 +51,7 @@ class _FakeGitHubAdapter:
     def __init__(self, token: str = "", *, app_auth=None):
         _FakeGitHubAdapter.called_with_app_auth.append(app_auth is not None)
 
-    async def list_accessible_repos(self):
+    async def list_installation_repos(self):
         return [
             {
                 "full_name": "octo/service",
@@ -298,6 +298,79 @@ async def test_purge_prs_from_inactive_connections():
             assert purged == 1, "only the inactive-connection pending PR should be removed"
             assert total == 1
             assert items[0]["pr_id"] == "1"
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_browse_surfaces_ado_review_despite_pr_url_mismatch():
+    """Regression: the browse view must surface a Guardian review for an ADO PR even
+    when the review's pr_url differs from the synced PR's pr_url.
+
+    ADO builds the review-side pr_url from the API's raw ``remoteUrl`` while the sync
+    path reconstructs it from org/project/repo, so the two strings are not equal. The
+    guardian-status enrichment joins on (platform, repo, pr_id) instead — assert it
+    matches so the PR no longer shows "Guardian not run".
+    """
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            connection = await create_connection(
+                "ADO Sync",
+                platform="ado",
+                token="ado-token",
+                health_status="healthy",
+                sync_enabled=True,
+            )
+            # Synced PR: pr_url reconstructed from org/project/repo (the sync path).
+            await upsert_synced_pr(
+                {
+                    "platform": "ado",
+                    "pr_id": "14240",
+                    "org": "https://dev.azure.com/contextand",
+                    "project": "TeamPlanner",
+                    "repo": "TeamPlanner",
+                    "title": "fix(scheduler): restore SQL Export Resync",
+                    "author": "d-ewi@contextand.com",
+                    "pr_url": (
+                        "https://dev.azure.com/contextand/TeamPlanner/_git/"
+                        "TeamPlanner/pullrequest/14240"
+                    ),
+                    "source_branch": "hotfix/sqlexport-resync-all-scheduled-job",
+                    "target_branch": "release/2.3.40",
+                    "connection_id": uuid.UUID(connection["id"]),
+                    "connection_snapshot": connection,
+                    "pr_created_at": datetime.now(timezone.utc),
+                    "pr_updated_at": datetime.now(timezone.utc),
+                }
+            )
+            # Review row: same (platform, repo, pr_id) but a DIFFERENT pr_url, mimicking
+            # the raw ADO remoteUrl (note the org@ userinfo prefix) that the review path
+            # records. The old pr_url join missed this; the tuple join must find it.
+            async with factory() as session:
+                session.add(
+                    models.ReviewRow(
+                        pr_id="14240",
+                        repo="TeamPlanner",
+                        platform="ado",
+                        title="fix(scheduler): restore SQL Export Resync",
+                        decision="changes_requested",
+                        pr_url=(
+                            "https://contextand@dev.azure.com/contextand/TeamPlanner/"
+                            "_git/9537d319-9d2b-450c-8fae-c24f3bad17c2/pullrequest/14240"
+                        ),
+                        finished_at=datetime.now(timezone.utc),
+                    )
+                )
+                await session.commit()
+
+            items, total = await list_synced_prs()
+
+            assert total == 1
+            pr = items[0]
+            assert pr["pr_id"] == "14240"
+            assert pr["has_guardian_review"] is True
+            assert pr["guardian_decision"] == "changes_requested"
     finally:
         await engine.dispose()
 

@@ -3573,7 +3573,12 @@ async def list_synced_prs(
     # Subquery: does a completed guardian review exist for this PR?
     review_exists_subq = (
         select(ReviewRow.id)
-        .where(ReviewRow.pr_url == SyncedPRRow.pr_url)
+        # Match on (platform, repo, pr_id) rather than pr_url — the ADO review
+        # and synced-PR pr_url strings are built from different sources and don't
+        # compare equal. See list_synced_prs' guardian-status enrichment.
+        .where(ReviewRow.platform == SyncedPRRow.platform)
+        .where(ReviewRow.repo == SyncedPRRow.repo)
+        .where(ReviewRow.pr_id == SyncedPRRow.pr_id)
         .where(ReviewRow.finished_at.isnot(None))
         .correlate(SyncedPRRow)
         .exists()
@@ -3659,24 +3664,40 @@ async def list_synced_prs(
             rows = (await session.scalars(paged)).all()
             pr_dicts = [_synced_pr_to_dict(r) for r in rows]
 
-        # Batch-fetch guardian review status for the returned PRs
+        # Batch-fetch guardian review status for the returned PRs.
+        # Join on (platform, repo, pr_id) rather than pr_url: ADO builds the
+        # review-side pr_url from the API's raw `remoteUrl` while the synced-PR
+        # side reconstructs it from org/project/repo, so the two strings are not
+        # byte-identical and an exact pr_url match silently misses. The tuple key
+        # matches what the readiness-candidate enrichment below already uses.
         if pr_dicts:
-            pr_urls = [d["pr_url"] for d in pr_dicts]
+            from sqlalchemy import tuple_
+
+            pr_keys = [(d["platform"], d["repo"], d["pr_id"]) for d in pr_dicts]
             review_rows = await session.execute(
-                select(ReviewRow.pr_url, ReviewRow.id, ReviewRow.decision)
-                .where(ReviewRow.pr_url.in_(pr_urls))
+                select(
+                    ReviewRow.platform,
+                    ReviewRow.repo,
+                    ReviewRow.pr_id,
+                    ReviewRow.id,
+                    ReviewRow.decision,
+                )
+                .where(
+                    tuple_(ReviewRow.platform, ReviewRow.repo, ReviewRow.pr_id).in_(pr_keys)
+                )
                 .where(ReviewRow.finished_at.isnot(None))
-                .order_by(ReviewRow.pr_url, ReviewRow.finished_at.desc())
+                .order_by(ReviewRow.finished_at.desc())
             )
-            reviews_map: dict[str, dict] = {}
-            for rpr_url, rid, rdecision in review_rows.fetchall():
-                if rpr_url not in reviews_map:
-                    reviews_map[rpr_url] = {
+            reviews_map: dict[tuple, dict] = {}
+            for r_platform, r_repo, r_pr_id, rid, rdecision in review_rows.fetchall():
+                key = (r_platform, r_repo, r_pr_id)
+                if key not in reviews_map:  # first = latest (ORDER BY finished_at DESC)
+                    reviews_map[key] = {
                         "guardian_review_id": str(rid),
                         "guardian_decision": rdecision,
                     }
             for d in pr_dicts:
-                info = reviews_map.get(d["pr_url"])
+                info = reviews_map.get((d["platform"], d["repo"], d["pr_id"]))
                 if info:
                     d["has_guardian_review"] = True
                     d["guardian_review_id"] = info["guardian_review_id"]
@@ -3734,7 +3755,12 @@ async def get_pr_dashboard_summary(
 
     review_exists_subq = (
         select(ReviewRow.id)
-        .where(ReviewRow.pr_url == SyncedPRRow.pr_url)
+        # Match on (platform, repo, pr_id) rather than pr_url — the ADO review
+        # and synced-PR pr_url strings are built from different sources and don't
+        # compare equal. See list_synced_prs' guardian-status enrichment.
+        .where(ReviewRow.platform == SyncedPRRow.platform)
+        .where(ReviewRow.repo == SyncedPRRow.repo)
+        .where(ReviewRow.pr_id == SyncedPRRow.pr_id)
         .where(ReviewRow.finished_at.isnot(None))
         .correlate(SyncedPRRow)
         .exists()
