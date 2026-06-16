@@ -830,7 +830,9 @@ async def update_repo_link(
         if platform == "github" and auto_review_enabled and not paused and require_review_check:
             await _ensure_github_gate_for_repo(
                 connection_id=body.connection_id or uuid.UUID(str(current["connection_id"])),
-                repo_owner=body.repo_owner if body.repo_owner is not None else current["repo_owner"],
+                repo_owner=body.repo_owner
+                if body.repo_owner is not None
+                else current["repo_owner"],
                 repo_name=body.repo_name if body.repo_name is not None else current["repo_name"],
             )
         updated = await storage.update_repo_link(

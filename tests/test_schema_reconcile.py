@@ -14,7 +14,9 @@ from pr_guardian.persistence import models, reconcile
 def _columns(engine, table: str) -> set[str]:
     async def _go() -> set[str]:
         async with engine.connect() as conn:
-            return await conn.run_sync(lambda sc: {c["name"] for c in inspect(sc).get_columns(table)})
+            return await conn.run_sync(
+                lambda sc: {c["name"] for c in inspect(sc).get_columns(table)}
+            )
 
     return asyncio.run(_go())
 
