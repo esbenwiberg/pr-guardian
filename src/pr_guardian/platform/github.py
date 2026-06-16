@@ -887,18 +887,25 @@ class GitHubAdapter:
         data = resp.json()
         return {"number": data.get("number"), "url": data.get("html_url", "")}
 
-    async def list_accessible_repos(self) -> list[dict]:
-        """List repos the token has access to (owned + collaborated + org member)."""
+    async def list_installation_repos(self) -> list[dict]:
+        """List every repository the GitHub App installation can access.
+
+        Broad sync only runs for GitHub App connections, whose installation
+        tokens are server-to-server and carry no user context — ``/user/repos``
+        returns nothing for them. Repos must be enumerated via the installation
+        endpoint, which is also what the connection health check uses, so the
+        two never disagree.
+        """
         client = self._get_client()
         repos: list[dict] = []
         page = 1
         while len(repos) < 500:
             resp = await client.get(
-                "/user/repos",
-                params={"type": "all", "per_page": 100, "page": page, "sort": "pushed"},
+                "/installation/repositories",
+                params={"per_page": 100, "page": page},
             )
             resp.raise_for_status()
-            batch = resp.json()
+            batch = resp.json().get("repositories", [])
             if not batch:
                 break
             repos.extend(batch)

@@ -215,7 +215,7 @@ async def _sync_github(connection: dict[str, Any]) -> None:
 
     adapter = await build_github_adapter_from_connection(connection)
     try:
-        repos = await adapter.list_accessible_repos()
+        repos = await adapter.list_installation_repos()
         log.info(
             "github_sync_repos_discovered",
             count=len(repos),

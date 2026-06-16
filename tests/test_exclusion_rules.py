@@ -381,7 +381,7 @@ class TestSyncTimeFilter:
         from pr_guardian.core import pr_sync
 
         adapter = AsyncMock()
-        adapter.list_accessible_repos = AsyncMock(
+        adapter.list_installation_repos = AsyncMock(
             return_value=[
                 {"full_name": "acme/keep", "owner": {"login": "acme"}, "clone_url": "u1"},
                 {"full_name": "acme/test-skip", "owner": {"login": "acme"}, "clone_url": "u2"},

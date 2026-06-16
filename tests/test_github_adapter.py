@@ -300,6 +300,40 @@ async def test_list_repo_open_prs_surfaces_failed_guardian_commit_status():
 
 
 # ---------------------------------------------------------------------------
+# list_installation_repos — App installation enumeration (not /user/repos)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_installation_repos_uses_installation_endpoint_and_paginates():
+    # Two full pages then a short page → three GETs, all against the
+    # installation endpoint. Regression guard: an App installation token gets
+    # nothing from /user/repos, so sync must never call it (health vs sync drift).
+    page1 = _resp({"repositories": [{"full_name": f"acme/repo{i}"} for i in range(100)]})
+    page2 = _resp({"repositories": [{"full_name": f"acme/more{i}"} for i in range(100)]})
+    page3 = _resp({"repositories": [{"full_name": "acme/last"}]})
+    adapter = _adapter(page1, page2, page3)
+
+    repos = await adapter.list_installation_repos()
+
+    assert len(repos) == 201
+    assert repos[-1]["full_name"] == "acme/last"
+    paths = [call.args[0] for call in adapter._client.get.call_args_list]
+    assert paths == ["/installation/repositories"] * 3
+    assert all("/user/repos" not in p for p in paths)
+
+
+@pytest.mark.asyncio
+async def test_list_installation_repos_stops_on_empty_page():
+    adapter = _adapter(_resp({"repositories": []}))
+
+    repos = await adapter.list_installation_repos()
+
+    assert repos == []
+    assert adapter._client.get.call_count == 1
+
+
+# ---------------------------------------------------------------------------
 # fetch_pr_metadata — fork detection
 # ---------------------------------------------------------------------------
 
