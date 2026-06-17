@@ -242,6 +242,111 @@ def test_replayed_gate_agent_sticky_escalates_in_structural_only():
 
 
 # ---------------------------------------------------------------------------
+# reject_threshold variants: medium_plus and any
+# ---------------------------------------------------------------------------
+
+
+def test_medium_plus_threshold_rejects_detected_medium():
+    """reject_threshold=medium_plus: detected MEDIUM with concrete suggestion → REJECT."""
+    medium_finding = Finding(
+        severity=Severity.MEDIUM,
+        certainty=Certainty.DETECTED,
+        category="injection",
+        language="python",
+        file="app.py",
+        line=5,
+        description="Input not sanitised",
+        suggestion="Escape the value before use",
+        evidence_basis=EvidenceBasis(
+            saw_full_context=True,
+            pattern_match=True,
+            cwe_id="CWE-79",
+            suggestion_is_concrete=True,
+            cross_references=1,
+        ),
+    )
+    result = AgentResult(
+        agent_name="security_privacy", verdict=Verdict.FLAG_HUMAN, findings=[medium_finding]
+    )
+    config = _make_config(reject_threshold="medium_plus")
+    kwargs = _base_kwargs(agent_results=[result], score=2.0, config=config)
+    assert resolve_decision(**kwargs) == Decision.REJECT
+
+
+def test_medium_plus_threshold_does_not_reject_suspected_medium():
+    """reject_threshold=medium_plus: suspected MEDIUM (not detected) → AUTO_APPROVE, not REJECT."""
+    suspected_medium = Finding(
+        severity=Severity.MEDIUM,
+        certainty=Certainty.SUSPECTED,
+        category="style",
+        language="python",
+        file="app.py",
+        line=5,
+        description="Potential issue",
+        evidence_basis=EvidenceBasis(pattern_match=True),
+    )
+    result = AgentResult(
+        agent_name="security_privacy", verdict=Verdict.WARN, findings=[suspected_medium]
+    )
+    config = _make_config(reject_threshold="medium_plus")
+    kwargs = _base_kwargs(agent_results=[result], score=1.0, config=config)
+    assert resolve_decision(**kwargs) == Decision.AUTO_APPROVE
+
+
+def test_any_threshold_rejects_on_any_finding():
+    """reject_threshold=any: even a suspected LOW finding → REJECT (most aggressive setting)."""
+    low_suspected = Finding(
+        severity=Severity.LOW,
+        certainty=Certainty.SUSPECTED,
+        category="style",
+        language="python",
+        file="app.py",
+        line=1,
+        description="Minor style issue",
+        evidence_basis=EvidenceBasis(),
+    )
+    result = AgentResult(
+        agent_name="security_privacy", verdict=Verdict.WARN, findings=[low_suspected]
+    )
+    config = _make_config(reject_threshold="any")
+    kwargs = _base_kwargs(agent_results=[result], score=0.5, config=config)
+    assert resolve_decision(**kwargs) == Decision.REJECT
+
+
+def test_any_threshold_auto_approves_when_no_findings():
+    """reject_threshold=any: no findings at all → AUTO_APPROVE (any only fires on findings)."""
+    config = _make_config(reject_threshold="any")
+    kwargs = _base_kwargs(agent_results=[_safe_result()], score=0.0, config=config)
+    assert resolve_decision(**kwargs) == Decision.AUTO_APPROVE
+
+
+def test_confident_only_does_not_reject_detected_medium_without_suggestion():
+    """reject_threshold=confident_only: detected MEDIUM without concrete suggestion → AUTO_APPROVE."""
+    medium_no_suggestion = Finding(
+        severity=Severity.MEDIUM,
+        certainty=Certainty.DETECTED,
+        category="perf",
+        language="python",
+        file="app.py",
+        line=3,
+        description="Slow query pattern",
+        evidence_basis=EvidenceBasis(
+            saw_full_context=True,
+            pattern_match=True,
+            cwe_id="CWE-400",
+            suggestion_is_concrete=False,
+            cross_references=1,
+        ),
+    )
+    result = AgentResult(
+        agent_name="security_privacy", verdict=Verdict.WARN, findings=[medium_no_suggestion]
+    )
+    config = _make_config(reject_threshold="confident_only")
+    kwargs = _base_kwargs(agent_results=[result], score=2.0, config=config)
+    assert resolve_decision(**kwargs) == Decision.AUTO_APPROVE
+
+
+# ---------------------------------------------------------------------------
 # Standard mode regression
 # ---------------------------------------------------------------------------
 
