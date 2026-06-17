@@ -696,6 +696,14 @@ async def _run_pipeline(
     result.total_output_tokens = total_output_tokens
     result.cost_usd = round(total_cost, 6)
 
+    # Carry gate verdict so the dashboard can show the panel for non-gated reviews.
+    if gate_result is not None:
+        result.gate_read = {
+            "level": gate_result.level,
+            "reason": gate_result.reason,
+            "gated": gate_result.gated,
+        }
+
     _plog(
         "info",
         "decision",

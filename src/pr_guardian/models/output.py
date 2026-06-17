@@ -63,3 +63,8 @@ class ReviewResult:
 
     # Populated by orchestrator after platform side effects complete
     postback_meta: dict = field(default_factory=dict)
+
+    # Gate agent result (structural_only mode only). Stored so the dashboard
+    # can show the gate panel for auto-approved reviews where no sticky trigger
+    # is recorded.
+    gate_read: dict | None = None

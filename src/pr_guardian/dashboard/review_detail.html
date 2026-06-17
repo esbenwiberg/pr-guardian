@@ -69,11 +69,33 @@
     </div>
 
     <!-- Finding reasons (finding-derived escalation reasons) — surfaced near banner -->
+    <!-- Suppressed in structural_only mode: findings never gate a human there -->
     <div id="finding-reasons-section" style="display:none" class="mb-4">
       <div class="card border-l-[3px] border-l-amber-400/50 bg-amber-400/[0.03]">
         <div class="px-5 py-3.5">
           <div class="text-sm font-semibold text-amber-400 mb-2">Why this needs review — finding signals</div>
           <ul class="space-y-1.5 text-sm text-slate-300" id="finding-reasons-list"></ul>
+        </div>
+      </div>
+    </div>
+
+    <!-- Gate decision panel (structural_only mode only) -->
+    <div id="gate-decision-section" style="display:none" class="mb-4">
+      <div class="card border border-slate-700/50 bg-slate-800/30">
+        <div class="px-5 py-3.5">
+          <div class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Gate decision &middot; structural-only</div>
+          <div class="flex items-start gap-2 mb-2">
+            <span id="gate-level-icon" class="text-base leading-none mt-0.5"></span>
+            <div>
+              <div class="text-sm font-semibold" id="gate-level-label"></div>
+              <div class="text-sm text-slate-300 italic mt-0.5" id="gate-reason-text"></div>
+            </div>
+          </div>
+          <div class="mt-3 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs text-slate-400">
+            <span class="text-slate-500">Structural triggers:</span><span id="gate-triggers-cell"></span>
+            <span class="text-slate-500">Archmap:</span><span id="gate-archmap-cell"></span>
+            <span class="text-slate-500">Findings:</span><span id="gate-findings-cell"></span>
+          </div>
         </div>
       </div>
     </div>
@@ -373,15 +395,20 @@ function render(d) {
       </li>`).join('');
   }
 
-  // Finding reasons (finding-derived)
+  // Finding reasons (finding-derived) — suppressed in structural_only
   const findingReasons = d.finding_reasons || [];
-  if (findingReasons.length > 0) {
+  if (findingReasons.length > 0 && d.escalation_mode !== 'structural_only') {
     document.getElementById('finding-reasons-section').style.display = '';
     document.getElementById('finding-reasons-list').innerHTML = findingReasons
       .map(r => `<li class="flex items-start gap-2">
         <span class="text-amber-400 mt-0.5 shrink-0">&#9679;</span>
         <span>${esc(r)}</span>
       </li>`).join('');
+  }
+
+  // Gate decision panel (structural_only only)
+  if (d.escalation_mode === 'structural_only') {
+    renderGatePanel(d);
   }
 
   // Mechanical checks
@@ -1222,6 +1249,76 @@ function startProgressTracker(d) {
     if (pipe) pipe.insertAdjacentHTML('afterend', `
       <p class="mt-3 text-xs text-slate-500">No live events received — review may already be done. <a class="text-indigo-400 hover:text-indigo-300 cursor-pointer" onclick="window.location.reload()">Reload</a></p>`);
   }, 10000);
+}
+
+// --- Gate decision panel (structural_only) ---
+
+const GATE_LEVEL_ICON = { none: '🟢', low: '🟢', medium: '🟡', high: '🔴' };
+const GATE_LEVEL_LABEL = {
+  none: 'Gate agent: NO danger',
+  low: 'Gate agent: LOW danger',
+  medium: 'Gate agent: MEDIUM danger',
+  high: 'Gate agent: HIGH danger',
+};
+const GATE_LEVEL_COLOR = {
+  none: 'text-emerald-400',
+  low: 'text-emerald-400',
+  medium: 'text-yellow-400',
+  high: 'text-red-400',
+};
+
+const REJECT_THRESHOLD_LABEL = {
+  confident_only: 'confident-only',
+  medium_plus: 'medium+',
+  any: 'any finding',
+};
+
+function renderGatePanel(d) {
+  const gate = d.gate_read;
+  const section = document.getElementById('gate-decision-section');
+  if (!section) return;
+  section.style.display = '';
+
+  const level = (gate && gate.level) || 'unknown';
+  const reason = (gate && gate.reason) || '';
+  const icon = GATE_LEVEL_ICON[level] || '⬜';
+  const labelText = GATE_LEVEL_LABEL[level] || `Gate agent: ${level.toUpperCase()} danger`;
+  const labelColor = GATE_LEVEL_COLOR[level] || 'text-slate-300';
+
+  document.getElementById('gate-level-icon').textContent = icon;
+  const labelEl = document.getElementById('gate-level-label');
+  labelEl.textContent = labelText;
+  labelEl.className = `text-sm font-semibold ${labelColor}`;
+  document.getElementById('gate-reason-text').textContent = reason ? `"${reason}"` : '';
+
+  // Structural triggers cell
+  const stickies = (d.sticky_triggers || []).filter(t => t.kind !== 'gate_agent');
+  const triggersEl = document.getElementById('gate-triggers-cell');
+  if (stickies.length === 0) {
+    triggersEl.innerHTML = '<span class="text-slate-500">none</span>';
+  } else {
+    triggersEl.innerHTML = stickies
+      .map(t => `<span class="text-orange-300">${esc(t.label)}</span>`)
+      .join(', ');
+  }
+
+  // Archmap cell
+  const archmapEl = document.getElementById('gate-archmap-cell');
+  const hasHub = (d.sticky_triggers || []).some(t => t.kind === 'archmap_hub');
+  archmapEl.textContent = hasHub ? 'hub touched' : 'leaf (no hub touched)';
+
+  // Findings cell
+  const findingsEl = document.getElementById('gate-findings-cell');
+  const totalFindings = (d.agent_results || []).reduce((sum, a) => sum + (a.findings || []).length, 0);
+  const rejectThreshold = REJECT_THRESHOLD_LABEL[
+    ((d.profile_snapshot || {}).escalation_policy || {}).reject_threshold
+  ] || 'confident-only';
+  const notBlockingNote = `not blocking (threshold: ${rejectThreshold})`;
+  if (totalFindings > 0) {
+    findingsEl.innerHTML = `<span>${totalFindings} posted as comments &middot; ${esc(notBlockingNote)}</span>`;
+  } else {
+    findingsEl.innerHTML = `<span class="text-slate-500">none &middot; ${esc(notBlockingNote)}</span>`;
+  }
 }
 
 // Init
