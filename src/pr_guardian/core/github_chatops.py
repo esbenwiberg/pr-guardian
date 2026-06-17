@@ -25,6 +25,49 @@ _MENTION_REVIEW_RE = re.compile(r"(?im)(?:^|\s)@pr-guardian(?:\s+|[:,]\s*)re-rev
 
 _TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 
+# Dismiss command, used when an author replies to a Guardian inline comment:
+#   @guardian dismiss false_positive: reason
+#   @pr-guardian dismiss by_design
+# The status and reason are both optional; status defaults to "acknowledged".
+_DISMISS_STATUSES = {"false_positive", "by_design", "acknowledged", "will_fix"}
+_DEFAULT_DISMISS_STATUS = "acknowledged"
+_DISMISS_RE = re.compile(
+    r"(?im)@(?:guardian|pr-guardian)\s+dismiss\b"
+    r"(?:\s+(false_positive|by_design|acknowledged|will_fix))?"
+    r"(?:\s*[:\-]\s*(.*))?"
+)
+
+# Safety gate: the PR author may only self-dismiss low/medium, non-security
+# findings via a comment. High/critical and security findings still require a
+# code fix, an API-key dismissal, or a human override.
+_COMMENT_UNDISMISSABLE_AGENTS = {"security_privacy"}
+_COMMENT_DISMISSABLE_SEVERITIES = {"low", "medium"}
+
+
+def is_github_dismiss_command(body: str) -> bool:
+    """Return True when a comment body contains a Guardian dismiss command."""
+    return bool(_DISMISS_RE.search(body or ""))
+
+
+def parse_dismiss_command(body: str) -> tuple[str, str] | None:
+    """Parse `@guardian dismiss <status>: <reason>` into (status, reason)."""
+    m = _DISMISS_RE.search(body or "")
+    if not m:
+        return None
+    status = (m.group(1) or _DEFAULT_DISMISS_STATUS).lower()
+    reason = (m.group(2) or "").strip()
+    return status, reason
+
+
+def _is_comment_dismissable(finding: dict) -> bool:
+    """Whether a single stored finding payload may be dismissed via a comment."""
+    sev = (finding.get("severity") or "").lower()
+    if sev not in _COMMENT_DISMISSABLE_SEVERITIES:
+        return False
+    if (finding.get("agent_name") or "") in _COMMENT_UNDISMISSABLE_AGENTS:
+        return False
+    return True
+
 
 def is_github_command(body: str) -> bool:
     """Return True when a GitHub PR comment contains any Guardian command (@guardian or @pr-guardian)."""
@@ -325,6 +368,150 @@ async def handle_github_comment(
             return {"status": "failed", "reason": "no_review_or_link"}
     finally:
         await command_adapter.close()
+
+
+async def handle_github_review_comment_reply(
+    *,
+    repo: str,
+    pr_id: str | int,
+    comment_id: str | int,
+    in_reply_to_id: str,
+    body: str,
+    commenter: str,
+    author_association: str = "",
+    pr_author: str = "",
+    source: str,
+    base_url: str = "",
+) -> dict[str, Any]:
+    """Handle a reply to a Guardian inline review comment as a dismiss command.
+
+    Maps the reply's parent comment back to the finding(s) it carried and records
+    a dismissal for the low/medium, non-security findings among them. Does NOT
+    trigger a re-review — the verdict refreshes on the next `@guardian re-review`.
+    """
+    parsed = parse_dismiss_command(body)
+    if parsed is None:
+        return {"status": "ignored", "reason": "no_dismiss_command"}
+    status, reason = parsed
+
+    # Resolve the parent comment to the finding(s) it carried. If it isn't a
+    # Guardian inline comment, there's nothing to dismiss.
+    parent = await storage.find_inline_comment_by_platform_id(
+        "github", repo, str(pr_id), str(in_reply_to_id)
+    )
+    if parent is None:
+        return {"status": "ignored", "reason": "not_a_guardian_finding_comment"}
+
+    command_id = await storage.claim_chatops_command(
+        platform="github",
+        repo=repo,
+        pr_id=str(pr_id),
+        command="dismiss",
+        external_id=str(comment_id),
+        source=source,
+        actor=commenter,
+        payload={
+            "author_association": author_association,
+            "body": body,
+            "in_reply_to_id": str(in_reply_to_id),
+        },
+    )
+    if command_id is None:
+        return {"status": "ignored", "reason": "duplicate"}
+
+    if not _is_authorized(commenter, author_association, pr_author):
+        await _mark_command(command_id, "ignored", "unauthorized")
+        log.info(
+            "github_dismiss_unauthorized",
+            repo=repo,
+            pr_id=str(pr_id),
+            commenter=commenter,
+            association=author_association,
+        )
+        return {"status": "ignored", "reason": "unauthorized"}
+
+    # Build an adapter from the originating review's connection for the ack reply.
+    adapter: GitHubAdapter | None = None
+    try:
+        review = await storage.get_review(uuid.UUID(parent["review_id"]))
+        if review is not None:
+            adapter = await _fresh_adapter_for_review(review)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("github_dismiss_adapter_failed", repo=repo, error=str(exc))
+
+    async def _reply(msg: str) -> None:
+        if adapter is None:
+            return
+        try:
+            await adapter.reply_to_review_comment(repo, pr_id, in_reply_to_id, msg)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("github_dismiss_reply_failed", repo=repo, error=str(exc))
+
+    try:
+        if status not in _DISMISS_STATUSES:
+            await _mark_command(command_id, "ignored", f"invalid status: {status}")
+            await _reply(
+                f"Guardian: `{status}` isn't a valid dismiss status. "
+                f"Use one of: {', '.join(sorted(_DISMISS_STATUSES))}."
+            )
+            return {"status": "ignored", "reason": "invalid_status"}
+
+        findings = parent.get("findings", [])
+        eligible = [f for f in findings if _is_comment_dismissable(f)]
+        blocked = [f for f in findings if not _is_comment_dismissable(f)]
+
+        if not eligible:
+            await _mark_command(command_id, "ignored", "no dismissable findings")
+            await _reply(
+                "Guardian: this finding can't be dismissed via comment. High/critical "
+                "and security findings need a code fix, an API-key dismissal, or a "
+                "human override."
+            )
+            return {"status": "ignored", "reason": "not_dismissable"}
+
+        dismissed = 0
+        for f in eligible:
+            try:
+                await storage.upsert_dismissal(
+                    pr_id=parent["pr_id"],
+                    repo=parent["repo"],
+                    platform=parent["platform"],
+                    finding=f,
+                    agent_name=f.get("agent_name", ""),
+                    status=status,
+                    comment=f"[comment dismiss by {commenter}] {reason}".strip(),
+                )
+                dismissed += 1
+            except Exception as exc:  # noqa: BLE001
+                log.warning("github_dismiss_upsert_failed", repo=repo, error=str(exc))
+
+        note = ""
+        if blocked:
+            note = (
+                f" {len(blocked)} finding(s) in this comment can't be self-dismissed "
+                "(high/critical or security)."
+            )
+        await _reply(
+            f"Guardian: recorded {dismissed} dismissal(s) as `{status}`. They'll be "
+            f"excluded on the next `@guardian re-review`.{note}"
+        )
+        await _mark_command(
+            command_id,
+            "completed",
+            f"dismissed {dismissed}",
+            review_id=parent["review_id"],
+        )
+        log.info(
+            "github_dismiss_recorded",
+            repo=repo,
+            pr_id=str(pr_id),
+            dismissed=dismissed,
+            status=status,
+        )
+        return {"status": "dismissed", "count": dismissed, "dismiss_status": status}
+    finally:
+        if adapter is not None:
+            await adapter.close()
 
 
 async def poll_github_pr_comments(

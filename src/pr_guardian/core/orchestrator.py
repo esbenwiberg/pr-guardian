@@ -1597,13 +1597,16 @@ async def _post_inline_and_summary(
     threshold = config.inline_comments.severity_threshold.lower()
     threshold_ord = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER["medium"])
 
-    # Collect qualifying findings from agent results
-    qualifying: list[Finding] = [
-        f
-        for ar in result.agent_results
-        for f in ar.findings
-        if f.line is not None and SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord
-    ]
+    # Collect qualifying findings from agent results. Stamp primary_agent with
+    # the AgentResult's name (the value the re-review dismissal filter matches on)
+    # so a reply-to-comment dismissal resolves to the right signature.
+    qualifying: list[Finding] = []
+    for ar in result.agent_results:
+        for f in ar.findings:
+            if f.line is not None and SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord:
+                if not f.primary_agent:
+                    f.primary_agent = ar.agent_name
+                qualifying.append(f)
 
     # Collect qualifying findings from mechanical results
     for mech in result.mechanical_results:
@@ -1646,6 +1649,7 @@ async def _post_inline_and_summary(
                     pr.platform.value,
                     pr.pr_id,
                     pr.repo,
+                    id_to_findings=inline_result.id_to_findings,
                 )
             postback["inline_comments_posted"] = len(inline_result.posted_ids)
             if inline_result.skipped:

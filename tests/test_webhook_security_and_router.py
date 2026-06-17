@@ -166,3 +166,72 @@ def test_github_issue_comment_webhook_routes_chatops_command(monkeypatch):
     assert handle_comment.call_args.kwargs["repo"] == "octo/service"
     assert handle_comment.call_args.kwargs["pr_id"] == "42"
     assert handle_comment.call_args.kwargs["body"] == "@pr-guardian re-review"
+
+
+def _github_review_comment_reply_payload() -> dict:
+    return {
+        "action": "created",
+        "repository": {"full_name": "octo/service", "owner": {"login": "octo"}},
+        "pull_request": {"number": 42, "user": {"login": "alice"}},
+        "comment": {
+            "id": 5002,
+            "in_reply_to_id": 5001,
+            "body": "@guardian dismiss false_positive: handled upstream",
+            "user": {"login": "alice"},
+            "author_association": "OWNER",
+        },
+    }
+
+
+def test_github_review_comment_reply_routes_dismiss_handler(monkeypatch):
+    monkeypatch.delenv("GUARDIAN_WEBHOOK_DEV_BYPASS", raising=False)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "github-secret")
+    body = json.dumps(_github_review_comment_reply_payload()).encode()
+
+    with (
+        patch(
+            "pr_guardian.core.github_chatops.handle_github_review_comment_reply",
+            new_callable=AsyncMock,
+            return_value={"status": "dismissed", "count": 1},
+        ) as handle_reply,
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.post(
+            "/api/webhooks/github",
+            content=body,
+            headers={
+                "X-GitHub-Event": "pull_request_review_comment",
+                "X-Hub-Signature-256": _signature(body, "github-secret"),
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "dismissed"
+    handle_reply.assert_awaited_once()
+    assert handle_reply.call_args.kwargs["in_reply_to_id"] == "5001"
+    assert handle_reply.call_args.kwargs["pr_id"] == "42"
+    assert handle_reply.call_args.kwargs["pr_author"] == "alice"
+
+
+def test_github_review_comment_non_reply_ignored(monkeypatch):
+    """A top-level review comment (no in_reply_to_id) is not a dismiss target."""
+    monkeypatch.delenv("GUARDIAN_WEBHOOK_DEV_BYPASS", raising=False)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "github-secret")
+    payload = _github_review_comment_reply_payload()
+    payload["comment"].pop("in_reply_to_id")
+    body = json.dumps(payload).encode()
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        resp = client.post(
+            "/api/webhooks/github",
+            content=body,
+            headers={
+                "X-GitHub-Event": "pull_request_review_comment",
+                "X-Hub-Signature-256": _signature(body, "github-secret"),
+                "Content-Type": "application/json",
+            },
+        )
+
+    assert resp.status_code == 200
+    assert resp.json()["reason"] == "not a review-comment reply"

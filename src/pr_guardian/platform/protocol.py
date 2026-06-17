@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 from pr_guardian.models.findings import Finding
@@ -51,12 +51,35 @@ class InstallationMetadata:
     permissions: dict | None = None
 
 
+def inline_finding_payload(f: Finding) -> dict:
+    """Serialize a finding into the payload stored against a posted inline comment.
+
+    Mirrors the dismissal ``source_finding`` shape so a reply-to-comment dismissal
+    can be recorded and matched (signature = file::category::agent_name) without
+    re-deriving anything. ``agent_name`` must be the AgentResult's name — the same
+    value the re-review dismissal filter uses — so dismissals actually take effect.
+    """
+    return {
+        "file": f.file,
+        "line": f.line,
+        "category": f.category,
+        "agent_name": f.primary_agent or "",
+        "severity": f.severity.value,
+        "certainty": f.certainty.value,
+        "description": (f.description or "")[:500],
+    }
+
+
 @dataclass
 class InlinePostResult:
     """Result of a post_inline_comments call."""
 
     posted_ids: list[str]
     skipped: list[Finding]
+    # Maps each posted platform comment id -> the finding payloads it carries.
+    # Populated by GitHub (used for reply-to-comment dismissals); other adapters
+    # may leave it empty.
+    id_to_findings: dict[str, list[dict]] = field(default_factory=dict)
 
 
 class PlatformAdapter(Protocol):

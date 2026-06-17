@@ -19,6 +19,7 @@ from pr_guardian.platform.protocol import (
     InstallationMetadata,
     PlatformPRMetadata,
     PlatformReadinessSignal,
+    inline_finding_payload,
 )
 
 if TYPE_CHECKING:
@@ -240,6 +241,21 @@ class GitHubAdapter:
         client = self._get_client()
         resp = await client.post(
             f"/repos/{pr.repo}/issues/{pr.pr_id}/comments",
+            json={"body": body},
+        )
+        resp.raise_for_status()
+
+    async def reply_to_review_comment(
+        self,
+        repo: str,
+        pr_id: str | int,
+        comment_id: str,
+        body: str,
+    ) -> None:
+        """Reply in-thread to an existing PR review (inline) comment."""
+        client = self._get_client()
+        resp = await client.post(
+            f"/repos/{repo}/pulls/{pr_id}/comments/{comment_id}/replies",
             json={"body": body},
         )
         resp.raise_for_status()
@@ -818,6 +834,7 @@ class GitHubAdapter:
             return InlinePostResult(posted_ids=[], skipped=list(findings))
 
         ids: list[str] = []
+        id_to_findings: dict[str, list[dict]] = {}
         for (file, line), group in grouped.items():
             body = inline_comment_body(group)
             try:
@@ -834,11 +851,16 @@ class GitHubAdapter:
                 resp.raise_for_status()
                 data = resp.json()
                 comments = data.get("comments", [])
+                group_payload = [inline_finding_payload(f) for f in group]
                 if "id" in data and not comments:
-                    ids.append(str(data["id"]))
+                    cid = str(data["id"])
+                    ids.append(cid)
+                    id_to_findings[cid] = group_payload
                 for c in comments:
                     if "id" in c:
-                        ids.append(str(c["id"]))
+                        cid = str(c["id"])
+                        ids.append(cid)
+                        id_to_findings[cid] = group_payload
             except httpx.HTTPStatusError as exc:
                 if exc.response.status_code == 422:
                     log.warning(
@@ -850,7 +872,7 @@ class GitHubAdapter:
                     skipped.extend(group)
                 else:
                     raise
-        return InlinePostResult(posted_ids=ids, skipped=skipped)
+        return InlinePostResult(posted_ids=ids, skipped=skipped, id_to_findings=id_to_findings)
 
     async def delete_inline_comments(
         self,

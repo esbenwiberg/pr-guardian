@@ -3044,8 +3044,15 @@ async def save_inline_comment_ids(
     platform: str,
     pr_id: str,
     repo: str,
+    id_to_findings: dict[str, list[dict]] | None = None,
 ) -> None:
-    """Persist platform-native comment IDs for a review."""
+    """Persist platform-native comment IDs for a review.
+
+    When ``id_to_findings`` is supplied, the finding payloads carried by each
+    comment are stored too, so a reply to that comment can later be mapped back
+    to the finding(s) for dismissal.
+    """
+    id_to_findings = id_to_findings or {}
     async with async_session() as session:
         for comment_id in ids:
             session.add(
@@ -3055,9 +3062,47 @@ async def save_inline_comment_ids(
                     platform=platform,
                     pr_id=pr_id,
                     repo=repo,
+                    findings=id_to_findings.get(comment_id, []),
                 )
             )
         await session.commit()
+
+
+async def find_inline_comment_by_platform_id(
+    platform: str,
+    repo: str,
+    pr_id: str,
+    platform_comment_id: str,
+) -> dict[str, Any] | None:
+    """Find a posted inline comment (and its finding payloads) by platform id.
+
+    Used to resolve a reply's ``in_reply_to_id`` back to the originating Guardian
+    comment and the finding(s) it carried.
+    """
+    async with async_session() as session:
+        row = (
+            await session.scalars(
+                select(PostedInlineCommentRow)
+                .where(
+                    PostedInlineCommentRow.platform == platform,
+                    PostedInlineCommentRow.repo == repo,
+                    PostedInlineCommentRow.pr_id == str(pr_id),
+                    PostedInlineCommentRow.platform_comment_id == str(platform_comment_id),
+                )
+                .order_by(PostedInlineCommentRow.created_at.desc())
+            )
+        ).first()
+        if row is None:
+            return None
+        return {
+            "id": str(row.id),
+            "review_id": str(row.review_id),
+            "platform": row.platform,
+            "repo": row.repo,
+            "pr_id": row.pr_id,
+            "platform_comment_id": row.platform_comment_id,
+            "findings": row.findings or [],
+        }
 
 
 async def load_inline_comment_ids(review_id: uuid.UUID) -> list[str]:
