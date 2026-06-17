@@ -67,6 +67,18 @@ class AutoApproveConfig(BaseModel):
     allowed_target_branches: list[str] = Field(default_factory=lambda: ["develop", "feature/*"])
     blocked_target_branches: list[str] = Field(default_factory=lambda: ["release/*"])
     require_all_checks_pass: bool = True
+    # PR authors that bypass the entire review pipeline (no mechanical gates, no
+    # agents) and get an immediate auto-approve so the required Guardian check
+    # goes green. Matched as exact, case-insensitive logins — NOT globs — because
+    # bot logins contain literal brackets (e.g. "dependabot[bot]"), which fnmatch
+    # would mis-parse as a character class. Set to [] to make this opt-in.
+    #
+    # TRADE-OFF (deliberate): this is a blind approval. Dependency bumps are a
+    # prime supply-chain vector, and the mechanical dep-audit/semgrep gates that
+    # would catch a poisoned package are skipped on this path. If that ever
+    # bites, switch the exempt path to mechanical-gates-only instead of a full
+    # bypass.
+    exempt_authors: list[str] = Field(default_factory=lambda: ["dependabot[bot]"])
 
 
 class AgentsConfig(BaseModel):

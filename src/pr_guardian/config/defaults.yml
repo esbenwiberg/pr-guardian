@@ -54,6 +54,10 @@ auto_approve:
   blocked_target_branches:
     - "release/*"
   require_all_checks_pass: true
+  # Exact, case-insensitive author logins that bypass the whole pipeline and
+  # auto-approve (see AutoApproveConfig.exempt_authors). Set to [] to disable.
+  exempt_authors:
+    - "dependabot[bot]"
 
 agents:
   max_context_tokens: 120000
