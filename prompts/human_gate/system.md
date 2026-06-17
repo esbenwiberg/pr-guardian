@@ -31,6 +31,3 @@ You receive the PR diff, changed-file list, and architecture classification data
 - When uncertain between two levels, choose the higher one
 - The `reason` field must be 1–2 sentences identifying the specific change that drove your verdict
 - Architecture hub files (high fan-in) touching dangerous surfaces should trend toward HIGH
-
-Respond with ONLY raw valid JSON (no markdown fences, no commentary):
-{"level": "none | low | medium | high", "reason": "1-2 sentence explanation"}

@@ -29,8 +29,16 @@ Respond with ONLY raw valid JSON (no markdown fences, no commentary):
 
 
 def _compute_gated(level: str, gate_threshold: str) -> bool:
-    """Return True when level meets or exceeds the configured gate threshold."""
-    return _LEVEL_ORDER.get(level, 3) >= _THRESHOLD_ORDER.get(gate_threshold, 2)
+    """Return True when level meets or exceeds the configured gate threshold.
+
+    gate_threshold vocabulary matches EscalationPolicyConfig: low | medium_plus | high.
+    Unknown threshold falls back to medium_plus (the config default) — Pydantic
+    validation prevents invalid values from reaching here in normal operation.
+    """
+    level_val = _LEVEL_ORDER.get(level, 3)  # unknown level → treat as high (fail-closed)
+    _default_threshold = _THRESHOLD_ORDER["medium_plus"]
+    threshold_val = _THRESHOLD_ORDER.get(gate_threshold, _default_threshold)
+    return level_val >= threshold_val
 
 
 def _build_gate_context(context: ReviewContext) -> str:
