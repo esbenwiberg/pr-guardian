@@ -28,16 +28,40 @@ _engine = None
 _session_factory = None
 
 
+def _env_int(name: str, default: int) -> int:
+    """Read a non-negative int env var, falling back on missing/invalid values."""
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value >= 0 else default
+
+
 def _get_engine():
     global _engine
     if _engine is None:
         from sqlalchemy.ext.asyncio import create_async_engine
 
+        # Keep the per-replica connection footprint small. Container Apps runs
+        # the old and new revisions concurrently during a rolling deploy, so the
+        # peak demand on Postgres is (replicas x (pool_size + max_overflow) x 2
+        # revisions). With the old 5/10 defaults that overlap exhausted the
+        # flexible-server max_connections and the new revision crash-looped.
+        # Defaults give 3+2=5 connections/replica; both tunable via env so ops
+        # can right-size against max_connections without a code change.
+        pool_size = _env_int("GUARDIAN_DB_POOL_SIZE", 3)
+        max_overflow = _env_int("GUARDIAN_DB_MAX_OVERFLOW", 2)
+
         _engine = create_async_engine(
             _get_database_url(),
             echo=False,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_pre_ping=True,
+            pool_recycle=1800,
             connect_args={"timeout": 10},
         )
     return _engine
