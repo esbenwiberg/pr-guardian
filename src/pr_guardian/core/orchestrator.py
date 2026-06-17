@@ -13,6 +13,7 @@ import structlog
 from pr_guardian.agents.architecture_intent import ArchitectureIntentAgent
 from pr_guardian.agents.code_quality_obs import CodeQualityObservabilityAgent
 from pr_guardian.agents.hotspot import HotspotAgent
+from pr_guardian.agents.human_gate import HumanGateAgent
 from pr_guardian.agents.performance import PerformanceAgent
 from pr_guardian.agents.security_privacy import SecurityPrivacyAgent
 from pr_guardian.agents.test_quality import TestQualityAgent
@@ -46,7 +47,14 @@ from pr_guardian.models.context import (
     RiskTier,
     TrustTier,
 )
-from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
+from pr_guardian.models.findings import (
+    AgentResult,
+    Certainty,
+    Finding,
+    GateResult,
+    Severity,
+    Verdict,
+)
 from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.platform.guidance import upsert_guidance_comment as _upsert_guidance_comment
@@ -648,9 +656,30 @@ async def _run_pipeline(
             f"Trust tier escalated: {' | '.join(trust_tier_result.escalation_reasons)}",
         )
 
+    # Gate agent (structural_only mode only — blind to findings by design).
+    gate_result: GateResult | None = None
+    if config.escalation_policy.mode == "structural_only":
+        gate_agent = HumanGateAgent(config)
+        gate_result = await gate_agent.review(context)
+        _plog(
+            "warn" if gate_result.gated else "info",
+            "gate_agent",
+            f"Gate verdict: {gate_result.level.upper()} "
+            f"(gated={gate_result.gated}) — {gate_result.reason[:120]}",
+        )
+        if gate_result.error:
+            _plog("error", "gate_agent", f"Gate agent error: {gate_result.error}")
+
     # Stage 4: Decision
     await _update_stage("decision", "Computing final verdict")
-    result = decide(context, agent_results, triage_result.risk_tier, config, trust_tier_result)
+    result = decide(
+        context,
+        agent_results,
+        triage_result.risk_tier,
+        config,
+        trust_tier_result,
+        gate_result=gate_result,
+    )
     result.review_id = str(review_db_id) if review_db_id else ""
     result.mechanical_results = [_convert_mechanical(r) for r in mechanical_results]
     result.mechanical_passed = True
