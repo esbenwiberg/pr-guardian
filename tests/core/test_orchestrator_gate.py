@@ -12,6 +12,8 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
+import pytest
+
 from pr_guardian.agents.human_gate import HumanGateAgent
 from pr_guardian.config.schema import EscalationPolicyConfig, GuardianConfig
 from pr_guardian.decision.engine import decide
@@ -178,6 +180,7 @@ def test_gate_result_none_in_standard_mode_uses_matrix():
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.asyncio
 async def test_pipeline_calls_gate_only_in_structural_only(monkeypatch):
     """run_review() in structural_only calls HumanGateAgent.review(); standard does not."""
     import pr_guardian.core.orchestrator as orch
@@ -228,6 +231,7 @@ async def test_pipeline_calls_gate_only_in_structural_only(monkeypatch):
     )
 
 
+@pytest.mark.asyncio
 async def test_pipeline_gate_result_gated_produces_human_review_in_structural_only(monkeypatch):
     """run_review() in structural_only with gated=True gate agent → HUMAN_REVIEW decision."""
     import pr_guardian.core.orchestrator as orch
@@ -247,6 +251,7 @@ async def test_pipeline_gate_result_gated_produces_human_review_in_structural_on
     assert result.sticky_triggers[-1].reason == "Dangerous schema migration"
 
 
+@pytest.mark.asyncio
 async def test_pipeline_gate_agent_exception_fails_closed(monkeypatch):
     """run_review() in structural_only: gate agent raises → fail-closed HUMAN_REVIEW."""
     import pr_guardian.core.orchestrator as orch

@@ -663,13 +663,11 @@ async def _run_pipeline(
         try:
             gate_result = await gate_agent.review(context)
         except Exception as exc:  # noqa: BLE001
-            error_msg = str(exc)
-            _plog("error", "gate_agent", f"Gate agent raised unexpectedly: {error_msg}")
             gate_result = GateResult(
                 level="high",
                 reason="Gate agent error — failing closed",
                 gated=True,
-                error=error_msg,
+                error=str(exc),
             )
         _plog(
             "warn" if gate_result.gated else "info",
