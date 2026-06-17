@@ -115,13 +115,17 @@ def combined_score(
     return total_weighted / total_weight
 
 
-def check_overrides(
+def finding_overrides(
     agent_results: list[AgentResult],
-    context: ReviewContext,
     config: GuardianConfig,
-) -> tuple[list[StickyTrigger], list[str]]:
-    """Split escalation reasons into sticky structural triggers and finding-derived reasons."""
-    sticky: list[StickyTrigger] = []
+) -> list[str]:
+    """Finding-derived escalation reasons.
+
+    Depends only on the findings + config — no ReviewContext — so it can be
+    recomputed from re-evaluated findings during a re-review without rebuilding
+    discovery/triage state. The structural sticky triggers (new dep, hotspot,
+    trust tier, …) are computed separately in :func:`check_overrides`.
+    """
     finding_reasons: list[str] = []
 
     detected_medium_plus = 0
@@ -146,6 +150,18 @@ def check_overrides(
         )
     if suspected_count >= 3:
         finding_reasons.append(f"{suspected_count} suspected findings (threshold: 3)")
+
+    return finding_reasons
+
+
+def check_overrides(
+    agent_results: list[AgentResult],
+    context: ReviewContext,
+    config: GuardianConfig,
+) -> tuple[list[StickyTrigger], list[str]]:
+    """Split escalation reasons into sticky structural triggers and finding-derived reasons."""
+    sticky: list[StickyTrigger] = []
+    finding_reasons: list[str] = finding_overrides(agent_results, config)
 
     if context.change_profile.adds_dependencies:
         sticky.append(
@@ -212,6 +228,82 @@ def check_overrides(
     return sticky, finding_reasons
 
 
+def resolve_decision(
+    *,
+    risk_tier: RiskTier,
+    repo_risk: RepoRiskClass,
+    agent_results: list[AgentResult],
+    score: float,
+    config: GuardianConfig,
+    trust_tier: TrustTier | None,
+    sticky_triggers: list[StickyTrigger],
+    finding_reasons: list[str],
+    target_branch: str,
+) -> Decision:
+    """Apply the decision matrix + overrides to a set of findings.
+
+    This is the single source of truth for turning (risk, structure, findings,
+    trust) into a verdict. It is shared by the full-review path (:func:`decide`)
+    and the re-review path so the two can never diverge — a re-review with the
+    same inputs yields the same decision as a first review.
+
+    The structural inputs (``sticky_triggers``, ``trust_tier``, ``repo_risk``,
+    ``target_branch``) are *replayed* on re-review from the stored original
+    review; only the finding-derived inputs (``score``, ``finding_reasons``,
+    ``agent_results``) are recomputed from the re-evaluated findings.
+
+    Mutates ``sticky_triggers`` and ``finding_reasons`` in place to record the
+    trust-tier and branch/disabled escalations on the audit trail.
+    """
+    auto_approve_cfg = config.auto_approve
+    branch_blocked = any(fnmatch(target_branch, p) for p in auto_approve_cfg.blocked_target_branches)
+
+    # Start with decision matrix (risk-based)
+    decision = _apply_matrix(risk_tier, repo_risk, agent_results, score, config)
+
+    # Trust tier overrides: MANDATORY_HUMAN and HUMAN_PRIMARY force human review.
+    # The sticky trigger is recorded unconditionally so the structural audit
+    # trail reflects the restrictive tier even when findings already escalated.
+    if trust_tier in (TrustTier.MANDATORY_HUMAN, TrustTier.HUMAN_PRIMARY):
+        sticky_triggers.append(
+            StickyTrigger(
+                kind="trust_tier",
+                label=f"Trust tier: {trust_tier.value}",
+                source=trust_tier.value,
+                reason=f"Trust tier {trust_tier.value} requires human review",
+            )
+        )
+        if decision == Decision.AUTO_APPROVE:
+            decision = Decision.HUMAN_REVIEW
+
+    # Override: always escalate if sticky triggers or finding reasons exist
+    if (sticky_triggers or finding_reasons) and decision == Decision.AUTO_APPROVE:
+        decision = Decision.HUMAN_REVIEW
+
+    # Override: blocked branches never auto-approve
+    if branch_blocked and decision == Decision.AUTO_APPROVE:
+        decision = Decision.HUMAN_REVIEW
+        finding_reasons.append(f"Target branch {target_branch} is in blocked list")
+
+    # Override: auto-approve disabled
+    if not auto_approve_cfg.enabled and decision == Decision.AUTO_APPROVE:
+        decision = Decision.HUMAN_REVIEW
+        finding_reasons.append("Auto-approve is disabled")
+
+    # Reject: high-confidence, actionable findings — no human needed
+    if decision == Decision.HUMAN_REVIEW:
+        reject_reasons = _check_reject(agent_results, config)
+        if reject_reasons:
+            decision = Decision.REJECT
+            finding_reasons.extend(reject_reasons)
+
+    # Hard block threshold
+    if score >= config.thresholds.hard_block_score:
+        decision = Decision.HARD_BLOCK
+
+    return decision
+
+
 def decide(
     context: ReviewContext,
     agent_results: list[AgentResult],
@@ -232,56 +324,21 @@ def decide(
     repo_risk = context.repo_risk_class
     trust_tier = trust_tier_result.resolved_tier if trust_tier_result else None
 
-    # Check auto-approve branch rules
-    target = context.pr.target_branch
-    auto_approve_cfg = config.auto_approve
-    branch_blocked = any(fnmatch(target, p) for p in auto_approve_cfg.blocked_target_branches)
+    decision = resolve_decision(
+        risk_tier=risk_tier,
+        repo_risk=repo_risk,
+        agent_results=agent_results,
+        score=score,
+        config=config,
+        trust_tier=trust_tier,
+        sticky_triggers=sticky_triggers,
+        finding_reasons=finding_reasons,
+        target_branch=context.pr.target_branch,
+    )
 
-    # Start with decision matrix (risk-based)
-    decision = _apply_matrix(risk_tier, repo_risk, agent_results, score, config)
-
-    # Trust tier overrides: MANDATORY_HUMAN and HUMAN_PRIMARY force human review.
-    # The sticky trigger is recorded unconditionally so the structural audit
-    # trail reflects the restrictive tier even when findings already escalated.
     reviewer_group_override: str | None = None
-    if trust_tier in (TrustTier.MANDATORY_HUMAN, TrustTier.HUMAN_PRIMARY):
-        sticky_triggers.append(
-            StickyTrigger(
-                kind="trust_tier",
-                label=f"Trust tier: {trust_tier.value}",
-                source=trust_tier.value,
-                reason=f"Trust tier {trust_tier.value} requires human review",
-            )
-        )
-        if decision == Decision.AUTO_APPROVE:
-            decision = Decision.HUMAN_REVIEW
-        if trust_tier == TrustTier.HUMAN_PRIMARY and trust_tier_result:
-            reviewer_group_override = trust_tier_result.reviewer_group_override
-
-    # Override: always escalate if sticky triggers or finding reasons exist
-    if (sticky_triggers or finding_reasons) and decision == Decision.AUTO_APPROVE:
-        decision = Decision.HUMAN_REVIEW
-
-    # Override: blocked branches never auto-approve
-    if branch_blocked and decision == Decision.AUTO_APPROVE:
-        decision = Decision.HUMAN_REVIEW
-        finding_reasons.append(f"Target branch {target} is in blocked list")
-
-    # Override: auto-approve disabled
-    if not auto_approve_cfg.enabled and decision == Decision.AUTO_APPROVE:
-        decision = Decision.HUMAN_REVIEW
-        finding_reasons.append("Auto-approve is disabled")
-
-    # Reject: high-confidence, actionable findings — no human needed
-    if decision == Decision.HUMAN_REVIEW:
-        reject_reasons = _check_reject(agent_results, config)
-        if reject_reasons:
-            decision = Decision.REJECT
-            finding_reasons.extend(reject_reasons)
-
-    # Hard block threshold
-    if score >= config.thresholds.hard_block_score:
-        decision = Decision.HARD_BLOCK
+    if trust_tier == TrustTier.HUMAN_PRIMARY and trust_tier_result:
+        reviewer_group_override = trust_tier_result.reviewer_group_override
 
     # Build trust tier metadata for the result
     escalated_from: str | None = None

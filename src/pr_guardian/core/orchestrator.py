@@ -37,7 +37,14 @@ from pr_guardian.discovery.change_profile import build_change_profile
 from pr_guardian.discovery.dep_graph import build_dep_graph
 from pr_guardian.languages.detector import detect_languages
 from pr_guardian.mechanical.runner import all_checks_passed, run_mechanical_checks
-from pr_guardian.models.context import ArchmapContext, RepoRiskClass, ReviewContext
+from pr_guardian.decision.types import StickyTrigger
+from pr_guardian.models.context import (
+    ArchmapContext,
+    RepoRiskClass,
+    ReviewContext,
+    RiskTier,
+    TrustTier,
+)
 from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
 from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
@@ -1187,7 +1194,11 @@ async def _run_re_review_pipeline(
             )
         )
 
-    # Compute decision
+    # Compute decision through the shared decision engine so re-review and full
+    # review can never diverge. Finding-derived inputs (score, finding reasons)
+    # are recomputed from the re-evaluated findings; structural inputs (trust
+    # tier, sticky triggers, repo risk, risk tier, target branch) are *replayed*
+    # from the original review since re-evaluation does not change them.
     all_kept = sum(len(ar.findings) for ar in kept_findings)
     has_high = any(
         f.severity in (Severity.HIGH, Severity.CRITICAL)
@@ -1195,26 +1206,51 @@ async def _run_re_review_pipeline(
         for f in ar.findings
     )
 
-    if all_kept == 0:
-        decision = Decision.AUTO_APPROVE
-        summary_text = "Re-review: all findings have been resolved."
-    elif has_high:
-        decision = Decision.HUMAN_REVIEW
-        summary_text = f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved). High-severity findings need attention."
-    else:
-        decision = Decision.HUMAN_REVIEW
-        summary_text = (
-            f"Re-review: {all_kept} finding(s) remain ({active_findings - all_kept} resolved)."
-        )
-
-    risk_tier = (
-        RiskTier.HIGH if has_high else (RiskTier.MEDIUM if all_kept > 0 else RiskTier.TRIVIAL)
+    from pr_guardian.decision.engine import (
+        combined_score as calc_score,
+        finding_overrides,
+        resolve_decision,
     )
 
-    # Build combined score from kept findings
-    from pr_guardian.decision.engine import combined_score as calc_score
-
     score = calc_score(kept_findings, config) if all_kept > 0 else 0.0
+
+    repo_risk = _parse_risk_class(original_review.get("repo_risk_class"))
+    risk_tier = _parse_risk_tier(
+        original_review.get("risk_tier"),
+        fallback=(
+            RiskTier.HIGH if has_high else (RiskTier.MEDIUM if all_kept > 0 else RiskTier.TRIVIAL)
+        ),
+    )
+    trust_tier = _parse_trust_tier(original_review.get("trust_tier"))
+    target_branch = original_review.get("target_branch", "") or ""
+
+    # Replay the original structural triggers, minus the trust-tier one —
+    # resolve_decision re-adds that from trust_tier so we avoid a duplicate.
+    sticky_triggers = _replay_sticky_triggers(original_review.get("sticky_triggers", []))
+    finding_reasons = finding_overrides(kept_findings, config)
+
+    decision = resolve_decision(
+        risk_tier=risk_tier,
+        repo_risk=repo_risk,
+        agent_results=kept_findings,
+        score=score,
+        config=config,
+        trust_tier=trust_tier,
+        sticky_triggers=sticky_triggers,
+        finding_reasons=finding_reasons,
+        target_branch=target_branch,
+    )
+
+    resolved_count_total = active_findings - all_kept
+    if all_kept == 0:
+        summary_text = "Re-review: all findings have been resolved."
+    else:
+        summary_text = f"Re-review: {all_kept} finding(s) remain ({resolved_count_total} resolved)."
+        if decision in (Decision.HUMAN_REVIEW, Decision.REJECT, Decision.HARD_BLOCK) and has_high:
+            summary_text += " High-severity findings need attention."
+    if decision != Decision.AUTO_APPROVE and all_kept == 0:
+        # Clean code but a structural gate (e.g. trust tier) still requires a human.
+        summary_text = "Re-review: all findings resolved; human approval still required."
 
     result = ReviewResult(
         pr_id=pr.pr_id,
@@ -1273,6 +1309,40 @@ def _parse_risk_class(value: str | None) -> RepoRiskClass:
         "critical": RepoRiskClass.CRITICAL,
     }
     return mapping.get(value or "", RepoRiskClass.STANDARD)
+
+
+def _parse_risk_tier(value: str | None, *, fallback: RiskTier) -> RiskTier:
+    """Parse a stored risk tier string, falling back when absent/unknown."""
+    try:
+        return RiskTier(value) if value else fallback
+    except ValueError:
+        return fallback
+
+
+def _parse_trust_tier(value: str | None) -> TrustTier | None:
+    """Parse a stored trust tier string. Empty/unknown means no trust gate."""
+    try:
+        return TrustTier(value) if value else None
+    except ValueError:
+        return None
+
+
+def _replay_sticky_triggers(stored: list) -> list[StickyTrigger]:
+    """Rebuild StickyTrigger objects from a stored review's serialized triggers.
+
+    The trust-tier trigger is intentionally dropped: resolve_decision re-derives
+    it from the trust tier, so replaying it here would duplicate the audit entry.
+    """
+    fields = ("kind", "label", "source", "reason")
+    out: list[StickyTrigger] = []
+    for d in stored or []:
+        if not isinstance(d, dict) or d.get("kind") == "trust_tier":
+            continue
+        try:
+            out.append(StickyTrigger(**{k: d.get(k, "") for k in fields}))
+        except (TypeError, ValueError):
+            continue
+    return out
 
 
 def _uuid_or_none(value) -> uuid.UUID | None:
