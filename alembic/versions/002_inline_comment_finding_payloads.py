@@ -26,21 +26,33 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "posted_inline_comments",
-        sa.Column(
-            "findings",
-            sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql"),
-            nullable=False,
-            server_default=sa.text("'[]'"),
-        ),
-    )
-    op.create_index(
-        op.f("ix_posted_inline_comments_platform_comment_id"),
-        "posted_inline_comments",
-        ["platform_comment_id"],
-        unique=False,
-    )
+    # Idempotent: the app's startup create_all reconcile can add the `findings`
+    # column from the model before Alembic records this revision (alembic_version
+    # left at the baseline). A plain ADD COLUMN then fails with DuplicateColumn on
+    # the next boot, crash-looping the container. Guard on the live schema so this
+    # migration converges whether or not create_all already ran.
+    bind = op.get_bind()
+    insp = sa.inspect(bind)
+    columns = {c["name"] for c in insp.get_columns("posted_inline_comments")}
+    if "findings" not in columns:
+        op.add_column(
+            "posted_inline_comments",
+            sa.Column(
+                "findings",
+                sa.JSON().with_variant(postgresql.JSONB(astext_type=sa.Text()), "postgresql"),
+                nullable=False,
+                server_default=sa.text("'[]'"),
+            ),
+        )
+
+    indexes = {i["name"] for i in insp.get_indexes("posted_inline_comments")}
+    if "ix_posted_inline_comments_platform_comment_id" not in indexes:
+        op.create_index(
+            op.f("ix_posted_inline_comments_platform_comment_id"),
+            "posted_inline_comments",
+            ["platform_comment_id"],
+            unique=False,
+        )
 
 
 def downgrade() -> None:
