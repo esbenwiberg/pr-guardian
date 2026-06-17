@@ -943,6 +943,25 @@ async def submit_verdict(
         elif body.verdict == "decline":
             await adapter.request_changes(pr, comment_body)
             actions.append("request_changes")
+
+        # Flip the guardian/review commit status to match the human verdict.
+        # The original automated review left it at 'failure' for a HUMAN_REVIEW
+        # decision; a bot APPROVE review alone does NOT clear that status, so a
+        # repo that made guardian/review a required check would stay blocked even
+        # after approval. Posting success here is what actually unblocks merge.
+        set_status_fn = getattr(adapter, "set_review_status", None)
+        if set_status_fn is not None:
+            reviewer = identity.display_name or identity.email or "human reviewer"
+            if body.verdict in ("approve", "approve_with_fixes"):
+                await set_status_fn(
+                    pr, "success", f"Guardian: approved by {reviewer}", review_url or ""
+                )
+                actions.append("set_status:success")
+            elif body.verdict == "decline":
+                await set_status_fn(
+                    pr, "failure", f"Guardian: changes requested by {reviewer}", review_url or ""
+                )
+                actions.append("set_status:failure")
     except Exception as exc:  # noqa: BLE001 — surface any platform error to the caller
         posted = False
         error = f"{type(exc).__name__}: {exc}"

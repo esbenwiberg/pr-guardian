@@ -350,10 +350,13 @@ class PostedInlineCommentRow(Base):
     review_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("reviews.id"), index=True
     )
-    platform_comment_id: Mapped[str] = mapped_column(String(256))
+    platform_comment_id: Mapped[str] = mapped_column(String(256), index=True)
     platform: Mapped[str] = mapped_column(String(16))
     pr_id: Mapped[str] = mapped_column(String(64))
     repo: Mapped[str] = mapped_column(String(256))
+    # Finding payloads carried by this comment, so a reply-to-comment dismissal
+    # can be mapped back to the specific finding(s). See inline_finding_payload.
+    findings: Mapped[list] = mapped_column(_json_type(), default=list)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

@@ -115,7 +115,13 @@ def test_approve_always_posts_comment_for_audit_trail(client, fake_review, monke
     assert body["posted"] is True
     assert body["verdict"] == "approve"
     # Fixture carries one `will_fix` finding, so we expect an inline post too.
-    assert body["platform_actions"] == ["post_inline_comments", "approve_pr", "post_comment"]
+    # Approve also flips guardian/review -> success so a required check unblocks.
+    assert body["platform_actions"] == [
+        "post_inline_comments",
+        "approve_pr",
+        "post_comment",
+        "set_status:success",
+    ]
 
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
@@ -144,6 +150,7 @@ def test_approve_with_comment_also_posts_comment(client, fake_review, monkeypatc
         "post_inline_comments",
         "approve_pr",
         "post_comment",
+        "set_status:success",
     ]
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
@@ -165,6 +172,7 @@ def test_approve_with_fixes_always_posts_comment(client, fake_review, monkeypatc
         "post_inline_comments",
         "approve_pr",
         "post_comment",
+        "set_status:success",
     ]
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
@@ -179,7 +187,11 @@ def test_decline_calls_request_changes_with_comment(client, fake_review, monkeyp
         json={"verdict": "decline", "comment": "Auth flow needs rework."},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["platform_actions"] == ["post_inline_comments", "request_changes"]
+    assert resp.json()["platform_actions"] == [
+        "post_inline_comments",
+        "request_changes",
+        "set_status:failure",
+    ]
     adapter.request_changes.assert_awaited_once()
     body = adapter.request_changes.await_args.args[1]
     assert "Auth flow needs rework" in body
@@ -246,12 +258,71 @@ def test_decline_posts_inline_comments_for_each_will_fix_finding(client, monkeyp
         json={"verdict": "decline", "comment": "Needs rework."},
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["platform_actions"] == ["post_inline_comments", "request_changes"]
+    assert resp.json()["platform_actions"] == [
+        "post_inline_comments",
+        "request_changes",
+        "set_status:failure",
+    ]
 
     adapter.post_inline_comments.assert_awaited_once()
     inline_arg = adapter.post_inline_comments.await_args.args[1]
     assert len(inline_arg) == 3
     assert {f.file for f in inline_arg} == {"a.py", "b.py", "c.py"}
+
+
+def test_approve_flips_guardian_status_to_success(client, fake_review, monkeypatch):
+    """Human approval must flip guardian/review -> success so a required status
+    check unblocks merge. A bot APPROVE review alone leaves the check red."""
+    adapter = _make_mock_adapter()
+    adapter.set_review_status = AsyncMock(return_value=None)
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    adapter.set_review_status.assert_awaited_once()
+    args = adapter.set_review_status.await_args.args
+    assert args[0].repo == "org/repo"  # pr
+    assert args[1] == "success"  # state
+
+
+def test_decline_flips_guardian_status_to_failure(client, fake_review, monkeypatch):
+    adapter = _make_mock_adapter()
+    adapter.set_review_status = AsyncMock(return_value=None)
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "decline", "comment": "nope"},
+    )
+    assert resp.status_code == 200, resp.text
+    adapter.set_review_status.assert_awaited_once()
+    assert adapter.set_review_status.await_args.args[1] == "failure"
+
+
+def test_approve_succeeds_when_adapter_has_no_set_review_status(client, fake_review, monkeypatch):
+    """Adapters without a status mechanism (e.g. some platforms) must not break
+    the verdict — the status flip is best-effort by capability."""
+    adapter = _make_mock_adapter()
+    # Simulate an adapter that genuinely lacks the method.
+    if hasattr(adapter, "set_review_status"):
+        delattr(adapter, "set_review_status")
+    # AsyncMock auto-creates attributes; force getattr(...) to return None.
+    adapter.mock_add_spec(
+        ["approve_pr", "request_changes", "post_comment", "post_inline_comments"]
+    )
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    actions = resp.json()["platform_actions"]
+    assert "set_status:success" not in actions
+    assert "approve_pr" in actions
 
 
 def test_invalid_verdict_returns_400(client, fake_review, monkeypatch):

@@ -132,6 +132,35 @@ async def github_webhook(
             base_url=str(request.base_url).rstrip("/"),
         )
 
+    if x_github_event == "pull_request_review_comment":
+        action = body.get("action", "")
+        comment = body.get("comment") or {}
+        pull_request = body.get("pull_request") or {}
+        repo_data = body.get("repository") or {}
+        in_reply_to = comment.get("in_reply_to_id")
+        # Only act on freshly-created replies to an existing review comment.
+        if action != "created" or not in_reply_to:
+            return {"status": "ignored", "reason": "not a review-comment reply"}
+
+        from pr_guardian.core.github_chatops import handle_github_review_comment_reply
+
+        repo = repo_data.get("full_name") or ""
+        pr_id = str(pull_request.get("number") or "")
+        if not repo or not pr_id:
+            return {"status": "ignored", "reason": "missing repo or PR number"}
+        return await handle_github_review_comment_reply(
+            repo=repo,
+            pr_id=pr_id,
+            comment_id=str(comment.get("id") or ""),
+            in_reply_to_id=str(in_reply_to),
+            body=comment.get("body") or "",
+            commenter=(comment.get("user") or {}).get("login") or "",
+            author_association=comment.get("author_association") or "",
+            pr_author=(pull_request.get("user") or {}).get("login") or "",
+            source="github:pull_request_review_comment",
+            base_url=str(request.base_url).rstrip("/"),
+        )
+
     if x_github_event != "pull_request":
         return {"status": "ignored", "reason": f"event type: {x_github_event}"}
 

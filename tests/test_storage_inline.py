@@ -23,6 +23,7 @@ sa.Table(
     sa.Column("platform", sa.String(16), nullable=False),
     sa.Column("pr_id", sa.String(64), nullable=False),
     sa.Column("repo", sa.String(256), nullable=False),
+    sa.Column("findings", sa.JSON, nullable=False),
     sa.Column("created_at", sa.DateTime),
 )
 
