@@ -635,22 +635,9 @@ def _candidate_pr(candidate: dict[str, Any]) -> PlatformPR:
 
 
 async def _adapter_from_candidate(candidate: dict[str, Any]):
-    from pr_guardian.platform.factory import create_adapter
+    from pr_guardian.platform.factory import create_adapter_for_review
 
-    connection_id = candidate.get("connection_id")
-    if not connection_id:
-        return create_adapter(candidate["platform"])
-    connection = await storage.get_connection(uuid_mod.UUID(str(connection_id)))
-    if not connection or connection.get("archived_at"):
-        raise HTTPException(409, "Candidate Connection is archived or inaccessible")
-    token = await storage.get_connection_token(uuid_mod.UUID(str(connection_id)))
-    if not token:
-        raise HTTPException(409, "Candidate Connection has no accessible token")
-    return create_adapter(
-        candidate["platform"],
-        token_override=token,
-        org_url_override=connection.get("org_url") or None,
-    )
+    return await create_adapter_for_review(candidate, (candidate.get("platform") or "").lower())
 
 
 async def _run_candidate_review(
@@ -1008,25 +995,9 @@ async def _post_github_comment_fallback(
 
 
 async def _adapter_from_review_connection(review: dict[str, Any]):
-    from pr_guardian.platform.factory import create_adapter, create_github_adapter
+    from pr_guardian.platform.factory import create_adapter_for_review
 
-    connection_id = review.get("connection_id")
-    platform = (review.get("platform") or "").lower()
-    if connection_id:
-        connection = await storage.get_connection(uuid_mod.UUID(str(connection_id)))
-        if not connection or connection.get("archived_at"):
-            raise HTTPException(409, "Stored Connection is archived or inaccessible")
-        token = await storage.get_connection_token(uuid_mod.UUID(str(connection_id)))
-        if not token:
-            raise HTTPException(409, "Stored Connection has no accessible token")
-        return create_adapter(
-            platform,
-            token_override=token,
-            org_url_override=connection.get("org_url") or None,
-        )
-    if platform == "github":
-        return await create_github_adapter(review.get("pat_name"))
-    return create_adapter(platform)
+    return await create_adapter_for_review(review, (review.get("platform") or "").lower())
 
 
 @router.post("/{review_id}/finalize")

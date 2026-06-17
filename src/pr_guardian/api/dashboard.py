@@ -29,11 +29,7 @@ from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.decision.types import StickyTriggerKind
 from pr_guardian.persistence import storage
 from pr_guardian.persistence.storage import _hash16, finding_signature
-from pr_guardian.platform.factory import (
-    create_adapter,
-    create_adapter_for_review,
-    create_github_adapter,
-)
+from pr_guardian.platform.factory import create_adapter_for_review
 from pr_guardian.decision.actions import _detail_url
 from pr_guardian.wizard.capability_clusterer import (
     FileSummary,
@@ -862,25 +858,7 @@ async def submit_verdict(
         )
 
     try:
-        connection_id = review.get("connection_id")
-        if connection_id:
-            connection = await storage.get_connection(uuid.UUID(str(connection_id)))
-            if not connection or connection.get("archived_at"):
-                raise HTTPException(409, "Stored Connection is archived or inaccessible")
-            token = await storage.get_connection_token(uuid.UUID(str(connection_id)))
-            if not token:
-                raise HTTPException(409, "Stored Connection has no accessible token")
-            adapter = create_adapter(
-                platform_str,
-                token_override=token,
-                org_url_override=connection.get("org_url") or None,
-            )
-        else:
-            adapter = (
-                await create_github_adapter(review.get("pat_name"))
-                if platform_str == "github"
-                else create_adapter(platform_str)
-            )
+        adapter = await create_adapter_for_review(review, platform_str)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     decision_counts = _summarise_decisions(review)

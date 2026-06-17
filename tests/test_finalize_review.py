@@ -8,7 +8,7 @@ storage and a mocked platform adapter.
 from __future__ import annotations
 
 import uuid
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from pr_guardian.platform.protocol import InlinePostResult
 
@@ -166,9 +166,11 @@ def test_api_keys_cannot_finalize_and_signed_in_user_uses_stored_connection(clie
             }
         ),
     )
-    monkeypatch.setattr(rq.storage, "get_connection_token", AsyncMock(return_value="stored-token"))
-    create_adapter = MagicMock(return_value=adapter)
-    monkeypatch.setattr(factory_mod, "create_adapter", create_adapter)
+    # GitHub connections mint an installation token via the App path — finalize
+    # must resolve through create_github_adapter keyed by the stored connection
+    # id, NOT pull a static token (GitHub App connections store no static token).
+    create_github_adapter = AsyncMock(return_value=adapter)
+    monkeypatch.setattr(factory_mod, "create_github_adapter", create_github_adapter)
 
     api_resp = client.post(
         f"/api/reviews/{review['id']}/finalize",
@@ -185,9 +187,7 @@ def test_api_keys_cannot_finalize_and_signed_in_user_uses_stored_connection(clie
     )
     assert user_resp.status_code == 200
     adapter.approve_pr.assert_awaited_once()
-    factory_mod.create_adapter.assert_called_once_with(
-        "github", token_override="stored-token", org_url_override=None
-    )
+    create_github_adapter.assert_awaited_once_with(str(connection_id))
     assert appended[-1]["actor_email"] == "reviewer@example.test"
 
 
