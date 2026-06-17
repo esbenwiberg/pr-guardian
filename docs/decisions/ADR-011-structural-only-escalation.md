@@ -3,6 +3,13 @@
 ## Status
 Accepted — 2026-06-17. Amends ADR-002's closed sticky-trigger kind set.
 
+**Staged rollout — only §1 is implemented in the initial brief.** §2
+(`EscalationPolicyConfig`), §3 (gate agent + `GateResult`), and §4 (engine
+branch) are follow-on work delivered by parallel briefs in the
+`structural-only-escalation` pod series. The Accepted status reflects the full
+design decision; individual implementation briefs track which subsystems are
+live.
+
 ## Context
 
 ADR-002 split escalation reasons into two disjoint buckets — `sticky_triggers`

@@ -50,11 +50,20 @@ the new fields. No transitional union field. The only existing consumer
 (`review_detail.html`) migrates in the same brief.
 
 The sticky-trigger `kind` set is closed:
-`new_dep | path_risk | hotspot | trust_tier | repo_risk | high_diff | archmap_hub | gate_agent`.
+`new_dep | path_risk | hotspot | trust_tier | repo_risk | high_diff`.
 ADR-005 proposes adding `config_policy` and structured
 `StickyTrigger.details`; those are not accepted live contract fields yet.
 Adding any further kind requires another ADR amendment, not a silent enum
 extension.
+
+**Note on `archmap_hub`:** this kind was added to `StickyTriggerKind` in
+`decision/types.py` as part of the archmap feature (prior to ADR-011) without
+a standalone ADR amendment. It is a structural trigger in the same spirit as the
+original six kinds; no separate ADR was authored at that time. Its presence is
+acknowledged here for completeness.
+
+**Note on `gate_agent`:** added by ADR-011 (2026-06-17); see
+`docs/decisions/ADR-011-structural-only-escalation.md`.
 
 ## Consequences
 
