@@ -127,6 +127,31 @@ def test_structural_only_payload_gate_read_from_sticky_when_absent(client, monke
     assert body["gate_read"]["gated"] is True
 
 
+def test_structural_only_legacy_sticky_medium_level_derived_correctly(client, monkeypatch):
+    """Legacy gate_agent sticky with MEDIUM label → derived gate_read.level is 'medium', not 'high'."""
+    stickies = [
+        {
+            "kind": "gate_agent",
+            "label": "Gate agent: MEDIUM danger",
+            "reason": "Risky but not catastrophic",
+            "source": "gate_agent",
+        }
+    ]
+    review = _structural_review(gate_read=None, sticky_triggers=stickies)
+    _patch(monkeypatch, review)
+
+    resp = client.get(f"/api/dashboard/reviews/{review['id']}")
+    assert resp.status_code == 200
+    body = resp.json()
+
+    assert body["escalation_mode"] == "structural_only"
+    assert body["gate_read"] is not None
+    assert body["gate_read"]["level"] == "medium", (
+        "level must be parsed from the trigger label, not hardcoded to 'high'"
+    )
+    assert body["gate_read"]["reason"] == "Risky but not catastrophic"
+
+
 def test_standard_mode_payload_has_standard_escalation_mode(client, monkeypatch):
     """Standard review → escalation_mode is 'standard', gate_read absent."""
     review = _standard_review()

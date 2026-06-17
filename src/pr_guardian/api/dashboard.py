@@ -210,8 +210,17 @@ async def dashboard_review_detail(review_id: uuid.UUID):
                 None,
             )
             if gate_sticky:
+                # Parse level from label: "Gate agent: HIGH danger" → "high".
+                # Fall back to "high" (fail-safe) if the label format has changed.
+                _valid_levels = {"none", "low", "medium", "high"}
+                _label_words = (gate_sticky.get("label") or "").lower().split()
+                _level = (
+                    _label_words[2]
+                    if len(_label_words) > 2 and _label_words[2] in _valid_levels
+                    else "high"
+                )
                 row["gate_read"] = {
-                    "level": "high",
+                    "level": _level,
                     "reason": gate_sticky.get("reason", ""),
                     "gated": True,
                 }
