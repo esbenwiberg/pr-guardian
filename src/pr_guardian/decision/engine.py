@@ -496,15 +496,18 @@ def _resolve_structural_only(
         decision = Decision.HUMAN_REVIEW
 
     # Gate agent: gated=True means the semantic gate fired (or errored closed).
+    # Guard against duplicate if a gate_agent sticky was already replayed from
+    # a prior review cycle (block 2 above already escalated via it).
     if gate_result is not None and gate_result.gated:
-        sticky_triggers.append(
-            StickyTrigger(
-                kind="gate_agent",
-                label=f"Gate agent: {gate_result.level.upper()} danger",
-                source="gate_agent",
-                reason=gate_result.reason,
+        if not any(st.kind == "gate_agent" for st in sticky_triggers):
+            sticky_triggers.append(
+                StickyTrigger(
+                    kind="gate_agent",
+                    label=f"Gate agent: {gate_result.level.upper()} danger",
+                    source="gate_agent",
+                    reason=gate_result.reason,
+                )
             )
-        )
         decision = Decision.HUMAN_REVIEW
 
     # Findings drive REJECT (not human review) at the configured threshold.

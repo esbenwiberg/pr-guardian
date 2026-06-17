@@ -241,6 +241,23 @@ def test_replayed_gate_agent_sticky_escalates_in_structural_only():
     assert resolve_decision(**kwargs) == Decision.HUMAN_REVIEW
 
 
+def test_gate_agent_sticky_not_duplicated_when_replayed_and_gated():
+    """Replayed gate_agent sticky + gated=True gate_result → only one gate_agent sticky."""
+    replayed = StickyTrigger(
+        kind="gate_agent",
+        label="Gate agent: HIGH danger",
+        source="gate_agent",
+        reason="From prior review",
+    )
+    stickies = [replayed]
+    gate_result = GateResult(level="high", reason="Still dangerous", gated=True)
+    kwargs = _base_kwargs(sticky_triggers=stickies, gate_result=gate_result)
+    assert resolve_decision(**kwargs) == Decision.HUMAN_REVIEW
+    assert sum(1 for st in stickies if st.kind == "gate_agent") == 1, (
+        "gate_agent sticky must not be duplicated"
+    )
+
+
 # ---------------------------------------------------------------------------
 # reject_threshold variants: medium_plus and any
 # ---------------------------------------------------------------------------
