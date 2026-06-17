@@ -14,7 +14,9 @@ from pr_guardian.core import github_chatops
 
 
 def test_parse_dismiss_command_variants():
-    assert github_chatops.parse_dismiss_command("@guardian dismiss false_positive: parameterized") == (
+    assert github_chatops.parse_dismiss_command(
+        "@guardian dismiss false_positive: parameterized"
+    ) == (
         "false_positive",
         "parameterized",
     )
@@ -95,8 +97,12 @@ async def test_dismiss_records_eligible_finding(monkeypatch):
         "repo": "org/repo",
         "pr_id": "287",
         "findings": [
-            {"file": "a.py", "category": "style", "agent_name": "code_quality_observability",
-             "severity": "low"},
+            {
+                "file": "a.py",
+                "category": "style",
+                "agent_name": "code_quality_observability",
+                "severity": "low",
+            },
         ],
     }
     adapter = _FakeAdapter()
@@ -131,8 +137,12 @@ async def test_dismiss_blocked_for_high_or_security(monkeypatch):
         "repo": "org/repo",
         "pr_id": "287",
         "findings": [
-            {"file": "auth.py", "category": "sql-injection", "agent_name": "security_privacy",
-             "severity": "high"},
+            {
+                "file": "auth.py",
+                "category": "sql-injection",
+                "agent_name": "security_privacy",
+                "severity": "high",
+            },
         ],
     }
     adapter = _FakeAdapter()
@@ -192,8 +202,12 @@ async def test_unauthorized_commenter_cannot_dismiss(monkeypatch):
         "repo": "org/repo",
         "pr_id": "287",
         "findings": [
-            {"file": "a.py", "category": "style", "agent_name": "code_quality_observability",
-             "severity": "low"},
+            {
+                "file": "a.py",
+                "category": "style",
+                "agent_name": "code_quality_observability",
+                "severity": "low",
+            },
         ],
     }
     adapter = _FakeAdapter()

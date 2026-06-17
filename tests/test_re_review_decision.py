@@ -97,9 +97,7 @@ def test_replayed_structural_sticky_blocks_even_when_findings_resolved():
     """A new-dependency sticky trigger from the original review must still gate a
     re-review where every finding was resolved."""
     sticky = [
-        StickyTrigger(
-            kind="new_dep", label="New dependency added", source="x", reason="dep"
-        )
+        StickyTrigger(kind="new_dep", label="New dependency added", source="x", reason="dep")
     ]
     decision = _resolve([], trust_tier=TrustTier.AI_ONLY, sticky=sticky)
     assert decision == Decision.HUMAN_REVIEW

@@ -3727,9 +3727,7 @@ async def list_synced_prs(
                     ReviewRow.id,
                     ReviewRow.decision,
                 )
-                .where(
-                    tuple_(ReviewRow.platform, ReviewRow.repo, ReviewRow.pr_id).in_(pr_keys)
-                )
+                .where(tuple_(ReviewRow.platform, ReviewRow.repo, ReviewRow.pr_id).in_(pr_keys))
                 .where(ReviewRow.finished_at.isnot(None))
                 .order_by(ReviewRow.finished_at.desc())
             )

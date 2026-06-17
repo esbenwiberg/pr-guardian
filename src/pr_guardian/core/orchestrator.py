@@ -1245,7 +1245,9 @@ async def _run_re_review_pipeline(
     if all_kept == 0:
         summary_text = "Re-review: all findings have been resolved."
     else:
-        summary_text = f"Re-review: {all_kept} finding(s) remain ({resolved_count_total} resolved)."
+        summary_text = (
+            f"Re-review: {all_kept} finding(s) remain ({resolved_count_total} resolved)."
+        )
         if decision in (Decision.HUMAN_REVIEW, Decision.REJECT, Decision.HARD_BLOCK) and has_high:
             summary_text += " High-severity findings need attention."
     if decision != Decision.AUTO_APPROVE and all_kept == 0:

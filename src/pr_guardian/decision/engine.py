@@ -256,7 +256,9 @@ def resolve_decision(
     trust-tier and branch/disabled escalations on the audit trail.
     """
     auto_approve_cfg = config.auto_approve
-    branch_blocked = any(fnmatch(target_branch, p) for p in auto_approve_cfg.blocked_target_branches)
+    branch_blocked = any(
+        fnmatch(target_branch, p) for p in auto_approve_cfg.blocked_target_branches
+    )
 
     # Start with decision matrix (risk-based)
     decision = _apply_matrix(risk_tier, repo_risk, agent_results, score, config)
