@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -290,6 +292,12 @@ class SideEffectsConfig(BaseModel):
     scan_issues: bool = False
 
 
+class EscalationPolicyConfig(BaseModel):
+    mode: Literal["standard", "structural_only"] = "standard"
+    gate_threshold: Literal["low", "medium_plus", "high"] = "medium_plus"
+    reject_threshold: Literal["confident_only", "medium_plus", "any"] = "confident_only"
+
+
 class GuardianConfig(BaseModel):
     """Top-level config: merged from service defaults + resolved Profile policy."""
 
@@ -321,3 +329,4 @@ class GuardianConfig(BaseModel):
     side_effects: SideEffectsConfig = Field(default_factory=SideEffectsConfig)
     guardian_clearance: bool = False
     platform_approval_enabled: bool = False
+    escalation_policy: EscalationPolicyConfig = Field(default_factory=EscalationPolicyConfig)
