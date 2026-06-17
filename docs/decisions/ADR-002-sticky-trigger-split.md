@@ -5,6 +5,10 @@ Accepted — 2026-05-25. Implemented in `DecisionResult.sticky_triggers`,
 `DecisionResult.finding_reasons`, dashboard payloads, and storage compatibility
 for legacy `override_reasons` rows.
 
+**Amendment — ADR-011 (2026-06-17):** `gate_agent` added to the closed kind set
+to support the structural-only escalation policy. See
+`docs/decisions/ADR-011-structural-only-escalation.md`.
+
 ADR-005 is a proposed future amendment; it is not part of the live trigger
 contract until accepted and implemented.
 
@@ -46,7 +50,7 @@ the new fields. No transitional union field. The only existing consumer
 (`review_detail.html`) migrates in the same brief.
 
 The sticky-trigger `kind` set is closed:
-`new_dep | path_risk | hotspot | trust_tier | repo_risk | high_diff`.
+`new_dep | path_risk | hotspot | trust_tier | repo_risk | high_diff | archmap_hub | gate_agent`.
 ADR-005 proposes adding `config_policy` and structured
 `StickyTrigger.details`; those are not accepted live contract fields yet.
 Adding any further kind requires another ADR amendment, not a silent enum
@@ -65,4 +69,5 @@ internal-only payload — risk acceptable per user decision.
 
 **Committed to:** the closed kind set is a contract. Future structural reasons
 must either map to an existing kind or trigger an ADR update. If ADR-005 is
-accepted, the closed set will expand to include `config_policy`.
+accepted, the closed set will expand to include `config_policy`. ADR-011
+expanded the set with `gate_agent` (2026-06-17).
