@@ -660,7 +660,17 @@ async def _run_pipeline(
     gate_result: GateResult | None = None
     if config.escalation_policy.mode == "structural_only":
         gate_agent = HumanGateAgent(config)
-        gate_result = await gate_agent.review(context)
+        try:
+            gate_result = await gate_agent.review(context)
+        except Exception as exc:  # noqa: BLE001
+            error_msg = str(exc)
+            _plog("error", "gate_agent", f"Gate agent raised unexpectedly: {error_msg}")
+            gate_result = GateResult(
+                level="high",
+                reason="Gate agent error — failing closed",
+                gated=True,
+                error=error_msg,
+            )
         _plog(
             "warn" if gate_result.gated else "info",
             "gate_agent",

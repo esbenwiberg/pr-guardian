@@ -245,3 +245,25 @@ async def test_pipeline_gate_result_gated_produces_human_review_in_structural_on
     assert result.decision == Decision.HUMAN_REVIEW
     assert any(st.kind == "gate_agent" for st in result.sticky_triggers)
     assert result.sticky_triggers[-1].reason == "Dangerous schema migration"
+
+
+async def test_pipeline_gate_agent_exception_fails_closed(monkeypatch):
+    """run_review() in structural_only: gate agent raises → fail-closed HUMAN_REVIEW."""
+    import pr_guardian.core.orchestrator as orch
+
+    _patch_pipeline(monkeypatch)
+
+    monkeypatch.setattr(
+        HumanGateAgent,
+        "review",
+        AsyncMock(side_effect=RuntimeError("LLM connection timeout")),
+    )
+
+    pr = _minimal_pr()
+    result = await orch.run_review(
+        pr, _FakeAdapter(), service_config=_structural_config(), post_comment=False
+    )
+
+    assert result.decision == Decision.HUMAN_REVIEW
+    gate_stickies = [st for st in result.sticky_triggers if st.kind == "gate_agent"]
+    assert gate_stickies, "gate_agent sticky must be recorded on exception (fail-closed)"
