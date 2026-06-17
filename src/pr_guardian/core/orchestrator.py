@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import tempfile
 import uuid
+from fnmatch import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -64,6 +65,26 @@ _TOKEN_PRICES: dict[str, tuple[float, float]] = {
     "gpt-5": (0.625, 5.0),
 }
 _DEFAULT_PRICE = (3.0, 15.0)  # fallback
+
+_RISK_CLASS_MAP: dict[str, RepoRiskClass] = {
+    "standard": RepoRiskClass.STANDARD,
+    "elevated": RepoRiskClass.ELEVATED,
+    "critical": RepoRiskClass.CRITICAL,
+}
+
+
+def is_exempt_author(author: str, config: GuardianConfig) -> bool:
+    """True if the PR author is on the auto-approve exemption allowlist.
+
+    Exact, case-insensitive match — deliberately not fnmatch, since bot logins
+    like "dependabot[bot]" contain literal brackets that glob would treat as a
+    character class. See AutoApproveConfig.exempt_authors for the trade-off this
+    blind-approval path accepts.
+    """
+    if not author:
+        return False
+    exempt = {p.strip().lower() for p in config.auto_approve.exempt_authors if p.strip()}
+    return author.strip().lower() in exempt
 
 
 def _estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
@@ -295,6 +316,64 @@ async def _run_pipeline(
 ) -> ReviewResult:
     """Inner pipeline logic, separated so run_review can handle errors."""
 
+    # Resolve config up front so author-exemption can short-circuit before we
+    # spend anything on diff fetch, mechanical gates, or agents.
+    if service_config is None:
+        config = (await resolve_default_profile_config()).config
+    else:
+        config = await apply_global_settings(service_config)
+
+    # Author exemption: trusted automation (e.g. dependabot[bot]) gets a blanket
+    # fast auto-approve so the required Guardian check goes green and the bump can
+    # merge. This skips BOTH mechanical gates and agents — see is_exempt_author /
+    # AutoApproveConfig.exempt_authors for the supply-chain blind spot it accepts.
+    # We still honor blocked_target_branches: blind-approving into a release
+    # branch would defeat an explicit guard rail, so those fall through to the
+    # full pipeline.
+    branch_blocked = any(
+        fnmatch(pr.target_branch, p) for p in config.auto_approve.blocked_target_branches
+    )
+    if is_exempt_author(pr.author, config) and not branch_blocked:
+        _plog(
+            "info",
+            "exemption",
+            f"Author '{pr.author}' is exempt — fast auto-approve, skipping pipeline.",
+        )
+        await _update_stage("decision", f"Author {pr.author} exempt — auto-approved")
+        from pr_guardian.models.context import RiskTier
+
+        result = ReviewResult(
+            pr_id=pr.pr_id,
+            repo=pr.repo,
+            risk_tier=RiskTier.LOW,
+            repo_risk_class=_RISK_CLASS_MAP.get(config.repo_risk_class, RepoRiskClass.STANDARD),
+            review_id=str(review_db_id) if review_db_id else "",
+            decision=Decision.AUTO_APPROVE,
+            mechanical_passed=True,
+            summary=f"Auto-approved: author '{pr.author}' is on the exemption allowlist.",
+            finding_reasons=[f"Author '{pr.author}' is exempt from review"],
+            pipeline_log=pipeline_log,
+        )
+        side_effects_skipped = skip_platform_side_effects or await _is_stale_automatic_review(
+            adapter, pr, storage=storage, review_id=review_db_id
+        )
+        if post_comment and not side_effects_skipped:
+            await _post_results(
+                adapter,
+                pr,
+                result,
+                config,
+                base_url=base_url,
+                comment_mode=comment_mode,
+                review_id=review_db_id,
+                storage=storage,
+                original_review_id=original_review_id,
+                manual_comment_override=manual_comment_override,
+            )
+        await _save_result(storage, review_db_id, result, _emit)
+        log.info("review_exempt_autoapprove", pr_id=pr.pr_id, author=pr.author)
+        return result
+
     # Fetch diff (or use pre-built synthetic diff, e.g. for repo reviews)
     if diff_override is not None:
         diff = diff_override
@@ -320,13 +399,8 @@ async def _run_pipeline(
     # Use temp dir as repo_path (in production, would be a shallow clone)
     repo_path = Path(tempfile.mkdtemp(prefix=f"review-{pr.pr_id}-"))
 
-    # Stage 0: Discovery
+    # Stage 0: Discovery (config already resolved at the top of _run_pipeline)
     await _update_stage("discovery", "Parsing diff and building context")
-    if service_config is None:
-        config = (await resolve_default_profile_config()).config
-    else:
-        config = await apply_global_settings(service_config)
-
     language_map = detect_languages(changed_files)
     security_surface = build_security_surface(config.security_surface, changed_files)
     dep_graph = build_dep_graph(config.path_risk.critical_consumers or None)
@@ -341,12 +415,6 @@ async def _run_pipeline(
     hotspots = await load_hotspots(pr.repo)
     archmap = await _load_archmap_context(pr, adapter, changed_files, _plog)
 
-    risk_class_map = {
-        "standard": RepoRiskClass.STANDARD,
-        "elevated": RepoRiskClass.ELEVATED,
-        "critical": RepoRiskClass.CRITICAL,
-    }
-
     context = ReviewContext(
         pr=pr,
         repo_path=repo_path,
@@ -357,7 +425,7 @@ async def _run_pipeline(
         primary_language=language_map.primary_language,
         cross_stack=language_map.cross_stack,
         repo_config=config.model_dump(),
-        repo_risk_class=risk_class_map.get(config.repo_risk_class, RepoRiskClass.STANDARD),
+        repo_risk_class=_RISK_CLASS_MAP.get(config.repo_risk_class, RepoRiskClass.STANDARD),
         hotspots=hotspots,
         security_surface=security_surface,
         blast_radius=blast_radius,
