@@ -72,5 +72,5 @@ def test_unknown_reject_threshold_rejected():
 
 
 def test_unknown_enum_via_profile_settings_to_config_rejected():
-    with pytest.raises((ValidationError, Exception)):
+    with pytest.raises(ValidationError):
         profile_settings_to_config({"escalation_policy": {"mode": "unknown_mode"}})
