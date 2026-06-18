@@ -1144,13 +1144,14 @@ async def finalize_review(
                         include_fix_findings_in_summary = True
                         actions.append("post_inline_comments_skipped")
 
+            review_url = build_review_detail_url(review_id, str(request.base_url).rstrip("/"))
             summary = _build_summary_comment(
                 decisions,
                 fix_findings,
                 body.comment_to_author,
                 body.verdict,
                 include_fix_findings=include_fix_findings_in_summary,
-                review_url=build_review_detail_url(review_id, str(request.base_url).rstrip("/")),
+                review_url=review_url,
             )
 
             # Summary + verdict.
@@ -1211,6 +1212,34 @@ async def finalize_review(
                         actions.append("block_advisory")
                     else:
                         raise
+
+            # Flip the guardian/review commit status to match the human verdict.
+            # The automated review left it at 'failure' for a HUMAN_REVIEW decision;
+            # a bot approve_pr/request_changes review alone does NOT clear that
+            # commit status, so a repo that made guardian/review a required check
+            # stays blocked even after a human approval. Posting here unblocks merge.
+            # (Mirrors the wizard finalize path in api/dashboard.py.)
+            set_status_fn = getattr(adapter, "set_review_status", None)
+            if set_status_fn is not None:
+                reviewer = identity.display_name or identity.email or "human reviewer"
+                if body.verdict == "approve":
+                    await set_status_fn(
+                        pr, "success", f"Guardian: approved by {reviewer}", review_url or ""
+                    )
+                    actions.append("set_status:success")
+                elif body.verdict == "request_changes":
+                    await set_status_fn(
+                        pr,
+                        "failure",
+                        f"Guardian: changes requested by {reviewer}",
+                        review_url or "",
+                    )
+                    actions.append("set_status:failure")
+                elif body.verdict == "block":
+                    await set_status_fn(
+                        pr, "failure", f"Guardian: blocked by {reviewer}", review_url or ""
+                    )
+                    actions.append("set_status:failure")
         except Exception as exc:  # noqa: BLE001
             posted = False
             error = _format_platform_error(exc)

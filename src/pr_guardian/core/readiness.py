@@ -605,7 +605,11 @@ async def evaluate_readiness(
         # the reconciler quietly retries, and stays hidden as before.
         persistent = status in (401, 403, 404)
         reason = "platform_access_error" if persistent else "platform_error"
-        snapshot["error"] = str(exc)
+        # str(exc) is empty for many exception types (bare raises, some httpx
+        # transport errors). Record the repr and type so the real cause is
+        # recoverable from the snapshot and logs instead of an empty string.
+        snapshot["error"] = repr(exc)
+        snapshot["error_type"] = type(exc).__name__
         if status is not None:
             snapshot["error_status"] = status
         log.warning(
@@ -616,7 +620,9 @@ async def evaluate_readiness(
             connection_id=candidate.get("connection_id"),
             status=status,
             reason=reason,
-            error=str(exc),
+            error=repr(exc),
+            error_type=type(exc).__name__,
+            exc_info=exc,
         )
         return ReadinessDecision("error", reason, snapshot)
 

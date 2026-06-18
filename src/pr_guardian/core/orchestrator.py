@@ -1654,6 +1654,23 @@ async def _post_results(
         log.warning("post_review_status_failed", pr_id=pr.pr_id, error=str(e))
         postback["status_posted"] = False
 
+    # A completed review implies the PR cleared the readiness gate. Re-assert
+    # guardian/readiness=success here so a candidate whose readiness-success
+    # write failed mid-flight (readiness.py proceeds with the review anyway,
+    # then the candidate goes terminal) doesn't strand the check at its last
+    # value — terminal candidates are never re-evaluated. Best-effort; the
+    # readiness check is informational and must not break result posting.
+    readiness_method = getattr(adapter, "set_readiness_status", None)
+    if readiness_method is not None:
+        try:
+            result_obj = readiness_method(pr, "success", "Guardian readiness: review_completed")
+            if inspect.isawaitable(result_obj):
+                await result_obj
+            postback["readiness_status"] = "success"
+        except Exception as e:
+            log.warning("readiness_status_reassert_failed", pr_id=pr.pr_id, error=str(e))
+            postback["readiness_status"] = "write_failed"
+
     if inline_enabled:
         await _post_inline_and_summary(
             adapter,

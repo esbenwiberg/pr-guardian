@@ -23,7 +23,9 @@ async def reconcile_readiness_once(*, limit: int = 100) -> int:
             log.warning(
                 "readiness_reconcile_candidate_failed",
                 candidate_id=candidate["id"],
-                error=str(exc),
+                error=repr(exc),
+                error_type=type(exc).__name__,
+                exc_info=exc,
             )
     return count
 
