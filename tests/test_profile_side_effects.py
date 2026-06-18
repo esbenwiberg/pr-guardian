@@ -161,3 +161,49 @@ async def test_github_app_formal_approval_requires_profile_switches_and_non_fork
 
     fork_adapter.approve_pr.assert_not_awaited()
     assert result_fork.postback_meta.get("formal_approval") == "skipped_fork"
+
+
+@pytest.mark.asyncio
+async def test_completed_review_reasserts_readiness_success():
+    """A completed review re-posts guardian/readiness=success.
+
+    Guards the orphaned-readiness bug: when the reconciler's readiness-success
+    write fails mid-flight it proceeds with the review, then the candidate goes
+    terminal and is never re-evaluated — stranding guardian/readiness at its
+    last value. Posting success on result completion self-heals that.
+    """
+    adapter = _adapter()
+    adapter.set_readiness_status = AsyncMock()
+
+    await _post_results(
+        adapter,
+        _pr(),
+        _result(),
+        GuardianConfig(),
+        comment_mode="summary",
+        manual_comment_override=False,
+    )
+
+    adapter.set_readiness_status.assert_awaited_once()
+    assert adapter.set_readiness_status.await_args.args[1] == "success"
+
+
+@pytest.mark.asyncio
+async def test_readiness_reassert_failure_does_not_break_result_posting():
+    """A failing readiness-status write must not abort _post_results."""
+    adapter = _adapter()
+    adapter.set_readiness_status = AsyncMock(side_effect=RuntimeError("boom"))
+    result = _result()
+
+    await _post_results(
+        adapter,
+        _pr(),
+        result,
+        GuardianConfig(),
+        comment_mode="summary",
+        manual_comment_override=False,
+    )
+
+    # Review status still posted despite the readiness write blowing up.
+    adapter.set_review_status.assert_awaited_once()
+    assert result.postback_meta.get("readiness_status") == "write_failed"
