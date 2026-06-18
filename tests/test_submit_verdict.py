@@ -120,6 +120,7 @@ def test_approve_always_posts_comment_for_audit_trail(client, fake_review, monke
         "approve_pr",
         "post_comment",
         "set_status:success",
+        "set_readiness:success",
     ]
 
     adapter.approve_pr.assert_awaited_once()
@@ -150,6 +151,7 @@ def test_approve_with_comment_also_posts_comment(client, fake_review, monkeypatc
         "approve_pr",
         "post_comment",
         "set_status:success",
+        "set_readiness:success",
     ]
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
@@ -172,6 +174,7 @@ def test_approve_with_fixes_always_posts_comment(client, fake_review, monkeypatc
         "approve_pr",
         "post_comment",
         "set_status:success",
+        "set_readiness:success",
     ]
     adapter.approve_pr.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
@@ -190,6 +193,7 @@ def test_decline_calls_request_changes_with_comment(client, fake_review, monkeyp
         "post_inline_comments",
         "request_changes",
         "set_status:failure",
+        "set_readiness:success",
     ]
     adapter.request_changes.assert_awaited_once()
     body = adapter.request_changes.await_args.args[1]
@@ -261,6 +265,7 @@ def test_decline_posts_inline_comments_for_each_will_fix_finding(client, monkeyp
         "post_inline_comments",
         "request_changes",
         "set_status:failure",
+        "set_readiness:success",
     ]
 
     adapter.post_inline_comments.assert_awaited_once()
@@ -285,6 +290,43 @@ def test_approve_flips_guardian_status_to_success(client, fake_review, monkeypat
     args = adapter.set_review_status.await_args.args
     assert args[0].repo == "org/repo"  # pr
     assert args[1] == "success"  # state
+
+
+def test_approve_also_flips_guardian_readiness_to_success(client, fake_review, monkeypatch):
+    """Wizard finalize must also re-assert guardian/readiness=success. By finalize
+    the readiness candidate is terminal, so nothing else clears it — a PR
+    finalized while readiness was mid-flight (checks_pending right after an
+    update-branch) would otherwise stay blocked on a stale readiness check."""
+    adapter = _make_mock_adapter()
+    adapter.set_review_status = AsyncMock(return_value=None)
+    adapter.set_readiness_status = AsyncMock(return_value=None)
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    adapter.set_readiness_status.assert_awaited_once()
+    assert adapter.set_readiness_status.await_args.args[1] == "success"
+    assert "set_readiness:success" in resp.json()["platform_actions"]
+
+
+def test_decline_also_flips_guardian_readiness_to_success(client, fake_review, monkeypatch):
+    """Readiness = "the review ran", independent of verdict: a decline still
+    clears guardian/readiness while guardian/review carries the failure."""
+    adapter = _make_mock_adapter()
+    adapter.set_review_status = AsyncMock(return_value=None)
+    adapter.set_readiness_status = AsyncMock(return_value=None)
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "decline", "comment": "nope"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert adapter.set_readiness_status.await_args.args[1] == "success"
+    assert adapter.set_review_status.await_args.args[1] == "failure"
 
 
 def test_decline_flips_guardian_status_to_failure(client, fake_review, monkeypatch):
