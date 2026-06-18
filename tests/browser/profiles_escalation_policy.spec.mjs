@@ -253,8 +253,12 @@ const tests = {
       await gateThreshold.selectOption("high");
       await rejectThreshold.selectOption("medium_plus");
 
-      // Save
+      // Save — wait for the PATCH to complete before reading server state
+      const patchDone = page.waitForResponse(
+        (r) => r.url().includes("/profiles/") && r.request().method() === "PATCH",
+      );
       await saveBtn.click();
+      await patchDone;
 
       // Verify the server received the correct payload
       const saved = state.profiles.find((p) => p.id === "profile-default");
