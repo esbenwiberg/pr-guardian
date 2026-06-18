@@ -531,10 +531,22 @@ async def run_pr_sync() -> None:
 
 
 async def pr_sync_loop() -> None:
-    """Long-running loop: sync every 5min during 09-18, 30min outside."""
+    """Long-running loop: sync every 5min during 09-18, 30min outside.
+
+    Gated behind a Postgres advisory lock so only the leader replica syncs —
+    every replica runs this loop, but uncoordinated parallel passes multiply
+    API traffic and DB connection pressure for no benefit (the work is
+    idempotent). Followers skip the pass.
+    """
+    from pr_guardian.persistence.leader_lock import SYNC_LOCK_KEY, leader_lock
+
     while True:
         try:
-            await run_pr_sync()
+            async with leader_lock(SYNC_LOCK_KEY, label="pr_sync") as is_leader:
+                if is_leader:
+                    await run_pr_sync()
+                else:
+                    log.debug("pr_sync_skipped_not_leader")
         except Exception as exc:
             log.error("pr_sync_loop_error", error=str(exc))
         interval = 5 * 60 if _is_work_hours() else 30 * 60
