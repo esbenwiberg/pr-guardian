@@ -65,6 +65,9 @@ async def lifespan(app: FastAPI):
                 await task
             except asyncio.CancelledError:
                 pass
+        from pr_guardian.persistence.leader_lock import dispose_lock_engine
+
+        await dispose_lock_engine()
         await close_db()
     else:
         log.info(

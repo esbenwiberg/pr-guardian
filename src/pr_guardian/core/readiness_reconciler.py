@@ -29,10 +29,22 @@ async def reconcile_readiness_once(*, limit: int = 100) -> int:
 
 
 async def readiness_reconciler_loop(*, interval_seconds: int = 30) -> None:
-    """Small app-local background loop; durable candidates make missed ticks harmless."""
+    """Small app-local background loop; durable candidates make missed ticks harmless.
+
+    Gated behind a Postgres advisory lock so only the leader replica reconciles;
+    followers skip the tick. Durable candidates make a missed tick harmless, and
+    a separate lock key from pr-sync lets the two loops lead on different
+    replicas.
+    """
+    from pr_guardian.persistence.leader_lock import READINESS_LOCK_KEY, leader_lock
+
     while True:
         try:
-            await reconcile_readiness_once()
+            async with leader_lock(READINESS_LOCK_KEY, label="readiness_reconciler") as is_leader:
+                if is_leader:
+                    await reconcile_readiness_once()
+                else:
+                    log.debug("readiness_reconciler_skipped_not_leader")
         except Exception as exc:
             log.warning("readiness_reconciler_failed", error=str(exc))
         await asyncio.sleep(interval_seconds)
