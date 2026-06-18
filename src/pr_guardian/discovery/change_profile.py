@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pr_guardian.config.schema import FileRolesConfig
+from pr_guardian.discovery.dependency_change import manifest_change_adds_dependency
 from pr_guardian.discovery.file_roles import classify_file_roles
 from pr_guardian.models.context import (
     BlastRadius,
@@ -50,7 +51,16 @@ def build_change_profile(
     profile.touches_data_layer = any(
         "data_access" in security_surface.get_classifications(f) for f in changed_files
     )
-    profile.adds_dependencies = any(FileRole.DEPENDENCY in roles for roles in all_roles)
+    # Content-aware: a manifest *touch* is not a dependency *add*. Only flag when
+    # the manifest's diff plausibly adds/changes a dependency (fail-safe to True
+    # when a patch is missing or unparseable). This stops release-please-style
+    # version bumps in package.json from force-escalating to human review.
+    patch_by_path = {df.path: df.patch for df in diff.files}
+    profile.adds_dependencies = any(
+        manifest_change_adds_dependency(path, patch_by_path.get(path, ""))
+        for path, roles in file_roles.items()
+        if FileRole.DEPENDENCY in roles
+    )
 
     # Check for new API endpoints (heuristic: new files in controller/handler/api dirs)
     _API_SEGMENTS = {"controllers", "controller", "handlers", "handler", "api", "routes"}
