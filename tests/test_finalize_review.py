@@ -286,6 +286,32 @@ def test_finalize_approve_with_comment_mode_none_skips_post_comment(client, monk
     adapter.post_comment.assert_not_awaited()
 
 
+def test_finalize_approve_flips_guardian_review_status_to_success(client, monkeypatch):
+    """A human approve via the wrap-up must clear the guardian/review commit
+    status. The automated HUMAN_REVIEW decision left it at 'failure'; a bot
+    approve_pr alone does NOT clear that status, so a required guardian/review
+    check would keep the PR blocked even after approval."""
+    review = _github_review()
+    adapter = _make_adapter()
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "approve",
+            "comment_mode": "summary",
+            "comment_to_author": "",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    adapter.set_review_status.assert_awaited_once()
+    state = adapter.set_review_status.await_args.args[1]
+    assert state == "success"
+    assert "set_status:success" in resp.json()["actions"]
+
+
 def test_github_finalize_uses_review_pat_name(client, monkeypatch):
     review = _github_review()
     adapter = _make_adapter()
@@ -326,7 +352,11 @@ def test_github_request_changes_422_falls_back_to_comment(client, monkeypatch):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["posted"] is True
-    assert body["actions"] == ["request_changes_rejected", "post_comment_fallback"]
+    assert body["actions"] == [
+        "request_changes_rejected",
+        "post_comment_fallback",
+        "set_status:failure",
+    ]
     adapter.request_changes.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
     assert "Please address this before merge" in adapter.post_comment.await_args.args[1]
@@ -455,7 +485,11 @@ def test_finalize_inline_omits_finding_list_when_inline_comments_post(client, mo
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["actions"] == ["post_inline_comments", "request_changes"]
+    assert resp.json()["actions"] == [
+        "post_inline_comments",
+        "request_changes",
+        "set_status:failure",
+    ]
     summary = adapter.request_changes.await_args.args[1]
     assert "Fix-requested findings" not in summary
     assert "Unsanitised input" not in summary
