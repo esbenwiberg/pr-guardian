@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Literal
 
 
 class Severity(str, Enum):
@@ -55,6 +56,20 @@ class Finding:
     primary_agent: str | None = None
     contributing_agents: list[dict] = field(default_factory=list)
     merged_from_count: int = 0
+
+
+@dataclass
+class GateResult:
+    """Output of the semantic human-gate agent.
+
+    Distinct from AgentResult — emits a graded danger level, not findings.
+    Fail-closed: any LLM error yields level='high', gated=True, error set.
+    """
+
+    level: Literal["none", "low", "medium", "high"]
+    reason: str
+    gated: bool
+    error: str | None = None
 
 
 @dataclass

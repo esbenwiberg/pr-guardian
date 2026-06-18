@@ -41,6 +41,7 @@ _PROFILE_SETTING_KEYS = {
     "inline_comments",
     "readiness",
     "side_effects",
+    "escalation_policy",
 }
 
 _SECRET_SETTING_MARKERS = ("api_key", "password", "secret", "token")

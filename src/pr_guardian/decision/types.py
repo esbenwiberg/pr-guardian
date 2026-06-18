@@ -11,6 +11,7 @@ StickyTriggerKind = Literal[
     "repo_risk",
     "high_diff",
     "archmap_hub",
+    "gate_agent",
 ]
 
 

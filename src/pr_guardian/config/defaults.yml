@@ -88,3 +88,8 @@ readiness:
   ignored_statuses: []
   ignored_checks: []
   archmap_expected: false
+
+escalation_policy:
+  mode: standard
+  gate_threshold: medium_plus
+  reject_threshold: confident_only

@@ -122,6 +122,33 @@
             <label class="toggle-line"><input id="platform-approval-enabled" type="checkbox"> <span>Platform approval enabled</span></label>
           </div>
         </fieldset>
+
+        <fieldset class="fieldset">
+          <legend>Escalation policy</legend>
+          <label class="field">Mode
+            <select id="escalation-mode" class="form-select">
+              <option value="standard">Standard</option>
+              <option value="structural_only">Structural only</option>
+            </select>
+          </label>
+          <div id="escalation-threshold-fields" class="hidden space-y-3 mt-3">
+            <label class="field">Gate agent escalates at
+              <select id="escalation-gate-threshold" class="form-select">
+                <option value="low">Low</option>
+                <option value="medium_plus">Medium+</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+            <label class="field">Bounce PR back when finding is
+              <select id="escalation-reject-threshold" class="form-select">
+                <option value="confident_only">Confident only</option>
+                <option value="medium_plus">Medium+</option>
+                <option value="any">Any finding</option>
+              </select>
+            </label>
+            <p class="text-xs text-slate-400 mt-2">&#9432; Findings never summon a human in this mode &mdash; they post as comments or bounce the PR back to the author to fix.</p>
+          </div>
+        </fieldset>
       </form>
 
       <aside class="panel p-4 space-y-4">
@@ -304,6 +331,9 @@
     ignoredChecks: document.getElementById('ignored-checks'),
     guardianClearance: document.getElementById('guardian-clearance'),
     platformApprovalEnabled: document.getElementById('platform-approval-enabled'),
+    escalationMode: document.getElementById('escalation-mode'),
+    escalationGateThreshold: document.getElementById('escalation-gate-threshold'),
+    escalationRejectThreshold: document.getElementById('escalation-reject-threshold'),
   };
 
   function escapeHtml(value) {
@@ -485,6 +515,13 @@
     profileInputs.ignoredChecks.value = csv(readiness.ignored_checks);
     profileInputs.guardianClearance.checked = Boolean(settings.guardian_clearance);
     profileInputs.platformApprovalEnabled.checked = Boolean(settings.platform_approval_enabled);
+    const escalationPolicy = settings.escalation_policy || {};
+    profileInputs.escalationMode.value = escalationPolicy.mode || 'standard';
+    profileInputs.escalationGateThreshold.value = escalationPolicy.gate_threshold || 'medium_plus';
+    profileInputs.escalationRejectThreshold.value = escalationPolicy.reject_threshold || 'confident_only';
+    document.getElementById('escalation-threshold-fields').classList.toggle(
+      'hidden', profileInputs.escalationMode.value !== 'structural_only'
+    );
     document.querySelectorAll('[data-side-effect]').forEach(input => {
       input.checked = Boolean(sideEffects[input.dataset.sideEffect]);
     });
@@ -525,6 +562,11 @@
           archmap_expected: profileInputs.archmapExpected.checked,
         },
         side_effects: sideEffects,
+        escalation_policy: {
+          mode: profileInputs.escalationMode.value,
+          gate_threshold: profileInputs.escalationGateThreshold.value,
+          reject_threshold: profileInputs.escalationRejectThreshold.value,
+        },
       }),
     };
   }
@@ -802,6 +844,11 @@
     els.repoRows.addEventListener('change', handleRepoLinkChange);
     document.getElementById('manager-form').addEventListener('submit', handleManagerSubmit);
     els.managerRows.addEventListener('click', handleManagerClick);
+    document.getElementById('escalation-mode').addEventListener('change', () => {
+      document.getElementById('escalation-threshold-fields').classList.toggle(
+        'hidden', profileInputs.escalationMode.value !== 'structural_only'
+      );
+    });
   }
 
   function uniqueName(base) {

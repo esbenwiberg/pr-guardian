@@ -1770,6 +1770,7 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
         row.override_reasons = {
             "sticky_triggers": [asdict(t) for t in result.sticky_triggers],
             "finding_reasons": result.finding_reasons,
+            "gate_read": result.gate_read,
         }
         row.summary = result.summary
         row.pipeline_log = result.pipeline_log
@@ -2792,10 +2793,11 @@ def _unpack_override_reasons(raw: dict | list | None) -> dict:
         return {
             "sticky_triggers": raw.get("sticky_triggers", []),
             "finding_reasons": raw.get("finding_reasons", []),
+            "gate_read": raw.get("gate_read"),
         }
     if isinstance(raw, list):
-        return {"sticky_triggers": [], "finding_reasons": raw}
-    return {"sticky_triggers": [], "finding_reasons": []}
+        return {"sticky_triggers": [], "finding_reasons": raw, "gate_read": None}
+    return {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
 
 
 def _review_to_dict(row: ReviewRow) -> dict[str, Any]:

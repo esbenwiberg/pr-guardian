@@ -236,7 +236,7 @@ class TestUnpackOverrideReasons:
 
     def test_empty_dict_format(self):
         out = _unpack_override_reasons({"sticky_triggers": [], "finding_reasons": []})
-        assert out == {"sticky_triggers": [], "finding_reasons": []}
+        assert out == {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
 
     def test_legacy_list_format(self):
         raw = ["Old override reason A", "Old override reason B"]
@@ -246,11 +246,11 @@ class TestUnpackOverrideReasons:
 
     def test_none_input(self):
         out = _unpack_override_reasons(None)
-        assert out == {"sticky_triggers": [], "finding_reasons": []}
+        assert out == {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
 
     def test_unexpected_type_returns_empty(self):
         out = _unpack_override_reasons("unexpected string")
-        assert out == {"sticky_triggers": [], "finding_reasons": []}
+        assert out == {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

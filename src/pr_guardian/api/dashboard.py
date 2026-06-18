@@ -180,6 +180,53 @@ async def dashboard_review_detail(review_id: uuid.UUID):
         row["prior_dismissals"] = []
         row.setdefault("triage_counts", {"noise": 0, "fyi": 0, "decision": 0})
 
+    # Gate transparency data (structural_only mode only).
+    # gate_read carries the gate agent's verdict for non-gated auto-approved reviews
+    # (gated reviews already surface the reason via the gate_agent sticky trigger).
+    # escalation_mode lets the template know which rendering path to use.
+    gate_read = row.get("gate_read")
+    escalation_mode = "standard"
+    try:
+        ps = row.get("profile_snapshot") or {}
+        ep = ps.get("escalation_policy") or {}
+        escalation_mode = ep.get("mode") or "standard"
+    except Exception:
+        log.warning(
+            "gate_escalation_mode_read_failed",
+            review_id=str(review_id),
+        )
+    row["escalation_mode"] = escalation_mode
+    if escalation_mode == "structural_only":
+        if gate_read:
+            row["gate_read"] = gate_read
+        else:
+            # gate_read absent (legacy row or storage gap): derive from sticky triggers
+            gate_sticky = next(
+                (t for t in (row.get("sticky_triggers") or []) if t.get("kind") == "gate_agent"),
+                None,
+            )
+            if gate_sticky:
+                # Parse level from label: "Gate agent: HIGH danger" → "high".
+                # Fall back to "high" (fail-safe) if the label format has changed.
+                _valid_levels = {"none", "low", "medium", "high"}
+                _label_words = (gate_sticky.get("label") or "").lower().split()
+                _level = (
+                    _label_words[2]
+                    if len(_label_words) > 2 and _label_words[2] in _valid_levels
+                    else "high"
+                )
+                row["gate_read"] = {
+                    "level": _level,
+                    "reason": gate_sticky.get("reason", ""),
+                    "gated": True,
+                }
+            else:
+                row["gate_read"] = None
+                log.warning(
+                    "gate_read_missing_for_structural_only_review",
+                    review_id=str(review_id),
+                )
+
     return row
 
 

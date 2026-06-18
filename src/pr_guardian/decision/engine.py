@@ -13,7 +13,14 @@ from pr_guardian.models.context import (
     TrustTier,
     TrustTierResult,
 )
-from pr_guardian.models.findings import AgentResult, Certainty, Finding, Severity, Verdict
+from pr_guardian.models.findings import (
+    AgentResult,
+    Certainty,
+    Finding,
+    GateResult,
+    Severity,
+    Verdict,
+)
 from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.triage.hotspots import check_hotspot_hits
 
@@ -239,6 +246,7 @@ def resolve_decision(
     sticky_triggers: list[StickyTrigger],
     finding_reasons: list[str],
     target_branch: str,
+    gate_result: GateResult | None = None,
 ) -> Decision:
     """Apply the decision matrix + overrides to a set of findings.
 
@@ -252,9 +260,25 @@ def resolve_decision(
     review; only the finding-derived inputs (``score``, ``finding_reasons``,
     ``agent_results``) are recomputed from the re-evaluated findings.
 
+    ``gate_result`` is ``None`` in standard mode and in re-review (the cached
+    gate verdict is already in ``sticky_triggers``). In structural_only full
+    review the orchestrator computes it and passes it here.
+
     Mutates ``sticky_triggers`` and ``finding_reasons`` in place to record the
     trust-tier and branch/disabled escalations on the audit trail.
     """
+    # structural_only: bypass matrix + finding-based human escalation.
+    if config.escalation_policy.mode == "structural_only":
+        return _resolve_structural_only(
+            agent_results=agent_results,
+            score=score,
+            config=config,
+            trust_tier=trust_tier,
+            sticky_triggers=sticky_triggers,
+            finding_reasons=finding_reasons,
+            gate_result=gate_result,
+        )
+
     auto_approve_cfg = config.auto_approve
     branch_blocked = any(
         fnmatch(target_branch, p) for p in auto_approve_cfg.blocked_target_branches
@@ -312,6 +336,7 @@ def decide(
     risk_tier: RiskTier,
     config: GuardianConfig,
     trust_tier_result: TrustTierResult | None = None,
+    gate_result: GateResult | None = None,
 ) -> ReviewResult:
     """Apply decision matrix to produce final review decision.
 
@@ -336,6 +361,7 @@ def decide(
         sticky_triggers=sticky_triggers,
         finding_reasons=finding_reasons,
         target_branch=context.pr.target_branch,
+        gate_result=gate_result,
     )
 
     reviewer_group_override: str | None = None
@@ -381,34 +407,123 @@ def decide(
     return result
 
 
+def _reject_predicate(finding: Finding, config: GuardianConfig, threshold: str) -> bool:
+    """Return True when a finding meets the configured reject threshold."""
+    if threshold == "any":
+        return True
+    validated = validated_certainty(finding, config)
+    if validated != Certainty.DETECTED:
+        return False
+    if threshold == "medium_plus":
+        return (
+            finding.severity in (Severity.MEDIUM, Severity.HIGH, Severity.CRITICAL)
+            and finding.evidence_basis.suggestion_is_concrete
+        )
+    # confident_only (default)
+    return (
+        finding.severity in (Severity.HIGH, Severity.CRITICAL)
+        and finding.evidence_basis.suggestion_is_concrete
+    )
+
+
 def _check_reject(
     agent_results: list[AgentResult],
     config: GuardianConfig,
+    reject_threshold: str = "confident_only",
 ) -> list[str]:
-    """Check if findings are concrete enough to reject without human review.
+    """Check if findings meet the reject threshold.
 
-    Criteria: at least one finding that is validated as 'detected' certainty
-    with high or critical severity AND has a concrete suggestion.
+    Criteria for the default confident_only threshold: at least one finding
+    validated as 'detected' with high/critical severity and a concrete suggestion.
+    The threshold can be widened to medium_plus or any via the escalation policy.
     """
-    reasons: list[str] = []
-    actionable_count = 0
-
-    for result in agent_results:
-        for finding in result.findings:
-            validated = validated_certainty(finding, config)
-            if (
-                validated == Certainty.DETECTED
-                and finding.severity in (Severity.HIGH, Severity.CRITICAL)
-                and finding.evidence_basis.suggestion_is_concrete
-            ):
-                actionable_count += 1
-
+    actionable_count = sum(
+        1
+        for result in agent_results
+        for finding in result.findings
+        if _reject_predicate(finding, config, reject_threshold)
+    )
     if actionable_count >= 1:
-        reasons.append(
+        return [
             f"{actionable_count} high-confidence actionable finding(s) — "
             f"auto-rejected with fix suggestions"
+        ]
+    return []
+
+
+# Sticky trigger kinds that escalate to HUMAN_REVIEW in structural_only mode.
+# gate_agent is included so that replayed triggers from the original review
+# correctly re-escalate on re-review without a new gate agent call.
+_STRUCTURAL_STICKY_KINDS = frozenset(
+    {"new_dep", "repo_risk", "hotspot", "path_risk", "archmap_hub", "gate_agent"}
+)
+
+
+def _resolve_structural_only(
+    *,
+    agent_results: list[AgentResult],
+    score: float,
+    config: GuardianConfig,
+    trust_tier: TrustTier | None,
+    sticky_triggers: list[StickyTrigger],
+    finding_reasons: list[str],
+    gate_result: GateResult | None,
+) -> Decision:
+    """Structural-only decision branch.
+
+    Escalates to HUMAN_REVIEW only on structural triggers (trust tier, archmap hub,
+    existing structural stickies, or a gated gate_result). Finding-derived reasons
+    do not gate humans; they drive _check_reject (REJECT) or stay as comments.
+    Hard block still applies unconditionally.
+    """
+    decision = Decision.AUTO_APPROVE
+
+    # Trust tier: mandatory_human / human_primary always require a human.
+    if trust_tier in (TrustTier.MANDATORY_HUMAN, TrustTier.HUMAN_PRIMARY):
+        sticky_triggers.append(
+            StickyTrigger(
+                kind="trust_tier",
+                label=f"Trust tier: {trust_tier.value}",
+                source=trust_tier.value,
+                reason=f"Trust tier {trust_tier.value} requires human review",
+            )
         )
-    return reasons
+        decision = Decision.HUMAN_REVIEW
+
+    # Existing structural stickies (new_dep / repo_risk / hotspot / path_risk /
+    # archmap_hub) — also catches gate_agent triggers replayed from re-review.
+    if any(st.kind in _STRUCTURAL_STICKY_KINDS for st in sticky_triggers):
+        decision = Decision.HUMAN_REVIEW
+
+    # Gate agent: gated=True means the semantic gate fired (or errored closed).
+    # Guard against duplicate if a gate_agent sticky was already replayed from
+    # a prior review cycle (block 2 above already escalated via it).
+    if gate_result is not None and gate_result.gated:
+        if not any(st.kind == "gate_agent" for st in sticky_triggers):
+            sticky_triggers.append(
+                StickyTrigger(
+                    kind="gate_agent",
+                    label=f"Gate agent: {gate_result.level.upper()} danger",
+                    source="gate_agent",
+                    reason=gate_result.reason,
+                )
+            )
+        decision = Decision.HUMAN_REVIEW
+
+    # Findings drive REJECT (not human review) at the configured threshold.
+    # This runs unconditionally — a confident finding on safe paths → REJECT,
+    # not AUTO_APPROVE; and REJECT overrides HUMAN_REVIEW when both fire.
+    reject_threshold = config.escalation_policy.reject_threshold
+    reject_reasons = _check_reject(agent_results, config, reject_threshold=reject_threshold)
+    if reject_reasons:
+        decision = Decision.REJECT
+        finding_reasons.extend(reject_reasons)
+
+    # Hard block is unconditional and always wins.
+    if score >= config.thresholds.hard_block_score:
+        decision = Decision.HARD_BLOCK
+
+    return decision
 
 
 def _apply_matrix(

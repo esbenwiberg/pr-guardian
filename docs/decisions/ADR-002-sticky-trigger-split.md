@@ -5,6 +5,10 @@ Accepted — 2026-05-25. Implemented in `DecisionResult.sticky_triggers`,
 `DecisionResult.finding_reasons`, dashboard payloads, and storage compatibility
 for legacy `override_reasons` rows.
 
+**Amendment — ADR-011 (2026-06-17):** `gate_agent` added to the closed kind set
+to support the structural-only escalation policy. See
+`docs/decisions/ADR-011-structural-only-escalation.md`.
+
 ADR-005 is a proposed future amendment; it is not part of the live trigger
 contract until accepted and implemented.
 
@@ -52,6 +56,15 @@ ADR-005 proposes adding `config_policy` and structured
 Adding any further kind requires another ADR amendment, not a silent enum
 extension.
 
+**Note on `archmap_hub`:** this kind was added to `StickyTriggerKind` in
+`decision/types.py` as part of the archmap feature (prior to ADR-011) without
+a standalone ADR amendment. It is a structural trigger in the same spirit as the
+original six kinds; no separate ADR was authored at that time. Its presence is
+acknowledged here for completeness.
+
+**Note on `gate_agent`:** added by ADR-011 (2026-06-17); see
+`docs/decisions/ADR-011-structural-only-escalation.md`.
+
 ## Consequences
 
 **Easier:** verification mode becomes expressible — `finding_reasons` empty
@@ -65,4 +78,5 @@ internal-only payload — risk acceptable per user decision.
 
 **Committed to:** the closed kind set is a contract. Future structural reasons
 must either map to an existing kind or trigger an ADR update. If ADR-005 is
-accepted, the closed set will expand to include `config_policy`.
+accepted, the closed set will expand to include `config_policy`. ADR-011
+expanded the set with `gate_agent` (2026-06-17).
