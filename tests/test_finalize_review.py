@@ -312,6 +312,60 @@ def test_finalize_approve_flips_guardian_review_status_to_success(client, monkey
     assert "set_status:success" in resp.json()["actions"]
 
 
+def test_finalize_approve_also_flips_guardian_readiness_to_success(client, monkeypatch):
+    """A finalized review must also re-assert guardian/readiness=success.
+
+    By finalize time the readiness candidate is terminal (reviewed), so nothing
+    else moves the check off its last value. A PR finalized while readiness was
+    mid-flight (e.g. checks_pending right after an update-branch) would otherwise
+    strand the required readiness check and block merge forever.
+    """
+    review = _github_review()
+    adapter = _make_adapter()
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "approve",
+            "comment_mode": "summary",
+            "comment_to_author": "",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    adapter.set_readiness_status.assert_awaited_once()
+    state = adapter.set_readiness_status.await_args.args[1]
+    assert state == "success"
+    assert "set_readiness:success" in resp.json()["actions"]
+
+
+def test_finalize_request_changes_still_flips_readiness_success(client, monkeypatch):
+    """Readiness = "the review ran", independent of verdict. Even a decline must
+    clear guardian/readiness (guardian/review carries the blocking failure), or
+    the readiness check stays stranded."""
+    review = _github_review()
+    adapter = _make_adapter()
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "request_changes",
+            "comment_mode": "summary",
+            "comment_to_author": "fix it",
+            "decisions": {},
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    adapter.set_readiness_status.assert_awaited_once()
+    assert adapter.set_readiness_status.await_args.args[1] == "success"
+    # guardian/review still carries the blocking verdict.
+    assert adapter.set_review_status.await_args.args[1] == "failure"
+
+
 def test_github_finalize_uses_review_pat_name(client, monkeypatch):
     review = _github_review()
     adapter = _make_adapter()
@@ -356,6 +410,7 @@ def test_github_request_changes_422_falls_back_to_comment(client, monkeypatch):
         "request_changes_rejected",
         "post_comment_fallback",
         "set_status:failure",
+        "set_readiness:success",
     ]
     adapter.request_changes.assert_awaited_once()
     adapter.post_comment.assert_awaited_once()
@@ -489,6 +544,7 @@ def test_finalize_inline_omits_finding_list_when_inline_comments_post(client, mo
         "post_inline_comments",
         "request_changes",
         "set_status:failure",
+        "set_readiness:success",
     ]
     summary = adapter.request_changes.await_args.args[1]
     assert "Fix-requested findings" not in summary

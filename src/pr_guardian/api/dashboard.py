@@ -987,6 +987,25 @@ async def submit_verdict(
                     pr, "failure", f"Guardian: changes requested by {reviewer}", review_url or ""
                 )
                 actions.append("set_status:failure")
+
+        # A finalized review also satisfies the readiness gate. By now the
+        # readiness candidate is terminal (reviewed), so nothing else re-asserts
+        # guardian/readiness — a PR finalized while readiness was mid-flight
+        # (e.g. checks_pending right after an update-branch) stays stranded on a
+        # stale required check. Re-post success here, mirroring _post_results
+        # (orchestrator.py). Unconditional: readiness means "the review ran";
+        # guardian/review carries the verdict. Best-effort — informational only.
+        readiness_fn = getattr(adapter, "set_readiness_status", None)
+        if readiness_fn is not None:
+            try:
+                await readiness_fn(pr, "success", "Guardian readiness: review_completed")
+                actions.append("set_readiness:success")
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "finalize_readiness_reassert_failed",
+                    review_id=str(review_id),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
     except Exception as exc:  # noqa: BLE001 — surface any platform error to the caller
         posted = False
         error = f"{type(exc).__name__}: {exc}"

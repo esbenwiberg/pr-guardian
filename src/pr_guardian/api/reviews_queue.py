@@ -1240,6 +1240,27 @@ async def finalize_review(
                         pr, "failure", f"Guardian: blocked by {reviewer}", review_url or ""
                     )
                     actions.append("set_status:failure")
+
+            # A finalized review also satisfies the readiness gate. By now the
+            # readiness candidate is terminal (reviewed), so nothing else will
+            # move guardian/readiness off its last value — e.g. a mid-flight
+            # checks_pending posted right after an update-branch stays stranded,
+            # blocking merge on a stale required check. Re-assert success here,
+            # mirroring the automated _post_results path (orchestrator.py).
+            # Unconditional: readiness means "the review ran"; guardian/review
+            # carries the verdict. Best-effort — the readiness check is
+            # informational and must not break finalize.
+            readiness_fn = getattr(adapter, "set_readiness_status", None)
+            if readiness_fn is not None:
+                try:
+                    await readiness_fn(pr, "success", "Guardian readiness: review_completed")
+                    actions.append("set_readiness:success")
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "finalize_readiness_reassert_failed",
+                        review_id=review_id,
+                        error=_format_platform_error(exc),
+                    )
         except Exception as exc:  # noqa: BLE001
             posted = False
             error = _format_platform_error(exc)
