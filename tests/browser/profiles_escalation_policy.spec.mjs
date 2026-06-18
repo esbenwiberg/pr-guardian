@@ -9,6 +9,7 @@
  *   - selections-persist: Save then reload shows the persisted selections.
  */
 
+import fsSync from "node:fs";
 import fs from "node:fs/promises";
 import http from "node:http";
 import path from "node:path";
@@ -22,7 +23,9 @@ try {
 
 const html = await fs.readFile("src/pr_guardian/dashboard/profiles.html", "utf8");
 const bundledChromium = "/opt/pw-browsers/chromium-1223/chrome-linux/chrome";
-const launchOptions = fs.stat(bundledChromium).then(() => ({ executablePath: bundledChromium })).catch(() => ({}));
+const launchOptions = fsSync.existsSync(bundledChromium)
+  ? { executablePath: bundledChromium }
+  : {};
 const staticFiles = {
   "/static/sidebar.js": await fs.readFile("src/pr_guardian/dashboard/static/sidebar.js", "utf8"),
   "/static/command-palette.js": await fs.readFile(
@@ -127,8 +130,7 @@ async function startServer() {
 
 async function withPage(fn) {
   const { server, url, state } = await startServer();
-  const opts = await launchOptions;
-  const browser = await chromium.launch(opts);
+  const browser = await chromium.launch(launchOptions);
   const page = await browser.newPage({ viewport: { width: 1440, height: 980 } });
   try {
     await page.goto(url);
