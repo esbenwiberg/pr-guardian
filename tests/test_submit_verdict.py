@@ -84,8 +84,7 @@ def _patch_endpoint_deps(monkeypatch, fake_review, mock_adapter, *, dismissals=N
     monkeypatch.setattr(dash.storage, "get_review", _get_review)
     monkeypatch.setattr(dash.storage, "append_review_log_entry", _append)
     monkeypatch.setattr(dash.storage, "get_active_dismissals", _active_dismissals)
-    monkeypatch.setattr(dash, "create_adapter", lambda _platform: mock_adapter)
-    monkeypatch.setattr(dash, "create_github_adapter", AsyncMock(return_value=mock_adapter))
+    monkeypatch.setattr(dash, "create_adapter_for_review", AsyncMock(return_value=mock_adapter))
     return appended
 
 
