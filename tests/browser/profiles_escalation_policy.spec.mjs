@@ -268,15 +268,17 @@ const tests = {
       if (ep.gate_threshold !== "high") throw new Error(`Expected gate_threshold high, got ${ep.gate_threshold}`);
       if (ep.reject_threshold !== "medium_plus") throw new Error(`Expected reject_threshold medium_plus, got ${ep.reject_threshold}`);
 
-      // Reload the page — saved data should be reflected in the form
+      // Reload the page — saved data should be reflected in the form.
+      // Wait for threshold fields to be visible — that proves the form was
+      // rendered with the persisted structural_only mode (not just the DOM default).
       await page.reload();
       await page.locator("#profile-list").waitFor();
+      await thresholdFields.waitFor({ state: "visible" });
 
       const reloadedMode = await modeSelect.inputValue();
       if (reloadedMode !== "structural_only") {
         throw new Error(`After reload mode should be structural_only, got ${reloadedMode}`);
       }
-      await thresholdFields.waitFor({ state: "visible" });
 
       const reloadedGate = await gateThreshold.inputValue();
       if (reloadedGate !== "high") {
