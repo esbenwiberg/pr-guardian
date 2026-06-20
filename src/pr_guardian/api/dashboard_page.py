@@ -36,7 +36,9 @@ _REVIEWS_QUEUE_HTML = _DASHBOARD_DIR / "reviews_queue.html"
 _LIVE_PROGRESS_HTML = _DASHBOARD_DIR / "live_progress.html"
 _REVIEW_DETAIL_HTML = _DASHBOARD_DIR / "review_detail.html"
 _SCANS_HTML = _DASHBOARD_DIR / "scans.html"
-_SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"  # consolidated hub (LLM + Prompts + Admin inlined)
+_SETTINGS_HTML = (
+    _DASHBOARD_DIR / "settings.html"
+)  # consolidated hub (LLM + Prompts + Admin inlined)
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
 _HUMAN_WIZARD_HTML = _DASHBOARD_DIR / "human_wizard.html"

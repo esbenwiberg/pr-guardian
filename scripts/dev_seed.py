@@ -201,7 +201,9 @@ def _clean_companions(seed_path: str) -> list[str]:
     return [f"tests/test_{stem}.py", f"docs/{stem}.md"]
 
 
-def _build_dev_diffs(rows: list, defaults: dict[uuid.UUID, dict[str, list[int]]]) -> dict[str, dict]:
+def _build_dev_diffs(
+    rows: list, defaults: dict[uuid.UUID, dict[str, list[int]]]
+) -> dict[str, dict]:
     """Derive a realistic per-review stored diff from the seeded findings.
 
     Files with findings get a hunk covering each finding line (so 'Show code'
@@ -217,9 +219,9 @@ def _build_dev_diffs(rows: list, defaults: dict[uuid.UUID, dict[str, list[int]]]
         elif isinstance(r, MechanicalResultRow):
             for mf in r.findings or []:
                 if mf.get("file"):
-                    review_files.setdefault(r.review_id, {}).setdefault(
-                        mf["file"], []
-                    ).append(mf.get("line") or 1)
+                    review_files.setdefault(r.review_id, {}).setdefault(mf["file"], []).append(
+                        mf.get("line") or 1
+                    )
     for rid, file_lines in defaults.items():
         review_files.setdefault(rid, file_lines)
 
