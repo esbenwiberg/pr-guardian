@@ -6,9 +6,10 @@
 <title>PR Guardian — Settings</title>
 <link rel="stylesheet" href="/static/styles.css">
 <style>
-  /* Hub layout: nav rail + section column. Each section frames a legacy
-     single-purpose page via /_embed/settings/* so their existing scripts
-     keep working in isolation. */
+  /* Hub layout: nav rail + section column. All three legacy single-purpose
+     pages are now inlined directly into this page (no iframes); each page's
+     script logic is wrapped in its own IIFE to keep its top-level globals
+     isolated. */
   .settings-hub {
     display: grid;
     grid-template-columns: 200px 1fr;
@@ -54,17 +55,54 @@
   .settings-section p.sub {
     font-size: 12.5px; color: rgb(148, 163, 184); margin: 0 0 16px 0;
   }
-  .settings-frame {
-    width: 100%;
-    height: 900px;
-    border: 1px solid rgb(51, 65, 85);
-    border-radius: 10px;
-    background: rgb(2, 6, 23);
+
+  /* Admin sub-section anchors — sit below the sticky header when scrolled to. */
+  #keys, #admins, #pats, #exclusions { scroll-margin-top: 70px; }
+
+  /* --- Inlined from settings_llm.html --- */
+  .provider-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 0.75rem 1rem;
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    border-radius: 0.5rem;
+    background: transparent;
+    color: #e2e8f0;
+    cursor: pointer;
+    transition: all 0.15s ease;
   }
-  /* Smaller frames where it makes sense */
-  iframe[data-pane="llm"]     { height: 760px; }
-  iframe[data-pane="prompts"] { height: 920px; }
-  iframe[data-pane="admin"]   { height: 2200px; }
+  .provider-btn:hover {
+    border-color: rgba(100, 116, 139, 0.5);
+    background: rgba(100, 116, 139, 0.08);
+  }
+  .provider-btn.active {
+    border-color: #34d399;
+    background: rgba(52, 211, 153, 0.1);
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.3);
+  }
+  .form-input {
+    background: rgba(15, 23, 42, 0.6);
+    border: 1px solid rgba(100, 116, 139, 0.3);
+    border-radius: 0.375rem;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8125rem;
+    color: #e2e8f0;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+  .form-input:focus {
+    border-color: #34d399;
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.3);
+  }
+  .form-input::placeholder {
+    color: #475569;
+  }
+
+  /* --- Inlined from admin.html --- */
+  .src-gh  { background: #21262d; color: #58a6ff; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
+  .src-ado { background: #1a1f3a; color: #a78bfa; border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600; }
 </style>
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
@@ -75,7 +113,7 @@
 <div class="ml-16 lg:ml-64">
   <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
     <h1 class="text-lg font-semibold text-slate-50">Settings</h1>
-    <span class="text-2xs text-slate-500">Admin-only</span>
+    <span class="text-2xs text-slate-500" id="identity-badge">Admin-only</span>
   </header>
 
   <div class="max-w-[1100px] mx-auto px-6 py-6">
@@ -86,80 +124,949 @@
         <a href="#prompts" data-target="prompts">Agent Prompts</a>
         <a href="#admin"   data-target="admin">Admin</a>
         <div class="rail-sub" data-parent="admin">
-          <a href="#admin" data-iframe-hash="keys"       data-target="admin">API Keys</a>
-          <a href="#admin" data-iframe-hash="admins"     data-target="admin">Admins</a>
-          <a href="#admin" data-iframe-hash="pats"       data-target="admin">GitHub PATs</a>
-          <a href="#admin" data-iframe-hash="exclusions" data-target="admin">Exclusions</a>
+          <a href="#keys"       data-target="admin" data-sub="keys">API Keys</a>
+          <a href="#admins"     data-target="admin" data-sub="admins">Admins</a>
+          <a href="#pats"       data-target="admin" data-sub="pats">GitHub PATs</a>
+          <a href="#exclusions" data-target="admin" data-sub="exclusions">Exclusions</a>
         </div>
       </nav>
 
       <!-- Sections -->
       <div class="space-y-10">
 
+        <!-- ================= LLM Provider ================= -->
         <section id="llm" class="settings-section">
           <h2>LLM Provider</h2>
           <p class="sub">Choose how PR Guardian connects to Claude.</p>
-          <iframe class="settings-frame" data-pane="llm" src="/_embed/settings/llm?embed=1" title="LLM Provider"></iframe>
+
+          <div class="space-y-6">
+            <!-- Provider Card -->
+            <div class="card p-6">
+              <p class="text-xs text-slate-400 mb-5">Azure AI Foundry routes requests through your Azure subscription.</p>
+
+              <div class="flex gap-3 mb-5" id="provider-toggle">
+                <button class="provider-btn" data-provider="anthropic" onclick="selectProvider('anthropic')">
+                  <span class="font-medium text-sm">Anthropic (Direct)</span>
+                  <span class="text-2xs text-slate-400 mt-0.5">api.anthropic.com</span>
+                </button>
+                <button class="provider-btn" data-provider="azure-ai-foundry" onclick="selectProvider('azure-ai-foundry')">
+                  <span class="font-medium text-sm">Azure AI Foundry</span>
+                  <span class="text-2xs text-slate-400 mt-0.5">Your Azure endpoint</span>
+                </button>
+              </div>
+
+              <!-- Anthropic Section -->
+              <div id="section-anthropic" class="space-y-3">
+                <div>
+                  <label class="text-xs font-medium text-slate-300 block mb-1">API Key</label>
+                  <div class="flex gap-2 items-center">
+                    <input type="password" id="anthropic-key" class="form-input flex-1" placeholder="sk-ant-..." autocomplete="off">
+                    <span class="text-2xs text-slate-500 shrink-0" id="anthropic-key-status"></span>
+                  </div>
+                  <p class="text-2xs text-slate-500 mt-1">Leave blank to keep the current key. Can also be set via <code class="text-slate-400">ANTHROPIC_API_KEY</code> env var.</p>
+                </div>
+              </div>
+
+              <!-- Azure AI Foundry Section -->
+              <div id="section-azure" class="space-y-3 hidden">
+                <div>
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Endpoint URL</label>
+                  <input type="url" id="azure-endpoint" class="form-input w-full" placeholder="https://your-resource.services.ai.azure.com/models" autocomplete="off">
+                  <p class="text-2xs text-slate-500 mt-1">Your Azure AI Foundry model endpoint URL.</p>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-300 block mb-1">API Key</label>
+                  <div class="flex gap-2 items-center">
+                    <input type="password" id="azure-key" class="form-input flex-1" placeholder="Azure AI Foundry key..." autocomplete="off">
+                    <span class="text-2xs text-slate-500 shrink-0" id="azure-key-status"></span>
+                  </div>
+                  <p class="text-2xs text-slate-500 mt-1">Leave blank to keep the current key. Can also be set via <code class="text-slate-400">AZURE_AI_FOUNDRY_API_KEY</code> env var.</p>
+                </div>
+              </div>
+
+              <!-- Model -->
+              <div class="mt-5 pt-5 border-t border-slate-700/50">
+                <label class="text-xs font-medium text-slate-300 block mb-1">Default Model</label>
+                <select id="default-model" class="form-input w-full">
+                  <optgroup label="Anthropic">
+                    <option value="claude-sonnet-4-6">Claude Sonnet 4 (claude-sonnet-4-6)</option>
+                    <option value="claude-opus-4-7">Claude Opus 4 (claude-opus-4-7)</option>
+                  </optgroup>
+                  <optgroup label="OpenAI GPT-5">
+                    <option value="gpt-5">GPT-5</option>
+                    <option value="gpt-5.2">GPT-5.2</option>
+                    <option value="gpt-5.4">GPT-5.4</option>
+                    <option value="gpt-5.5">GPT-5.5</option>
+                  </optgroup>
+                </select>
+                <p class="text-2xs text-slate-500 mt-1">Applied to all agents unless overridden per-agent in <code class="text-slate-400">review.yml</code>.</p>
+              </div>
+
+              <!-- Save -->
+              <div class="flex items-center gap-3 mt-6 pt-4 border-t border-slate-700/50">
+                <button class="btn btn-primary btn-sm" onclick="saveSettings()">Save Settings</button>
+                <span class="text-xs text-slate-400" id="save-status"></span>
+              </div>
+            </div>
+
+            <!-- Info Card -->
+            <div class="card p-5">
+              <h3 class="text-xs font-semibold text-slate-300 mb-2">How it works</h3>
+              <ul class="text-2xs text-slate-400 space-y-1.5 list-disc list-inside">
+                <li><strong class="text-slate-300">Anthropic (Direct)</strong> sends requests to the Anthropic API. Requires an Anthropic API key.</li>
+                <li><strong class="text-slate-300">Azure AI Foundry</strong> routes requests through your Azure endpoint using the Anthropic SDK's base URL parameter. Same Claude models, different billing path.</li>
+                <li>Settings saved here override environment variables. On restart, DB-stored settings are re-applied automatically.</li>
+                <li>API keys are stored in the database and never returned in full via the API.</li>
+              </ul>
+            </div>
+          </div>
         </section>
 
+        <!-- ================= Agent Prompts ================= -->
         <section id="prompts" class="settings-section">
           <h2>Agent Prompts</h2>
           <p class="sub">Edit the prompts each review agent runs.</p>
-          <iframe class="settings-frame" data-pane="prompts" src="/_embed/settings/prompts?embed=1" title="Agent Prompts"></iframe>
+
+          <div class="card overflow-hidden">
+            <div class="flex min-h-[520px]">
+              <!-- Agent sidebar -->
+              <div class="w-[220px] shrink-0 border-r border-slate-700/50 py-3 overflow-y-auto" id="prompt-sidebar">
+                <div class="text-center py-10 text-slate-400 text-sm">Loading agents...</div>
+              </div>
+              <!-- Editor pane -->
+              <div class="flex-1 flex flex-col p-5 min-w-0" id="prompt-editor">
+                <div class="p-10 text-center text-slate-400">Select an agent to edit its prompt</div>
+              </div>
+            </div>
+          </div>
         </section>
 
+        <!-- ================= Admin ================= -->
         <section id="admin" class="settings-section">
           <h2>Admin</h2>
           <p class="sub">API keys, admins, GitHub PATs, and exclusions.</p>
-          <iframe id="admin-frame" class="settings-frame" data-pane="admin" src="/_embed/settings/admin?embed=1" title="Admin"></iframe>
+
+          <div class="space-y-6">
+
+            <!-- API Keys Card -->
+            <div id="keys" class="card p-6">
+              <h3 class="text-[15px] font-semibold mb-1">API Keys</h3>
+              <p class="text-xs text-slate-400 mb-5">Create keys for agents and CI bots to authenticate without OIDC. Keys are shown once at creation.</p>
+
+              <!-- Create Form -->
+              <div class="flex flex-wrap gap-3 items-end mb-5">
+                <div class="flex-1 min-w-[160px]">
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Name</label>
+                  <input type="text" id="key-name" class="form-input w-full" placeholder="e.g. ci-bot, github-action">
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Scopes</label>
+                  <div class="flex gap-3 items-center h-[38px]">
+                    <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                      <input type="checkbox" id="scope-read" checked disabled class="form-checkbox"> read
+                    </label>
+                    <label class="flex items-center gap-1.5 text-xs text-slate-300 cursor-pointer">
+                      <input type="checkbox" id="scope-write" class="form-checkbox"> write
+                    </label>
+                  </div>
+                </div>
+                <div>
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Expires</label>
+                  <select id="key-expiry" class="form-input">
+                    <option value="">Never</option>
+                    <option value="30">30 days</option>
+                    <option value="90">90 days</option>
+                    <option value="365">1 year</option>
+                  </select>
+                </div>
+                <button class="btn btn-primary btn-sm h-[38px]" onclick="createKey()">Create Key</button>
+              </div>
+
+              <!-- One-time key display -->
+              <div id="new-key-alert" class="hidden mb-5 p-4 rounded-lg border border-emerald-400/30 bg-emerald-400/[0.06]">
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="text-emerald-400 text-sm font-semibold">Key created</span>
+                  <span class="text-2xs text-slate-400">Copy it now — it won't be shown again</span>
+                </div>
+                <div class="flex gap-2 items-center">
+                  <code class="flex-1 text-sm font-mono text-emerald-300 bg-slate-800/60 px-3 py-2 rounded select-all break-all" id="new-key-value"></code>
+                  <button class="btn btn-sm btn-secondary shrink-0" onclick="copyKey()">Copy</button>
+                </div>
+              </div>
+
+              <!-- Keys Table -->
+              <div id="keys-loading" class="text-xs text-slate-400 py-4">Loading...</div>
+              <div id="keys-empty" class="hidden text-xs text-slate-400 py-4">No API keys yet. Create one to let CI bots and agents call Guardian.</div>
+              <table id="keys-table" class="hidden w-full text-xs">
+                <thead>
+                  <tr class="text-left text-slate-400 border-b border-slate-700/50">
+                    <th class="pb-2 font-medium">Name</th>
+                    <th class="pb-2 font-medium">Prefix</th>
+                    <th class="pb-2 font-medium">Scopes</th>
+                    <th class="pb-2 font-medium">Created</th>
+                    <th class="pb-2 font-medium">Last Used</th>
+                    <th class="pb-2 font-medium">Status</th>
+                    <th class="pb-2 font-medium"></th>
+                  </tr>
+                </thead>
+                <tbody id="keys-body"></tbody>
+              </table>
+            </div>
+
+            <!-- Admins Card -->
+            <div id="admins" class="card p-6">
+              <h3 class="text-[15px] font-semibold mb-1">Admins</h3>
+              <p class="text-xs text-slate-400 mb-5">Admins can manage API keys, prompts, and LLM settings. Add by email (must match Entra ID login).</p>
+
+              <!-- Add Form -->
+              <div class="flex gap-3 items-end mb-5">
+                <div class="flex-1">
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Email</label>
+                  <input type="email" id="admin-email" class="form-input w-full" placeholder="user@example.com" onkeydown="if(event.key==='Enter')addAdmin()">
+                </div>
+                <button class="btn btn-primary btn-sm h-[38px]" onclick="addAdmin()">Add Admin</button>
+              </div>
+
+              <!-- Admins Table -->
+              <div id="admins-loading" class="text-xs text-slate-400 py-4">Loading...</div>
+              <div id="admins-empty" class="hidden text-xs text-slate-400 py-4">Only you so far. Add admins by email (must match their Entra ID login).</div>
+              <table id="admins-table" class="hidden w-full text-xs">
+                <thead>
+                  <tr class="text-left text-slate-400 border-b border-slate-700/50">
+                    <th class="pb-2 font-medium">Email</th>
+                    <th class="pb-2 font-medium">Added By</th>
+                    <th class="pb-2 font-medium">Added</th>
+                    <th class="pb-2 font-medium"></th>
+                  </tr>
+                </thead>
+                <tbody id="admins-body"></tbody>
+              </table>
+            </div>
+
+            <!-- GitHub PATs -->
+            <div id="pats" class="card p-6">
+              <h3 class="text-[15px] font-semibold mb-1">GitHub PATs</h3>
+              <p class="text-xs text-slate-400">GitHub access is managed through GitHub App Connections, not personal access tokens. Manage Connections from the <a href="/profiles" class="text-emerald-400 hover:text-emerald-300 transition-colors">Profiles &amp; Connections</a> page.</p>
+            </div>
+
+            <!-- Exclusion Rules -->
+            <div id="exclusions" class="card p-6">
+              <div class="flex items-center justify-between mb-4">
+                <div>
+                  <h3 class="text-sm font-semibold">Exclusion Rules</h3>
+                  <p class="text-xs text-slate-400 mt-0.5">Wildcard rules that hide entire orgs, projects, or repo patterns from sync and dashboard. Use <code class="text-slate-300">*</code> and <code class="text-slate-300">?</code> as wildcards. Empty pattern = match anything.</p>
+                </div>
+              </div>
+
+              <!-- Create form -->
+              <div class="flex flex-wrap gap-3 items-end mb-5">
+                <div>
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Platform</label>
+                  <select id="rule-platform" class="form-input" onchange="onRulePlatformChange()">
+                    <option value="github">GitHub</option>
+                    <option value="ado">Azure DevOps</option>
+                  </select>
+                </div>
+                <div class="flex-1 min-w-[140px]">
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Org pattern</label>
+                  <input type="text" id="rule-org" class="form-input w-full" placeholder="e.g. acme or acme-*">
+                </div>
+                <div class="flex-1 min-w-[140px]" id="rule-project-wrap" style="display:none">
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Project pattern</label>
+                  <input type="text" id="rule-project" class="form-input w-full" placeholder="e.g. LegacyApps">
+                </div>
+                <div class="flex-1 min-w-[140px]">
+                  <label class="text-xs font-medium text-slate-300 block mb-1">Repo pattern</label>
+                  <input type="text" id="rule-repo" class="form-input w-full" placeholder="e.g. test-* or *">
+                </div>
+                <button class="btn btn-primary btn-sm h-[38px]" onclick="createRule()">Add Rule</button>
+              </div>
+
+              <div id="rules-loading" class="text-xs text-slate-400 py-4">Loading…</div>
+              <div id="rules-empty" class="hidden text-xs text-slate-400 py-4">No exclusion rules.</div>
+              <table id="rules-table" class="hidden w-full text-xs">
+                <thead><tr class="text-left text-slate-400 border-b border-slate-700">
+                  <th class="pb-2 font-medium">Platform</th>
+                  <th class="pb-2 font-medium">Org</th>
+                  <th class="pb-2 font-medium">Project</th>
+                  <th class="pb-2 font-medium">Repo</th>
+                  <th class="pb-2 font-medium">Added by</th>
+                  <th class="pb-2 font-medium">Date</th>
+                  <th class="pb-2 font-medium"></th>
+                </tr></thead>
+                <tbody id="rules-body"></tbody>
+              </table>
+            </div>
+
+            <!-- Excluded Repos -->
+            <div class="card p-6">
+              <div class="flex items-center justify-between mb-4">
+                <div>
+                  <h3 class="text-sm font-semibold">Excluded Repos</h3>
+                  <p class="text-xs text-slate-400 mt-0.5">Individual repo exclusions. Users can exclude repos via the dashboard panel; for bulk filtering use Exclusion Rules above.</p>
+                </div>
+              </div>
+              <div id="repos-loading" class="text-xs text-slate-400 py-4">Loading…</div>
+              <div id="repos-empty" class="hidden text-xs text-slate-400 py-4">No excluded repos.</div>
+              <table id="repos-table" class="hidden w-full text-xs">
+                <thead><tr class="text-left text-slate-400 border-b border-slate-700">
+                  <th class="pb-2 font-medium">Platform</th>
+                  <th class="pb-2 font-medium">Repo</th>
+                  <th class="pb-2 font-medium">Excluded by</th>
+                  <th class="pb-2 font-medium">Date</th>
+                  <th class="pb-2 font-medium"></th>
+                </tr></thead>
+                <tbody id="repos-body"></tbody>
+              </table>
+            </div>
+
+          </div>
         </section>
       </div>
     </div>
   </div>
 </div>
 
+<!-- Shared toast (admin's structure; used by all three sections) -->
+<div id="toast" class="fixed bottom-6 right-6 z-50 hidden">
+  <div class="px-4 py-2 rounded-lg text-sm shadow-lg" id="toast-inner"></div>
+</div>
+
+<!-- ================= Shared helpers (defined ONCE, before the IIFEs) ================= -->
+<script>
+// Single shared toast for all three sections. The LLM and Prompts pages call
+// showToast(msg) with no type; default to 'success'.
+function showToast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  const inner = document.getElementById('toast-inner');
+  inner.textContent = msg;
+  inner.className = 'px-4 py-2 rounded-lg text-sm shadow-lg ' + (
+    type === 'error' ? 'bg-red-500/90 text-white' : 'bg-emerald-500/90 text-white'
+  );
+  t.classList.remove('hidden');
+  clearTimeout(t._timer);
+  t._timer = setTimeout(() => t.classList.add('hidden'), 3500);
+}
+</script>
+
+<!-- ================= LLM Provider logic (from settings_llm.html) ================= -->
+<script>
+(function () {
+  'use strict';
+  const API = '/api/dashboard';
+  let currentProvider = 'anthropic';
+  let settingsData = null;
+
+  async function loadSettings() {
+    try {
+      const resp = await fetch(`${API}/settings`);
+      settingsData = await resp.json();
+      currentProvider = settingsData.active_provider || 'anthropic';
+      renderProvider();
+      renderKeyStatuses();
+      if (settingsData.default_model) {
+        document.getElementById('default-model').value = settingsData.default_model;
+      }
+    } catch (e) {
+      console.error('Failed to load settings', e);
+    }
+  }
+
+  function selectProvider(provider) {
+    currentProvider = provider;
+    renderProvider();
+  }
+
+  function renderProvider() {
+    document.querySelectorAll('.provider-btn').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.provider === currentProvider);
+    });
+    document.getElementById('section-anthropic').classList.toggle('hidden', currentProvider !== 'anthropic');
+    document.getElementById('section-azure').classList.toggle('hidden', currentProvider !== 'azure-ai-foundry');
+  }
+
+  function renderKeyStatuses() {
+    if (!settingsData) return;
+
+    const anthropicStatus = document.getElementById('anthropic-key-status');
+    const azureStatus = document.getElementById('azure-key-status');
+
+    if (settingsData.anthropic.api_key_masked) {
+      anthropicStatus.textContent = `Current: ${settingsData.anthropic.api_key_masked} (${settingsData.anthropic.api_key_source})`;
+    } else {
+      anthropicStatus.textContent = 'Not configured';
+      anthropicStatus.classList.add('text-amber-400');
+    }
+
+    if (settingsData.azure_ai_foundry.api_key_masked) {
+      azureStatus.textContent = `Current: ${settingsData.azure_ai_foundry.api_key_masked} (${settingsData.azure_ai_foundry.api_key_source})`;
+    } else {
+      azureStatus.textContent = 'Not configured';
+      azureStatus.classList.add('text-amber-400');
+    }
+
+    if (settingsData.azure_ai_foundry.endpoint_url) {
+      document.getElementById('azure-endpoint').value = settingsData.azure_ai_foundry.endpoint_url;
+    }
+  }
+
+  async function saveSettings() {
+    const status = document.getElementById('save-status');
+    status.textContent = 'Saving...';
+    status.className = 'text-xs text-slate-400';
+
+    const body = {
+      active_provider: currentProvider,
+      default_model: document.getElementById('default-model').value,
+    };
+
+    const anthropicKey = document.getElementById('anthropic-key').value.trim();
+    if (anthropicKey) body.anthropic_api_key = anthropicKey;
+
+    const azureEndpoint = document.getElementById('azure-endpoint').value.trim();
+    if (currentProvider === 'azure-ai-foundry') {
+      body.azure_endpoint_url = azureEndpoint;
+    } else if (azureEndpoint) {
+      body.azure_endpoint_url = azureEndpoint;
+    }
+
+    const azureKey = document.getElementById('azure-key').value.trim();
+    if (azureKey) body.azure_api_key = azureKey;
+
+    try {
+      const resp = await fetch(`${API}/settings`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const result = await resp.json();
+
+      if (result.status === 'error') {
+        status.textContent = result.detail;
+        status.className = 'text-xs text-red-400';
+        showToast(result.detail, 'error');
+        return;
+      }
+
+      status.textContent = 'Settings saved';
+      status.className = 'text-xs text-emerald-400';
+      showToast('Settings saved', 'success');
+
+      document.getElementById('anthropic-key').value = '';
+      document.getElementById('azure-key').value = '';
+      await loadSettings();
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.className = 'text-xs text-red-400';
+      showToast('Save failed: ' + e.message, 'error');
+    }
+  }
+
+  // Expose handlers referenced by inline onclick attributes.
+  window.selectProvider = selectProvider;
+  window.saveSettings = saveSettings;
+
+  loadSettings();
+})();
+</script>
+
+<!-- ================= Agent Prompts logic (from prompts.html) ================= -->
+<script>
+(function () {
+  'use strict';
+  const API = '/api/dashboard';
+  let promptData = null;
+  let activePromptAgent = null;
+
+  async function loadPrompts() {
+    try {
+      promptData = await fetch(`${API}/prompts`).then(r => r.json());
+      renderPromptSidebar();
+      if (activePromptAgent) {
+        const agent = promptData.agents.find(a => a.agent_name === activePromptAgent);
+        if (agent) { renderPromptEditorFor(agent); return; }
+      }
+      if (promptData.agents.length) {
+        selectPromptAgent(promptData.agents[0].agent_name);
+      }
+    } catch (e) {
+      console.error('Failed to load prompts', e);
+    }
+  }
+
+  function renderPromptSidebar() {
+    const el = document.getElementById('prompt-sidebar');
+    el.innerHTML = promptData.agents.map(a => `
+      <div class="prompt-sidebar-item ${a.agent_name === activePromptAgent ? 'active' : ''}"
+           onclick="selectPromptAgent('${a.agent_name}')">
+        ${a.is_override ? '<span class="w-1.5 h-1.5 rounded-full bg-yellow-400 shrink-0"></span>' : ''}
+        <span>${esc(a.agent_name)}</span>
+      </div>
+    `).join('');
+  }
+
+  function selectPromptAgent(name) {
+    activePromptAgent = name;
+    const agent = promptData.agents.find(a => a.agent_name === name);
+    if (!agent) return;
+    renderPromptSidebar();
+    renderPromptEditorFor(agent);
+  }
+
+  function renderPromptEditorFor(agent) {
+    const editor = document.getElementById('prompt-editor');
+    editor.innerHTML = `
+      <div class="flex items-center gap-2.5 mb-3">
+        <h3 class="text-[15px] font-semibold">${esc(agent.agent_name)}</h3>
+        ${agent.is_override ? '<span class="badge badge-warning badge-sm">CUSTOMIZED</span>' : ''}
+        ${agent.updated_at ? `<span class="text-2xs text-slate-400">Updated ${formatTime(agent.updated_at)}</span>` : ''}
+      </div>
+      <textarea class="form-textarea flex-1 w-full min-h-[320px] font-mono text-xs leading-relaxed resize-y" id="prompt-content">${esc(agent.content)}</textarea>
+      <div class="flex items-center gap-2.5 mt-3">
+        <button class="btn btn-primary btn-sm" onclick="savePrompt('${agent.agent_name}')">Save</button>
+        ${agent.is_override ? `<button class="btn btn-secondary btn-sm" onclick="resetPrompt('${agent.agent_name}')">Reset to Default</button>` : ''}
+        <span class="ml-auto text-xs text-slate-400" id="prompt-status"></span>
+      </div>
+      <div class="mt-3.5 border-t border-slate-700/50 pt-2.5">
+        <button class="text-xs text-slate-400 cursor-pointer flex items-center gap-1.5 bg-transparent border-0 p-0 hover:text-slate-200 transition-colors" onclick="togglePromptRef('output-schema-ref')">
+          <span class="text-2xs transition-transform duration-200" id="output-schema-ref-arrow">&#9656;</span>
+          Output Schema (appended to all agents)
+        </button>
+        <div class="hidden mt-2 bg-slate-800 border border-slate-700/50 rounded-lg p-3 font-mono text-2xs leading-relaxed text-slate-400 whitespace-pre-wrap max-h-[200px] overflow-y-auto" id="output-schema-ref">${promptData ? esc(promptData.output_schema) : ''}</div>
+      </div>
+      <div class="mt-2">
+        <button class="text-xs text-slate-400 cursor-pointer flex items-center gap-1.5 bg-transparent border-0 p-0 hover:text-slate-200 transition-colors" onclick="togglePromptRef('cross-lang-ref')">
+          <span class="text-2xs transition-transform duration-200" id="cross-lang-ref-arrow">&#9656;</span>
+          Cross-Language Section (added when 2+ languages)
+        </button>
+        <div class="hidden mt-2 bg-slate-800 border border-slate-700/50 rounded-lg p-3 font-mono text-2xs leading-relaxed text-slate-400 whitespace-pre-wrap max-h-[200px] overflow-y-auto" id="cross-lang-ref">${promptData ? esc(promptData.cross_language_section) : ''}</div>
+      </div>
+    `;
+  }
+
+  function togglePromptRef(id) {
+    const el = document.getElementById(id);
+    const arrow = document.getElementById(id + '-arrow');
+    if (!el) return;
+    if (el.classList.contains('hidden')) {
+      el.classList.remove('hidden');
+      if (arrow) arrow.innerHTML = '&#9662;';
+    } else {
+      el.classList.add('hidden');
+      if (arrow) arrow.innerHTML = '&#9656;';
+    }
+  }
+
+  async function savePrompt(agentName) {
+    const content = document.getElementById('prompt-content').value;
+    const status = document.getElementById('prompt-status');
+    status.textContent = 'Saving...';
+    status.className = 'ml-auto text-xs text-slate-400';
+    try {
+      const resp = await fetch(`${API}/prompts/${agentName}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content }),
+      });
+      if (!resp.ok) throw new Error('Save failed');
+      status.textContent = 'Saved';
+      status.className = 'ml-auto text-xs text-emerald-400';
+      showToast('Prompt saved', 'success');
+      await loadPrompts();
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.className = 'ml-auto text-xs text-red-400';
+      showToast('Save failed: ' + e.message, 'error');
+    }
+  }
+
+  async function resetPrompt(agentName) {
+    const status = document.getElementById('prompt-status');
+    status.textContent = 'Resetting...';
+    status.className = 'ml-auto text-xs text-slate-400';
+    try {
+      const resp = await fetch(`${API}/prompts/${agentName}`, { method: 'DELETE' });
+      if (!resp.ok) throw new Error('Reset failed');
+      status.textContent = 'Reset to default';
+      status.className = 'ml-auto text-xs text-emerald-400';
+      showToast('Prompt reset to default', 'success');
+      await loadPrompts();
+    } catch (e) {
+      status.textContent = `Error: ${e.message}`;
+      status.className = 'ml-auto text-xs text-red-400';
+      showToast('Reset failed: ' + e.message, 'error');
+    }
+  }
+
+  // ---- Helpers (scoped to this IIFE) ----
+  function esc(s) {
+    if (!s) return '';
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function formatTime(iso) {
+    if (!iso) return '-';
+    const d = new Date(iso);
+    const now = new Date();
+    const diff = now - d;
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return d.toLocaleDateString();
+  }
+
+  // Expose handlers referenced by inline onclick attributes.
+  window.selectPromptAgent = selectPromptAgent;
+  window.togglePromptRef = togglePromptRef;
+  window.savePrompt = savePrompt;
+  window.resetPrompt = resetPrompt;
+
+  loadPrompts();
+})();
+</script>
+
+<!-- ================= Admin logic (from admin.html) ================= -->
+<script>
+(function () {
+  'use strict';
+  const API = '/api/admin';
+
+  function esc(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function fmtDate(iso) { return iso ? new Date(iso).toLocaleDateString() : '—'; }
+
+  // --- Identity ---
+  async function loadIdentity() {
+    try {
+      const r = await fetch(`${API}/me`);
+      if (r.status === 403) {
+        document.querySelector('#admin .space-y-6').innerHTML =
+          '<div class="card p-8 text-center"><p class="text-orange-400 font-semibold mb-2">Admin access required</p><p class="text-xs text-slate-400">You are not an admin. Contact an existing admin to be added.</p></div>';
+        return;
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const me = await r.json();
+      document.getElementById('identity-badge').textContent = `Signed in as ${me.display_name}`;
+      loadKeys();
+      loadAdmins();
+    } catch (e) {
+      showToast(`Auth error: ${e.message}`, 'error');
+    }
+  }
+
+  // --- API Keys ---
+  async function loadKeys() {
+    try {
+      const r = await fetch(`${API}/api-keys`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const keys = await r.json();
+      document.getElementById('keys-loading').classList.add('hidden');
+
+      if (!keys.length) {
+        document.getElementById('keys-empty').classList.remove('hidden');
+        document.getElementById('keys-table').classList.add('hidden');
+        return;
+      }
+      document.getElementById('keys-empty').classList.add('hidden');
+      document.getElementById('keys-table').classList.remove('hidden');
+
+      document.getElementById('keys-body').innerHTML = keys.map(k => {
+        const revoked = !!k.revoked_at;
+        const expired = k.expires_at && new Date(k.expires_at) < new Date();
+        const status = revoked ? 'Revoked' : (expired ? 'Expired' : 'Active');
+        const statusCls = revoked || expired
+          ? 'text-red-400'
+          : 'text-emerald-400';
+        return `<tr class="border-b border-slate-700/30 ${revoked ? 'opacity-50' : ''}">
+          <td class="py-2 font-medium text-slate-200">${esc(k.name)}</td>
+          <td class="py-2 font-mono text-slate-400">${esc(k.key_prefix)}...</td>
+          <td class="py-2">${(k.scopes || []).join(', ')}</td>
+          <td class="py-2 text-slate-400">${fmtDate(k.created_at)}</td>
+          <td class="py-2 text-slate-400">${fmtDate(k.last_used_at)}</td>
+          <td class="py-2 ${statusCls}">${status}</td>
+          <td class="py-2 text-right">${!revoked ? `<button class="text-red-400 hover:text-red-300 transition-colors" onclick="revokeKey('${k.id}', '${esc(k.name)}')">Revoke</button>` : ''}</td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('keys-loading').textContent = 'Failed to load keys.';
+    }
+  }
+
+  async function createKey() {
+    const name = document.getElementById('key-name').value.trim();
+    if (!name) { showToast('Key name is required', 'error'); return; }
+
+    const scopes = ['read'];
+    if (document.getElementById('scope-write').checked) scopes.push('write');
+    const expiryVal = document.getElementById('key-expiry').value;
+    const expires_in_days = expiryVal ? parseInt(expiryVal) : null;
+
+    try {
+      const r = await fetch(`${API}/api-keys`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, scopes, expires_in_days }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      const data = await r.json();
+
+      document.getElementById('new-key-value').textContent = data.key;
+      document.getElementById('new-key-alert').classList.remove('hidden');
+
+      document.getElementById('key-name').value = '';
+      document.getElementById('scope-write').checked = false;
+      document.getElementById('key-expiry').value = '';
+      showToast('API key created');
+      loadKeys();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  function copyKey() {
+    const key = document.getElementById('new-key-value').textContent;
+    navigator.clipboard.writeText(key).then(
+      () => showToast('Copied to clipboard'),
+      () => showToast('Copy failed — select and copy manually', 'error')
+    );
+  }
+
+  async function revokeKey(id, name) {
+    if (!confirm(`Revoke API key "${name}"? This cannot be undone.`)) return;
+    try {
+      const r = await fetch(`${API}/api-keys/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast(`Key "${name}" revoked`);
+      loadKeys();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  // --- Admins ---
+  async function loadAdmins() {
+    try {
+      const r = await fetch(`${API}/admins`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const admins = await r.json();
+      document.getElementById('admins-loading').classList.add('hidden');
+
+      if (!admins.length) {
+        document.getElementById('admins-empty').classList.remove('hidden');
+        document.getElementById('admins-table').classList.add('hidden');
+        return;
+      }
+      document.getElementById('admins-empty').classList.add('hidden');
+      document.getElementById('admins-table').classList.remove('hidden');
+
+      const canRemove = admins.length > 1;
+      document.getElementById('admins-body').innerHTML = admins.map(a => {
+        return `<tr class="border-b border-slate-700/30">
+          <td class="py-2 font-medium text-slate-200">${esc(a.email)}</td>
+          <td class="py-2 text-slate-400">${esc(a.added_by)}</td>
+          <td class="py-2 text-slate-400">${fmtDate(a.created_at)}</td>
+          <td class="py-2 text-right">${canRemove ? `<button class="text-red-400 hover:text-red-300 transition-colors" onclick="removeAdmin('${esc(a.email)}')">Remove</button>` : '<span class="text-slate-500 text-2xs">last admin</span>'}</td>
+        </tr>`;
+      }).join('');
+    } catch (e) {
+      document.getElementById('admins-loading').textContent = 'Failed to load admins.';
+    }
+  }
+
+  async function addAdmin() {
+    const email = document.getElementById('admin-email').value.trim().toLowerCase();
+    if (!email || !email.includes('@')) { showToast('Enter a valid email', 'error'); return; }
+
+    try {
+      const r = await fetch(`${API}/admins`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      document.getElementById('admin-email').value = '';
+      showToast(`${email} added as admin`);
+      loadAdmins();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  async function removeAdmin(email) {
+    if (!confirm(`Remove ${email} as admin?`)) return;
+    try {
+      const r = await fetch(`${API}/admins/${encodeURIComponent(email)}`, { method: 'DELETE' });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      showToast(`${email} removed`);
+      loadAdmins();
+    } catch (e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  // --- Excluded repos ---
+  async function loadExcludedRepos() {
+    try {
+      const r = await fetch(`${API}/excluded-repos`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const repos = await r.json();
+      document.getElementById('repos-loading').classList.add('hidden');
+      if (!repos.length) {
+        document.getElementById('repos-empty').classList.remove('hidden');
+        document.getElementById('repos-table').classList.add('hidden');
+        return;
+      }
+      document.getElementById('repos-empty').classList.add('hidden');
+      document.getElementById('repos-table').classList.remove('hidden');
+      document.getElementById('repos-body').innerHTML = repos.map(r => `
+        <tr class="border-b border-slate-700/30">
+          <td class="py-2"><span class="${r.platform === 'github' ? 'src-gh' : 'src-ado'}">${r.platform === 'github' ? 'GH' : 'ADO'}</span></td>
+          <td class="py-2 text-slate-200 font-medium">${esc(r.project ? r.project + '/' + r.repo : r.repo)}</td>
+          <td class="py-2 text-slate-400">${esc(r.excluded_by_email || '—')}</td>
+          <td class="py-2 text-slate-400">${fmtDate(r.created_at)}</td>
+          <td class="py-2 text-right">
+            <button class="text-emerald-400 hover:text-emerald-300 transition-colors" onclick="restoreRepo('${esc(r.id)}', '${esc(r.repo)}')">Restore</button>
+          </td>
+        </tr>`).join('');
+    } catch(e) {
+      document.getElementById('repos-loading').textContent = 'Failed to load excluded repos.';
+    }
+  }
+
+  async function restoreRepo(id, name) {
+    if (!confirm(`Restore "${name}" to the PR dashboard?`)) return;
+    try {
+      const r = await fetch(`${API}/excluded-repos/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast(`"${name}" restored`);
+      loadExcludedRepos();
+    } catch(e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  // --- Exclusion rules ---
+  function onRulePlatformChange() {
+    const platform = document.getElementById('rule-platform').value;
+    document.getElementById('rule-project-wrap').style.display = platform === 'ado' ? '' : 'none';
+  }
+
+  async function loadExclusionRules() {
+    try {
+      const r = await fetch(`${API}/exclusion-rules`);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const rules = await r.json();
+      document.getElementById('rules-loading').classList.add('hidden');
+      if (!rules.length) {
+        document.getElementById('rules-empty').classList.remove('hidden');
+        document.getElementById('rules-table').classList.add('hidden');
+        return;
+      }
+      document.getElementById('rules-empty').classList.add('hidden');
+      document.getElementById('rules-table').classList.remove('hidden');
+      document.getElementById('rules-body').innerHTML = rules.map(rule => `
+        <tr class="border-b border-slate-700/30">
+          <td class="py-2"><span class="${rule.platform === 'github' ? 'src-gh' : 'src-ado'}">${rule.platform === 'github' ? 'GH' : 'ADO'}</span></td>
+          <td class="py-2 font-mono text-slate-200">${esc(rule.org_pattern || '*')}</td>
+          <td class="py-2 font-mono text-slate-300">${esc(rule.project_pattern || (rule.platform === 'ado' ? '*' : '—'))}</td>
+          <td class="py-2 font-mono text-slate-200">${esc(rule.repo_pattern || '*')}</td>
+          <td class="py-2 text-slate-400">${esc(rule.created_by_email || '—')}</td>
+          <td class="py-2 text-slate-400">${fmtDate(rule.created_at)}</td>
+          <td class="py-2 text-right">
+            <button class="text-red-400 hover:text-red-300 transition-colors" onclick="deleteRule('${esc(rule.id)}')">Delete</button>
+          </td>
+        </tr>`).join('');
+    } catch(e) {
+      document.getElementById('rules-loading').textContent = 'Failed to load rules.';
+    }
+  }
+
+  async function createRule() {
+    const platform = document.getElementById('rule-platform').value;
+    const org_pattern = document.getElementById('rule-org').value.trim();
+    const project_pattern = platform === 'ado'
+      ? document.getElementById('rule-project').value.trim()
+      : '';
+    const repo_pattern = document.getElementById('rule-repo').value.trim();
+    if (!org_pattern && !project_pattern && !repo_pattern) {
+      showToast('Provide at least one pattern', 'error');
+      return;
+    }
+    try {
+      const r = await fetch(`${API}/exclusion-rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ platform, org_pattern, project_pattern, repo_pattern }),
+      });
+      if (!r.ok) {
+        const err = await r.json().catch(() => ({}));
+        throw new Error(err.detail || `HTTP ${r.status}`);
+      }
+      document.getElementById('rule-org').value = '';
+      document.getElementById('rule-project').value = '';
+      document.getElementById('rule-repo').value = '';
+      showToast('Exclusion rule added');
+      loadExclusionRules();
+    } catch(e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  async function deleteRule(id) {
+    if (!confirm('Delete this exclusion rule?')) return;
+    try {
+      const r = await fetch(`${API}/exclusion-rules/${id}`, { method: 'DELETE' });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      showToast('Rule deleted');
+      loadExclusionRules();
+    } catch(e) {
+      showToast(`Failed: ${e.message}`, 'error');
+    }
+  }
+
+  // Expose handlers referenced by inline onclick / onkeydown attributes.
+  window.createKey = createKey;
+  window.copyKey = copyKey;
+  window.revokeKey = revokeKey;
+  window.addAdmin = addAdmin;
+  window.removeAdmin = removeAdmin;
+  window.restoreRepo = restoreRepo;
+  window.onRulePlatformChange = onRulePlatformChange;
+  window.createRule = createRule;
+  window.deleteRule = deleteRule;
+
+  // --- Init ---
+  loadIdentity();
+  loadExclusionRules();
+  loadExcludedRepos();
+})();
+</script>
+
+<!-- ================= Hub navigation (rail highlight + smooth scroll + hash) ================= -->
 <script>
 (function () {
   'use strict';
 
   const rail = document.getElementById('rail');
   const links = Array.from(rail.querySelectorAll('a'));
-  // Top-level links only (skip sub-anchors which deep-link inside an iframe).
-  const topLinks = links.filter(a => !a.hasAttribute('data-iframe-hash'));
+  // Top-level links own the IntersectionObserver highlight.
+  const topLinks = links.filter(a => !a.hasAttribute('data-sub'));
   const sections = topLinks
     .map(a => document.getElementById(a.dataset.target))
     .filter(Boolean);
 
   function activate(id) {
     topLinks.forEach(a => a.classList.toggle('active', a.dataset.target === id));
-  }
-
-  function absOffsetTop(el) {
-    let y = 0;
-    for (let n = el; n; n = n.offsetParent) y += n.offsetTop;
-    return y;
-  }
-
-  function scrollIframeTo(hash) {
-    const frame = document.getElementById('admin-frame');
-    if (!frame) return;
-    const jump = () => {
-      try {
-        const doc = frame.contentDocument;
-        if (!doc) return false;
-        const el = doc.getElementById(hash);
-        if (!el) return false;
-        // The iframe is laid out at its full height, so internal scrolling is a
-        // no-op. Scroll the PARENT page to (iframe offset + element offset).
-        const headerOffset = 60; // sticky header height
-        const target = absOffsetTop(frame) + absOffsetTop(el) - headerOffset;
-        window.scrollTo({ top: target, behavior: 'smooth' });
-        return true;
-      } catch (_) { return false; }
-    };
-    if (jump()) return;
-    // iframe may still be loading — retry once after load
-    frame.addEventListener('load', jump, { once: true });
   }
 
   // Intersection observer — whichever section's top is nearest the top of
@@ -170,43 +1077,42 @@
   }, { rootMargin: '-50% 0px -45% 0px', threshold: [0, 0.25, 0.5, 0.75, 1] });
   sections.forEach(s => { if (s) io.observe(s); });
 
-  // Anchor link clicks → smooth-scroll + immediate activation.
+  // Anchor link clicks → native smooth-scroll to a real in-page element.
   links.forEach(a => a.addEventListener('click', (ev) => {
     ev.preventDefault();
+    const sub = a.getAttribute('data-sub');
     const id = a.dataset.target;
-    const sub = a.getAttribute('data-iframe-hash');
     activate(id);
-    if (sub) {
-      // Sub-rail: scroll directly to the deep target inside the admin iframe.
-      // Don't also scroll to the parent section — the two animations race.
-      scrollIframeTo(sub);
-      history.replaceState(null, '', `#${id}--${sub}`);
-    } else {
-      document.getElementById(id).scrollIntoView({ behavior: 'smooth', block: 'start' });
-      history.replaceState(null, '', `#${id}`);
-    }
+    // Sub-rail links scroll to their own in-page anchor (#keys, #admins, …);
+    // top-level links scroll to the section.
+    const targetId = sub || id;
+    const el = document.getElementById(targetId);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    history.replaceState(null, '', `#${targetId}`);
   }));
 
-  // If the URL has a hash on load (e.g. /settings#prompts from a legacy
-  // redirect), jump there once the iframes have laid out.
-  // Supports compound hashes like #admin--admins for iframe deep-links.
+  // On-load hash handling — supports new in-page ids (#prompts, #keys, …) and
+  // legacy redirect hashes (#api-keys → #keys). All scroll natively now.
   const rawHash = (window.location.hash || '').replace('#', '');
   if (rawHash) {
-    const [top, sub] = rawHash.split('--');
-    // Legacy hashes (api-keys, admins, pats, exclusions) → admin pane
+    // Legacy aliases map to the real in-page admin anchors.
     const adminAliases = { 'api-keys': 'keys', 'admins': 'admins', 'pats': 'pats', 'exclusions': 'exclusions' };
-    let topId = top, subId = sub;
-    if (adminAliases[top]) { topId = 'admin'; subId = adminAliases[top]; }
-    if (document.getElementById(topId)) {
+    const adminSubs = new Set(['keys', 'admins', 'pats', 'exclusions']);
+    let targetId = adminAliases[rawHash] || rawHash;
+    // Compound legacy hashes like #admin--admins → take the sub part.
+    if (targetId.includes('--')) targetId = targetId.split('--')[1] || targetId.split('--')[0];
+    const el = document.getElementById(targetId);
+    if (el) {
       setTimeout(() => {
-        activate(topId);
-        document.getElementById(topId).scrollIntoView({ behavior: 'auto', block: 'start' });
-        if (subId) scrollIframeTo(subId);
+        // Highlight the owning top-level section.
+        activate(adminSubs.has(targetId) ? 'admin' : targetId);
+        el.scrollIntoView({ behavior: 'auto', block: 'start' });
       }, 50);
     }
   }
 })();
 </script>
 
+<script src="/static/command-palette.js"></script>
 </body>
 </html>

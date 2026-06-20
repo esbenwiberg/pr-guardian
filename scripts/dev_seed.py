@@ -18,6 +18,7 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import delete
 
+from pr_guardian import dev_diff_store
 from pr_guardian.persistence.database import async_session, close_db, init_db
 from pr_guardian.persistence.models import (
     AdminRow,
@@ -163,6 +164,79 @@ def _finding(
     )
 
 
+def _patch_for(focus_lines: list[int]) -> tuple[str, int]:
+    """Build a unified-diff hunk whose new-file side covers each focus line, so
+    the dashboard's hunk extractor can render a snippet around a finding's line.
+    Returns ``(patch_text, additions)``."""
+    lines = sorted({n for n in focus_lines if n}) or [1]
+    start = max(1, lines[0] - 3)
+    end = lines[-1] + 3
+    span = end - start + 1
+    body = [f"@@ -{start},{span} +{start},{span} @@"]
+    for ln in range(start, end + 1):
+        if ln in lines:
+            body.append(f"+    # L{ln}: changed in this PR")
+        else:
+            body.append(f"     # L{ln}: surrounding context")
+    return "\n".join(body) + "\n", len(lines)
+
+
+def _diff_file(path: str, focus_lines: list[int]) -> dict:
+    patch, additions = _patch_for(focus_lines)
+    return {
+        "path": path,
+        "status": "modified",
+        "old_path": None,
+        "additions": additions,
+        "deletions": 0,
+        "patch": patch,
+    }
+
+
+def _clean_companions(seed_path: str) -> list[str]:
+    """Test + docs siblings that carry NO findings, so the wizard clusters at
+    least one *clean* capability (exercises the 'Also reviewed (clean)' wrap-up)
+    and the review shows a realistic multi-file diff."""
+    stem = seed_path.rsplit("/", 1)[-1].rsplit(".", 1)[0]
+    return [f"tests/test_{stem}.py", f"docs/{stem}.md"]
+
+
+def _build_dev_diffs(rows: list, defaults: dict[uuid.UUID, dict[str, list[int]]]) -> dict[str, dict]:
+    """Derive a realistic per-review stored diff from the seeded findings.
+
+    Files with findings get a hunk covering each finding line (so 'Show code'
+    works); clean companion files are added so the Wizard/Chapters show real
+    LOC, multiple files, and ≥1 clean capability."""
+    agent_review = {a.id: a.review_id for a in rows if isinstance(a, AgentResultRow)}
+    review_files: dict[uuid.UUID, dict[str, list[int]]] = {}
+    for r in rows:
+        if isinstance(r, FindingRow):
+            rid = agent_review.get(r.agent_result_id)
+            if rid:
+                review_files.setdefault(rid, {}).setdefault(r.file, []).append(r.line or 1)
+        elif isinstance(r, MechanicalResultRow):
+            for mf in r.findings or []:
+                if mf.get("file"):
+                    review_files.setdefault(r.review_id, {}).setdefault(
+                        mf["file"], []
+                    ).append(mf.get("line") or 1)
+    for rid, file_lines in defaults.items():
+        review_files.setdefault(rid, file_lines)
+
+    review_by_id = {r.id: r for r in rows if isinstance(r, ReviewRow)}
+    diffs: dict[str, dict] = {}
+    for rid, file_lines in review_files.items():
+        review = review_by_id.get(rid)
+        if review is None:
+            continue
+        files = [_diff_file(p, lines) for p, lines in file_lines.items()]
+        for clean in _clean_companions(next(iter(file_lines))):
+            if clean not in file_lines:
+                files.append(_diff_file(clean, [2, 3]))
+        diffs[str(rid)] = {"pr_id": review.pr_id, "repo": review.repo, "files": files}
+    return diffs
+
+
 async def _seed_reviews() -> None:
     rows: list = []
 
@@ -217,7 +291,7 @@ async def _seed_reviews() -> None:
         _finding(
             a2a.id,
             severity="medium",
-            certainty="high",
+            certainty="detected",
             category="reliability",
             file="src/pr_guardian/llm/client.py",
             line=142,
@@ -231,7 +305,7 @@ async def _seed_reviews() -> None:
         _finding(
             a2b.id,
             severity="low",
-            certainty="medium",
+            certainty="suspected",
             category="performance",
             file="src/pr_guardian/llm/client.py",
             line=180,
@@ -268,7 +342,7 @@ async def _seed_reviews() -> None:
         _finding(
             a3a.id,
             severity="critical",
-            certainty="high",
+            certainty="detected",
             category="auth_bypass",
             file="src/orcha/auth/middleware.py",
             line=58,
@@ -281,7 +355,7 @@ async def _seed_reviews() -> None:
         _finding(
             a3a.id,
             severity="high",
-            certainty="high",
+            certainty="detected",
             category="logging",
             file="src/orcha/auth/middleware.py",
             line=60,
@@ -296,7 +370,7 @@ async def _seed_reviews() -> None:
         _finding(
             a3b.id,
             severity="medium",
-            certainty="medium",
+            certainty="suspected",
             category="architecture",
             file="src/orcha/auth/middleware.py",
             line=55,
@@ -407,7 +481,7 @@ async def _seed_reviews() -> None:
         _finding(
             a7.id,
             severity="high",
-            certainty="high",
+            certainty="detected",
             category="rate_limiting",
             file="src/pr_guardian/api/review.py",
             line=58,
@@ -419,7 +493,7 @@ async def _seed_reviews() -> None:
         _finding(
             a7.id,
             severity="medium",
-            certainty="medium",
+            certainty="suspected",
             category="info_disclosure",
             file="src/pr_guardian/api/review.py",
             line=71,
@@ -459,6 +533,17 @@ async def _seed_reviews() -> None:
         s.add_all(comment_rows)
         await s.commit()
 
+    # Write the dev stored-diff sidecar so the dashboard renders real hunks,
+    # LOC, files, and clean capabilities locally (no platform connection). The
+    # clean auto-approve reviews (no findings) get a representative file each.
+    clean_defaults = {
+        r1.id: {"README.md": [3]},
+        r6.id: {"tests/triage/test_classifier.py": [22, 23]},
+    }
+    diffs = _build_dev_diffs(rows, clean_defaults)
+    store_path = dev_diff_store.save_all(diffs)
+    print(f"[dev_seed] wrote {len(diffs)} stored diffs to {store_path}")
+
 
 async def _seed_dismissals() -> None:
     # One dismissal on the rejected PR — validator can see an already-dismissed finding
@@ -481,7 +566,7 @@ async def _seed_dismissals() -> None:
                     "category": "architecture",
                     "agent_name": "architecture_intent",
                     "severity": "medium",
-                    "certainty": "medium",
+                    "certainty": "suspected",
                     "description": "Auth decisions leaking into request parsing layer.",
                 },
                 active=True,

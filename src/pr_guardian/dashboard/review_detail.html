@@ -10,6 +10,7 @@
 
 <aside id="sidebar"></aside>
 <script src="/static/sidebar.js"></script>
+<script src="/static/review-helpers.js"></script>
 <script src="/static/viewer-shell.js" defer></script>
 
 <!-- Main content (offset for sidebar) -->
@@ -329,9 +330,27 @@ function render(d) {
 
   const riskEl = document.getElementById('v-risk');
   riskEl.textContent = failed ? '-' : (d.risk_tier || '-').toUpperCase();
+  const riskCard = riskEl.closest('.stat-card');
   if (!failed && d.risk_tier && tierTextClass[d.risk_tier]) {
     riskEl.className = 'stat-card-value ' + tierTextClass[d.risk_tier];
-    riskEl.closest('.stat-card').style.borderTop = `2px solid ${tierColors[d.risk_tier]}`;
+    riskCard.style.borderTop = `2px solid ${tierColors[d.risk_tier]}`;
+  }
+  // Name what drives the tier. It's set by trust/repo policy, not the numeric
+  // score — so a HIGH tier beside a low Risk Score isn't a contradiction.
+  if (!failed && riskCard) {
+    const trustTrigger = (d.sticky_triggers || []).find(t => t.kind === 'trust_tier');
+    const driver = trustTrigger
+      ? (trustTrigger.label || 'Set by trust policy')
+      : (d.combined_score != null ? 'From risk score' : '');
+    if (driver) {
+      const sub = document.createElement('div');
+      sub.style.cssText = 'font-size:10px;color:#94a3b8;margin-top:2px;line-height:1.2';
+      sub.textContent = driver;
+      riskCard.appendChild(sub);
+      riskCard.title = trustTrigger
+        ? `Risk tier is set by the trust policy (${trustTrigger.source || trustTrigger.label}), independent of the numeric risk score.`
+        : 'Risk tier reflects the numeric risk score.';
+    }
   }
 
   const scoreEl = document.getElementById('v-score');
@@ -347,7 +366,7 @@ function render(d) {
   if (totalFindings > 0) {
     document.getElementById('v-findings').closest('.stat-card').style.borderTop = '2px solid #fb923c';
   }
-  document.getElementById('v-duration').textContent = d.duration_ms ? `${(d.duration_ms / 1000).toFixed(1)}s` : '-';
+  document.getElementById('v-duration').textContent = PRG.formatDuration(d.duration_ms);
   document.getElementById('v-cost').textContent = d.cost_usd ? `$${d.cost_usd.toFixed(4)}` : '-';
 
   // Summary
@@ -956,6 +975,14 @@ function closeDismissDialog() {
   document.getElementById('dismiss-modal').classList.add('hidden');
   dismissFindingId = null;
 }
+
+// Escape closes the dismiss modal, matching the ⌘K palette's behavior.
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('dismiss-modal').classList.contains('hidden')) {
+    closeDismissDialog();
+  }
+});
 
 async function submitDismiss() {
   if (!dismissFindingId) return;

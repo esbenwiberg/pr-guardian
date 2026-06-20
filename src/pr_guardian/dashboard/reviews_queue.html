@@ -153,6 +153,11 @@
   .status-chip.changes_requested { color: rgb(248 113 113); border: 1px solid rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.06); }
   .status-chip.draft { color: rgb(148 163 184); border: 1px solid rgb(71 85 105); background: rgb(15 23 42 / 0.6); }
   .status-chip.error { color: rgb(248 113 113); border: 1px solid rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.06); }
+  .verdict-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.02em; }
+  .verdict-chip.auto_approve { color: rgb(110 231 183); border: 1px solid rgb(110 231 183 / 0.45); background: rgb(110 231 183 / 0.06); }
+  .verdict-chip.human_review { color: rgb(251 191 36); border: 1px solid rgb(251 191 36 / 0.45); background: rgb(251 191 36 / 0.06); }
+  .verdict-chip.reject, .verdict-chip.hard_block { color: rgb(248 113 113); border: 1px solid rgb(248 113 113 / 0.45); background: rgb(248 113 113 / 0.06); }
+  .verdict-chip.error { color: rgb(248 113 113); border: 1px solid rgb(71 85 105); }
   .risk-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
   .risk-dot.error { background: rgb(248 113 113); }
   .risk-dot.high { background: rgb(248 113 113); }
@@ -264,14 +269,26 @@
   }
 
   function originLabel(item) {
-    if (item.trigger_origin === 'readiness') return { text: 'readiness', cls: 'origin-chip' };
+    if (item.trigger_origin === 'readiness') return { text: 'readiness', cls: 'origin-chip', title: 'Auto-triggered when this PR met its readiness rules' };
     if (item.trigger_origin === 'manual' && item.triggered_by) {
-      if (ME && ME.email && ME.email === item.triggered_by) return { text: 'you triggered', cls: 'origin-chip you-triggered' };
-      return { text: 'manual', cls: 'origin-chip manual' };
+      if (ME && ME.email && ME.email === item.triggered_by) return { text: 'you triggered', cls: 'origin-chip you-triggered', title: 'You triggered this review manually' };
+      return { text: 'manual', cls: 'origin-chip manual', title: `Triggered manually by ${item.triggered_by}` };
     }
-    if (item.trigger_origin === 'scan') return { text: 'scan · full', cls: 'origin-chip' };
-    if (item.trigger_origin === 'manual') return { text: 'manual', cls: 'origin-chip manual' };
-    return { text: 'auto', cls: 'origin-chip' };
+    if (item.trigger_origin === 'scan') return { text: 'scan · full', cls: 'origin-chip', title: 'Full-depth review started from a repository scan' };
+    if (item.trigger_origin === 'manual') return { text: 'manual', cls: 'origin-chip manual', title: 'Triggered manually' };
+    return { text: 'auto', cls: 'origin-chip', title: 'Auto-triggered by a pull-request webhook event' };
+  }
+
+  // Mirror Insights wording so a verdict reads the same on every surface.
+  function formatDecision(d) {
+    const m = { auto_approve: 'Approved', human_review: 'Human Review', reject: 'Rejected', hard_block: 'Blocked', pending: 'Pending', error: 'Error' };
+    return m[d] || d || '-';
+  }
+
+  function verdictChip(item) {
+    // Only completed reviews carry a verdict — candidates / open PRs don't.
+    if (isCandidate(item) || isFailed(item) || !item.decision || item.decision === 'pending') return '';
+    return `<span class="verdict-chip ${escape(item.decision)}" title="PR Guardian verdict">${escape(formatDecision(item.decision))}</span>`;
   }
 
   function statusChip(item) {
@@ -307,6 +324,7 @@
     subtitleParts.push(timeAgo(item.started_at));
     const subtitle = subtitleParts.join(' &middot; ');
     const filesText = candidate ? readinessShort(item) : item.files_changed ? `${item.files_changed} files` : 'full';
+    const filesTitle = candidate ? 'Readiness state' : item.files_changed ? `${item.files_changed} files changed` : 'Full-depth review (all changed files)';
     const selected = candidate && item.id === SELECTED_CANDIDATE_ID ? ' selected' : '';
     const statusLine = candidate
       ? `<div class="mt-1 text-2xs text-slate-400">${escape(readinessDetail(item))}</div>`
@@ -329,10 +347,11 @@
           ${statusLine}
         </div>
         <div class="flex flex-col items-end gap-1 shrink-0 text-xs tabular-nums">
+          ${verdictChip(item)}
           <div class="flex items-center gap-1.5">${riskDots(item)}<span class="ml-1">${findingSummary(item)}</span></div>
           <div class="flex items-center gap-2 text-2xs text-slate-500">
-            <span class="${origin.cls}">${origin.text}</span>
-            <span>${filesText}</span>
+            <span class="${origin.cls}" title="${escape(origin.title || '')}">${origin.text}</span>
+            <span title="${escape(filesTitle)}">${filesText}</span>
           </div>
         </div>
         <svg class="w-4 h-4 text-slate-600 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5"/></svg>

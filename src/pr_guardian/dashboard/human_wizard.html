@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PR Guardian — Review Wizard (Prototype G)</title>
+<title>PR Guardian — Review Wizard</title>
 <style>
   :root {
     --bg: #0b1220;
@@ -422,7 +422,9 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
     );
     sorted.forEach((f, j) => {
       const { q, rest } = splitQuestion(f.description || f.category || 'Concern');
-      const reasoning = rest.length ? rest : (f.description ? [f.description] : []);
+      // Only carry the remainder into the body. Falling back to the full
+      // description here duplicated single-sentence findings verbatim (title==body).
+      const reasoning = rest.length ? rest : [];
       const hunk = extractHunkAroundLine(parsedPatchByPath[f.file], f.line);
       if (hunk) hunk.file = f.file;
       // Read existing dismissal state (chapter view's dismissals show through here too).
@@ -967,10 +969,10 @@ function renderWrap() {
       <div class="summary-card pending"><div class="num">${pending}</div><div class="lbl">Pending</div></div>
     </div>
 
-    <div class="also-reviewed">
+    ${cleanCaps.length ? `<div class="also-reviewed">
       <strong>Also reviewed (clean):</strong> ${cleanCaps.map(c => escapeHtml(c.name)).join(" · ")}.
       The agent looked at these capabilities and surfaced no concerns for you.
-    </div>
+    </div>` : ''}
 
     <div class="noise-line">
       ${(() => {

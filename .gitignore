@@ -1,3 +1,6 @@
+# Dev-only stored-diff sidecar written by scripts/dev_seed.py
+.dev_seed_diffs.json
+
 # Python
 __pycache__/
 *.pyc

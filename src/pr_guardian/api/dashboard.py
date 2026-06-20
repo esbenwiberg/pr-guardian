@@ -20,6 +20,7 @@ from pr_guardian.auth.identity import Identity
 
 from pr_guardian.agents.base import AGENT_OUTPUT_SCHEMA
 from pr_guardian.agents.prompt_composer import CROSS_LANGUAGE_SECTION
+from pr_guardian import dev_diff_store
 from pr_guardian.config.loader import apply_global_settings, load_service_defaults
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import event_bus
@@ -299,6 +300,77 @@ def _extract_hunk(patch: str, target_line: int, context: int) -> list[dict]:
     return out
 
 
+def _norm_diff_path(p: str) -> str:
+    """Normalize a path for tolerant matching between a finding's stored file
+    path and the diff's file paths, which can carry ``./``, ``a/``/``b/`` git
+    prefixes, backslashes from Windows runners, or a leading slash."""
+    p = (p or "").replace("\\", "/").strip()
+    for prefix in ("a/", "b/"):
+        if p.startswith(prefix):
+            p = p[len(prefix) :]
+    while p.startswith("./"):
+        p = p[2:]
+    return p.lstrip("/")
+
+
+def _find_diff_file(files: list, path: str):
+    """Locate the diff file a finding refers to, tolerating path-format drift.
+
+    A finding's stored path doesn't always byte-match the platform diff's path
+    (rename, moved file, ``./`` prefix, separators). Try exact, then normalized
+    (including the pre-rename ``old_path``), then a *unique* suffix match before
+    giving up — never guess when more than one file could match.
+    """
+    for f in files:
+        if f.path == path:
+            return f
+    target = _norm_diff_path(path)
+    for f in files:
+        if _norm_diff_path(f.path) == target or (
+            getattr(f, "old_path", None) and _norm_diff_path(f.old_path) == target
+        ):
+            return f
+    suffix_matches = [
+        f
+        for f in files
+        if _norm_diff_path(f.path).endswith("/" + target)
+        or target.endswith("/" + _norm_diff_path(f.path))
+    ]
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+    return None
+
+
+def _diff_from_stored(stored: dict, path: str | None, line: int | None, context: int) -> dict:
+    """Serve a diff response from the dev stored-diff sidecar (see dev_diff_store).
+
+    Mirrors the live ``/diff`` endpoint's response shapes so the dashboard can't
+    tell the difference between a stored and a fetched diff."""
+    files = stored.get("files") or []
+    if path and line is not None:
+        target = _norm_diff_path(path)
+        fobj = next(
+            (
+                f
+                for f in files
+                if f.get("path") == path or _norm_diff_path(f.get("path", "")) == target
+            ),
+            None,
+        )
+        if fobj is None:
+            raise HTTPException(
+                404,
+                f"'{path}' isn't among the {len(files)} files in the stored diff for this review.",
+            )
+        hunk_lines = _extract_hunk(fobj.get("patch") or "", line, context)
+        return {"file": fobj["path"], "line": line, "context": context, "lines": hunk_lines}
+    return {
+        "pr_id": stored.get("pr_id"),
+        "repo": stored.get("repo"),
+        "files": files,
+    }
+
+
 @router.get("/reviews/{review_id}/diff")
 async def dashboard_review_diff(
     review_id: uuid.UUID,
@@ -314,6 +386,13 @@ async def dashboard_review_diff(
     row = await storage.get_review(review_id)
     if not row:
         raise HTTPException(404, "Review not found")
+
+    # Dev affordance: prefer a stored diff (no platform connection locally). The
+    # sidecar only exists in seeded dev environments — see dev_diff_store.
+    stored = dev_diff_store.load(review_id)
+    if stored is not None:
+        return _diff_from_stored(stored, path, line, context)
+
     if not row.get("pr_url"):
         raise HTTPException(422, "Review has no PR URL — cannot fetch diff")
 
@@ -333,11 +412,16 @@ async def dashboard_review_diff(
         raise HTTPException(502, f"Failed to fetch diff from platform: {e}")
 
     if path and line is not None:
-        file_obj = next((f for f in diff.files if f.path == path), None)
+        file_obj = _find_diff_file(diff.files, path)
         if not file_obj:
-            raise HTTPException(404, f"File not found in diff: {path}")
+            raise HTTPException(
+                404,
+                f"'{path}' isn't among the {len(diff.files)} files changed in this PR's diff. "
+                "The finding may point at a renamed or moved file, or a path whose format "
+                "differs from the diff.",
+            )
         hunk_lines = _extract_hunk(file_obj.patch or "", line, context)
-        return {"file": path, "line": line, "context": context, "lines": hunk_lines}
+        return {"file": file_obj.path, "line": line, "context": context, "lines": hunk_lines}
 
     return {
         "pr_id": row["pr_id"],
@@ -364,6 +448,20 @@ async def dashboard_review_diff(
 # commit on the PR invalidates the cache by changing the SHA, so the wizard
 # always sees clusters that match what's actually in the diff.
 _capability_cache: dict[tuple[str, str], dict] = {}
+
+
+def _capabilities_degraded(error: str) -> dict:
+    """A graceful, non-LLM capabilities payload. ``source != "llm"`` tells the
+    wizard to fall back to its built-in path-prefix heuristic rather than 500."""
+    return {
+        "source": "fallback_no_llm",
+        "capabilities": [],
+        "briefing": None,
+        "model": "",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "error": error,
+    }
 
 
 def _role_for_path(path: str) -> str:
@@ -417,19 +515,26 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     from pr_guardian.models.pr import Diff
 
     stub, platform_name = _parse_pr_url(row["pr_url"])
-    adapter = await create_adapter_for_review(row, platform_name)
 
-    # Best-effort diff + context fetch — when platform credentials are
-    # unavailable or the PR is gone, fall back to building a minimal file list
-    # from the stored agent_results so the LLM can still cluster and brief.
+    # Best-effort adapter + diff + context fetch — when no platform connection
+    # exists (local dev), credentials are unavailable, or the PR is gone, fall
+    # back to building a minimal file list from the stored agent_results so the
+    # LLM can still cluster and brief. None of this may 500 the wizard.
     diff: Diff | None = None
     pr = None
+    adapter = None
     try:
-        pr = await _hydrate_pr(adapter, stub, platform_name)
+        adapter = await create_adapter_for_review(row, platform_name)
     except Exception as exc:
-        log.warning("capabilities_hydrate_pr_failed", review_id=str(review_id), error=str(exc))
+        log.warning("capabilities_adapter_failed", review_id=str(review_id), error=str(exc))
 
-    if pr is not None:
+    if adapter is not None:
+        try:
+            pr = await _hydrate_pr(adapter, stub, platform_name)
+        except Exception as exc:
+            log.warning("capabilities_hydrate_pr_failed", review_id=str(review_id), error=str(exc))
+
+    if adapter is not None and pr is not None:
         try:
             diff = await adapter.fetch_diff(pr)
         except Exception as exc:
@@ -439,7 +544,7 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
     # fall back to the DB-stored summary so the briefing still has context.
     pr_body = ""
     commit_messages: list[str] = []
-    if pr is not None:
+    if adapter is not None and pr is not None:
         try:
             pr_body, commit_messages = await adapter.fetch_pr_body_and_commits(pr)
         except Exception as exc:
@@ -457,6 +562,10 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
                 continue
             findings_by_path.setdefault(f["file"], []).append(f)
 
+    # Dev affordance: when the platform diff is unavailable, prefer the stored
+    # sidecar diff so the wizard still sees real files (incl. clean ones) + LOC.
+    stored = dev_diff_store.load(review_id) if diff is None else None
+
     if diff is not None:
         files = [
             FileSummary(
@@ -468,6 +577,18 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
             for f in diff.files
         ]
         file_patches = {f.path: (f.patch or "") for f in diff.files if f.patch}
+    elif stored is not None:
+        sfiles = stored.get("files") or []
+        files = [
+            FileSummary(
+                path=f["path"],
+                role=_role_for_path(f["path"]),
+                locs=(f.get("additions") or 0) + (f.get("deletions") or 0),
+                finding_count=len(findings_by_path.get(f["path"], [])),
+            )
+            for f in sfiles
+        ]
+        file_patches = {f["path"]: (f.get("patch") or "") for f in sfiles if f.get("patch")}
     else:
         # Build a minimal file list from stored findings when diff is unavailable.
         # This allows the LLM to still cluster by file roles and finding patterns.
@@ -493,18 +614,29 @@ async def dashboard_review_capabilities(review_id: uuid.UUID):
         for f in items
     ]
 
-    config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
-    llm = create_llm_client(config)
+    # No LLM key (local dev) or clustering blew up → degrade to an empty payload
+    # the wizard reads as "use the built-in path-prefix heuristic". Don't cache
+    # these so the next request retries once a key/connection is configured.
+    try:
+        config = await apply_global_settings(GuardianConfig(**load_service_defaults()))
+        llm = create_llm_client(config)
+    except Exception as exc:
+        log.warning("capabilities_llm_unavailable", review_id=str(review_id), error=str(exc))
+        return {**_capabilities_degraded(f"LLM client unavailable: {exc}"), "cache": "skip"}
 
-    result = await cluster_capabilities(
-        files=files,
-        findings=findings,
-        pr_title=row.get("title") or "",
-        pr_body=pr_body,
-        llm_client=llm,
-        commit_messages=commit_messages,
-        file_patches=file_patches,
-    )
+    try:
+        result = await cluster_capabilities(
+            files=files,
+            findings=findings,
+            pr_title=row.get("title") or "",
+            pr_body=pr_body,
+            llm_client=llm,
+            commit_messages=commit_messages,
+            file_patches=file_patches,
+        )
+    except Exception as exc:
+        log.warning("capabilities_cluster_failed", review_id=str(review_id), error=str(exc))
+        return {**_capabilities_degraded(str(exc)), "cache": "skip"}
 
     response = {
         "source": result.source,
