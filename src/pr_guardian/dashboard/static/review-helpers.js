@@ -25,6 +25,22 @@ window.PRG.detectRole = function detectRole(path) {
   return 'PRODUCTION';
 };
 
+// Canonical duration formatter. Every dashboard surface renders elapsed time
+// through this so one review never shows "126.5s" here and "2m 6s" there.
+window.PRG.formatDuration = function formatDuration(ms) {
+  if (!ms) return '-';
+  if (ms < 1000) return `${ms}ms`;
+  const s = ms / 1000;
+  if (s < 60) return `${s.toFixed(1)}s`;
+  const totalSec = Math.floor(s);
+  const m = Math.floor(totalSec / 60);
+  if (m < 60) return `${m}m ${totalSec % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
+};
+
 window.PRG.escapeHtml = function escapeHtml(s) {
   return String(s == null ? '' : s)
     .replace(/&/g, '&amp;')

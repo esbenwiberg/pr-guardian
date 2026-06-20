@@ -7,10 +7,17 @@ async function fetchSnippet(reviewId, path, line, context = 3) {
     const url = `/api/dashboard/reviews/${encodeURIComponent(reviewId)}/diff`
       + `?path=${encodeURIComponent(path)}&line=${encodeURIComponent(line)}&context=${encodeURIComponent(context)}`;
     const resp = await fetch(url);
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      let detail = `Couldn't load the code snippet (HTTP ${resp.status}).`;
+      try {
+        const body = await resp.json();
+        if (body && body.detail) detail = body.detail;
+      } catch { /* non-JSON error body */ }
+      return { error: detail };
+    }
     return await resp.json();
   } catch {
-    return null;
+    return { error: 'Network error while loading the code snippet.' };
   }
 }
 
@@ -26,7 +33,9 @@ function renderSnippet(container, hunkData) {
   if (!lines.length) {
     const msg = document.createElement('div');
     msg.className = 'text-xs text-slate-500 mt-2 ml-1';
-    msg.textContent = 'snippet unavailable';
+    msg.textContent = (hunkData && hunkData.error)
+      ? hunkData.error
+      : 'No code is available for this line in the PR diff.';
     msg.dataset.snippetFallback = '1';
     container.appendChild(msg);
     return;

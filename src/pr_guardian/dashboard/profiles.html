@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PR Guardian - Profiles</title>
+<title>PR Guardian — Profiles</title>
 <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body class="bg-surface-overlay text-slate-50 min-h-screen font-sans antialiased">
@@ -64,7 +64,7 @@
         <div class="section-grid">
           <fieldset class="fieldset">
             <legend>Review Policy</legend>
-            <label class="field">Repo risk class
+            <label class="field" title="How much scrutiny this repo gets. Higher classes raise the bar for auto-approval and pull in a human sooner.">Repo risk class
               <select id="repo-risk-class" class="form-select">
                 <option value="">Default</option>
                 <option value="standard">Standard</option>
@@ -72,29 +72,29 @@
                 <option value="critical">Critical</option>
               </select>
             </label>
-            <label class="field">Reviewer group
+            <label class="field" title="Team or group requested as reviewers when a PR needs a human.">Reviewer group
               <input id="reviewer-group" class="form-input" autocomplete="off">
             </label>
-            <label class="field">Auto-approve max score
+            <label class="field" title="PRs whose combined risk score is at or below this (0–100) are auto-approved without a human.">Auto-approve max score
               <input id="auto-approve-max-score" type="number" min="0" max="100" step="1" class="form-input">
             </label>
-            <label class="field">Hard-block score
+            <label class="field" title="PRs scoring at or above this (0–100) are hard-blocked — they can't merge until the risk is resolved.">Hard-block score
               <input id="hard-block-score" type="number" min="0" max="100" step="1" class="form-input">
             </label>
           </fieldset>
 
           <fieldset class="fieldset">
             <legend>Readiness</legend>
-            <label class="field">Quiet period seconds
+            <label class="field" title="Wait this long after the last push before reviewing, so a burst of edits doesn't trigger duplicate reviews.">Quiet period seconds
               <input id="quiet-period-seconds" type="number" min="0" max="3600" step="1" class="form-input">
             </label>
-            <label class="field">Checks max wait minutes
+            <label class="field" title="How long to wait for CI checks to finish before reviewing anyway.">Checks max wait minutes
               <input id="max-wait-minutes" type="number" min="0" max="1440" step="1" class="form-input">
             </label>
-            <label class="field">Archmap max wait minutes
+            <label class="field" title="How long to wait for the Archmap (architecture map) artifact before proceeding without it.">Archmap max wait minutes
               <input id="archmap-max-wait-minutes" type="number" min="0" max="1440" step="1" class="form-input">
             </label>
-            <label class="toggle-line">
+            <label class="toggle-line" title="Hold the review until the architecture-map artifact is available.">
               <input id="archmap-expected" type="checkbox">
               <span>Wait for Archmap artifact</span>
             </label>
@@ -118,8 +118,8 @@
             <label class="toggle-line"><input data-side-effect="scan_issues" type="checkbox"> <span>Scan issue creation</span></label>
           </div>
           <div class="mt-3 flex flex-wrap gap-4">
-            <label class="toggle-line"><input id="guardian-clearance" type="checkbox"> <span>Guardian clearance enabled</span></label>
-            <label class="toggle-line"><input id="platform-approval-enabled" type="checkbox"> <span>Platform approval enabled</span></label>
+            <label class="toggle-line" title="Let Guardian post a merge-clearance commit status that branch protection can require — merges wait for Guardian's verdict."><input id="guardian-clearance" type="checkbox"> <span>Guardian clearance enabled</span></label>
+            <label class="toggle-line" title="Allow Guardian to cast a formal platform approval / request-changes review, not just comments."><input id="platform-approval-enabled" type="checkbox"> <span>Platform approval enabled</span></label>
           </div>
         </fieldset>
 
@@ -164,6 +164,17 @@
         <div>
           <h3 class="inspector-title">Recent Audit</h3>
           <div id="profile-recent-audit" class="space-y-2 text-xs text-slate-400"></div>
+        </div>
+        <div>
+          <h3 class="inspector-title">How it works</h3>
+          <ul class="text-2xs text-slate-400 space-y-1.5 list-disc list-inside">
+            <li><strong class="text-slate-300">Risk score (0–100)</strong> is the combined risk of a PR. Low scores can auto-approve; high scores hard-block.</li>
+            <li><strong class="text-slate-300">Auto-approve max</strong> / <strong class="text-slate-300">Hard-block</strong> are the two thresholds on that score — between them, a PR goes to human review.</li>
+            <li><strong class="text-slate-300">Repo risk class</strong> shifts how cautious those thresholds are for this repo.</li>
+            <li><strong class="text-slate-300">Readiness</strong> controls when a PR is ripe to review — quiet period, CI waits, and the Archmap artifact.</li>
+            <li><strong class="text-slate-300">Side effects</strong> are the actions Guardian may take on the platform (comments, labels, formal approvals, clearance status).</li>
+          </ul>
+          <p class="text-2xs text-slate-500 mt-2">Hover any field label for a one-line explanation.</p>
         </div>
       </aside>
     </section>
@@ -819,13 +830,27 @@
     els.profileForm.addEventListener('submit', async event => {
       event.preventDefault();
       const profile = selectedProfile();
-      if (!profile) return;
-      const updated = await api(`/profiles/${profile.id}`, { method: 'PATCH', body: JSON.stringify(collectProfilePayload()) });
-      state.profiles = state.profiles.map(item => item.id === updated.id ? updated : item);
-      await refreshAudit();
-      renderAll();
-      showToast('Profile saved');
+      if (!profile) { showToast('Create or select a profile before saving'); return; }
+      const payload = collectProfilePayload();
+      if (!payload.name) {
+        // Validate rather than silently no-op on an empty name.
+        profileInputs.name.style.borderColor = '#ef4444';
+        profileInputs.name.focus();
+        showToast('Profile name is required');
+        return;
+      }
+      profileInputs.name.style.borderColor = '';
+      try {
+        const updated = await api(`/profiles/${profile.id}`, { method: 'PATCH', body: JSON.stringify(payload) });
+        state.profiles = state.profiles.map(item => item.id === updated.id ? updated : item);
+        await refreshAudit();
+        renderAll();
+        showToast('Profile saved');
+      } catch (e) {
+        showToast(e.message || 'Failed to save profile');
+      }
     });
+    profileInputs.name.addEventListener('input', () => { profileInputs.name.style.borderColor = ''; });
     els.archiveProfile.addEventListener('click', async () => {
       const profile = selectedProfile();
       if (!profile || profile.is_default) return;

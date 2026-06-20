@@ -36,10 +36,9 @@ _REVIEWS_QUEUE_HTML = _DASHBOARD_DIR / "reviews_queue.html"
 _LIVE_PROGRESS_HTML = _DASHBOARD_DIR / "live_progress.html"
 _REVIEW_DETAIL_HTML = _DASHBOARD_DIR / "review_detail.html"
 _SCANS_HTML = _DASHBOARD_DIR / "scans.html"
-_PROMPTS_HTML = _DASHBOARD_DIR / "prompts.html"
-_SETTINGS_HTML = _DASHBOARD_DIR / "settings.html"  # new consolidated hub (Brief 06)
-_SETTINGS_LLM_HTML = _DASHBOARD_DIR / "settings_llm.html"  # legacy LLM provider page (embedded)
-_ADMIN_HTML = _DASHBOARD_DIR / "admin.html"
+_SETTINGS_HTML = (
+    _DASHBOARD_DIR / "settings.html"
+)  # consolidated hub (LLM + Prompts + Admin inlined)
 _HOW_IT_WORKS_HTML = _DASHBOARD_DIR / "how_it_works.html"
 _HUMAN_REVIEW_HTML = _DASHBOARD_DIR / "human_review.html"
 _HUMAN_WIZARD_HTML = _DASHBOARD_DIR / "human_wizard.html"
@@ -149,33 +148,6 @@ async def settings_page(request: Request):
 # ---------------------------------------------------------------------------
 # Help (footer popover — no top-level nav slot)
 # ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Embedded panes consumed by the /settings hub via <iframe>.
-# Each pane is the legacy single-purpose page; the hub frames them so we can
-# keep their JS isolated (Brief 06 — see settings.html).
-# ---------------------------------------------------------------------------
-
-
-@router.get("/_embed/settings/llm", response_class=HTMLResponse)
-async def embed_llm(request: Request):
-    if not _is_admin(request):
-        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
-    return _SETTINGS_LLM_HTML.read_text()
-
-
-@router.get("/_embed/settings/prompts", response_class=HTMLResponse)
-async def embed_prompts(request: Request):
-    if not _is_admin(request):
-        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
-    return _PROMPTS_HTML.read_text()
-
-
-@router.get("/_embed/settings/admin", response_class=HTMLResponse)
-async def embed_admin(request: Request):
-    if not _is_admin(request):
-        return RedirectResponse(url="/reviews?error=admin_required", status_code=302)
-    return _ADMIN_HTML.read_text()
 
 
 @router.get("/help/how-it-works", response_class=HTMLResponse)

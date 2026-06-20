@@ -26,6 +26,7 @@
 
 <aside id="sidebar"></aside>
 <script src="/static/sidebar.js"></script>
+<script src="/static/review-helpers.js"></script>
 
 <div class="ml-16 lg:ml-64">
 <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
@@ -320,7 +321,7 @@ async function loadScans() {
         </td>
         <td>${s.cost_usd ? '$' + s.cost_usd.toFixed(4) : '-'}</td>
         <td>${s.started_at ? new Date(s.started_at).toLocaleDateString() : '-'}</td>
-        <td>${s.duration_ms ? (s.duration_ms / 1000).toFixed(1) + 's' : '-'}</td>
+        <td>${PRG.formatDuration(s.duration_ms)}</td>
       </tr>
     `).join('');
   } catch (e) {
@@ -381,7 +382,7 @@ function renderDetail(d) {
   document.getElementById('detail-stats').innerHTML = `
     <div class="stat-card"><div class="stat-card-label">Type</div><div class="stat-card-value"><span class="type-badge type-${d.scan_type}">${typeLabel}</span></div></div>
     <div class="stat-card"><div class="stat-card-label">Findings</div><div class="stat-card-value">${totalFindings}</div></div>
-    <div class="stat-card"><div class="stat-card-label">Duration</div><div class="stat-card-value">${d.duration_ms ? (d.duration_ms / 1000).toFixed(1) + 's' : '-'}</div></div>
+    <div class="stat-card"><div class="stat-card-label">Duration</div><div class="stat-card-value">${PRG.formatDuration(d.duration_ms)}</div></div>
     <div class="stat-card"><div class="stat-card-label">Cost</div><div class="stat-card-value">${d.cost_usd ? '$' + d.cost_usd.toFixed(4) : '-'}</div></div>
     <div class="stat-card"><div class="stat-card-label">${d.scan_type === 'recent_changes' ? 'Window' : 'Staleness'}</div><div class="stat-card-value">${d.scan_type === 'recent_changes' ? d.time_window_days + 'd' : d.staleness_months + 'mo'}</div></div>
   `;

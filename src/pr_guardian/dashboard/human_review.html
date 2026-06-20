@@ -298,13 +298,22 @@ async function init() {
     fetch(`/api/dashboard/reviews/${REVIEW_ID}/diff`),
   ]);
 
-  if (reviewResp.status === 'rejected') { showError('Failed to load review: ' + reviewResp.reason); return; }
-  const reviewJson = await reviewResp.value.json();
-  if (reviewJson.error) { showError(reviewJson.error); return; }
+  if (reviewResp.status === 'rejected') { showError('Failed to load review: ' + reviewResp.reason, true); return; }
+  if (!reviewResp.value.ok) { showError(`Failed to load review (HTTP ${reviewResp.value.status}).`, true); return; }
+  let reviewJson;
+  try {
+    reviewJson = await reviewResp.value.json();
+  } catch (e) {
+    // Empty/non-JSON body — the review may still be running or the fetch failed
+    // mid-flight. Surface an error with retry instead of hanging on "Loading…".
+    showError('Review data is unavailable or still being produced. Try again in a moment.', true);
+    return;
+  }
+  if (reviewJson.error) { showError(reviewJson.error, true); return; }
   reviewData = reviewJson;
 
   if (diffResp.status === 'fulfilled' && diffResp.value.ok) {
-    diffData = await diffResp.value.json();
+    try { diffData = await diffResp.value.json(); } catch { /* diff is best-effort */ }
   }
 
   buildOrientScreen();
@@ -592,6 +601,17 @@ function startChapters() {
   chaptersEl.style.display = '';
   chaptersEl.style.paddingRight = '11.5rem'; // room for map rail
   document.getElementById('hdr-progress').style.display = '';
+
+  // 0 chapters means nothing to walk — show a clean state instead of a blank
+  // canvas. (updateProgress's done===total branch is gated on total>0.)
+  if (!chapters.length) {
+    document.getElementById('hdr-progress-text').textContent = '0 / 0 chapters';
+    document.getElementById('chapters-container').style.display = 'none';
+    document.getElementById('done-summary').textContent = 'No findings to review — this PR came back clean.';
+    document.getElementById('review-done').style.display = '';
+    window.scrollTo(0, 0);
+    return;
+  }
 
   buildChapterMap();
   renderAllChapters();
@@ -897,11 +917,29 @@ function showToast(msg, type='info') {
   setTimeout(() => t.remove(), 3500);
 }
 
-function showError(msg) {
+function showError(msg, retryable) {
   document.getElementById('loading').style.display = 'none';
   const el = document.getElementById('error');
-  el.textContent = msg;
+  el.innerHTML = '';
+  const line = document.createElement('div');
+  line.textContent = msg;
+  el.appendChild(line);
+  if (retryable) {
+    const btn = document.createElement('button');
+    btn.className = 'btn btn-sm btn-secondary mt-4';
+    btn.textContent = 'Retry';
+    btn.onclick = retryInit;
+    el.appendChild(btn);
+  }
   el.style.display = '';
+}
+
+function retryInit() {
+  const loading = document.getElementById('loading');
+  document.getElementById('error').style.display = 'none';
+  loading.textContent = 'Loading review data...';
+  loading.style.display = '';
+  init();
 }
 
 init();
