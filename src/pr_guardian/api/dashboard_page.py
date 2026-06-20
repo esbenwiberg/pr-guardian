@@ -15,9 +15,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 
 router = APIRouter(tags=["dashboard"])
+
+# Emerald shield (matches the sidebar wordmark logo) served as the favicon so
+# every page stops 404-ing on /favicon.ico.
+_FAVICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="#10b981">'
+    '<path d="M12 1L3 5v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V5l-9-4z"/>'
+    '<path d="M10 15.5l-3.5-3.5 1.41-1.41L10 12.67l5.59-5.59L17 8.5l-7 7z" fill="#0f172a"/>'
+    "</svg>"
+)
 
 _DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 _PULL_REQUESTS_HTML = _DASHBOARD_DIR / "pull_requests.html"
@@ -61,6 +70,12 @@ def _can_manage_profiles(request: Request) -> bool:
 @router.get("/", response_class=HTMLResponse)
 async def root():
     return RedirectResponse(url="/reviews", status_code=302)
+
+
+@router.get("/favicon.ico", include_in_schema=False)
+@router.get("/favicon.svg", include_in_schema=False)
+async def favicon() -> Response:
+    return Response(content=_FAVICON_SVG, media_type="image/svg+xml")
 
 
 @router.get("/reviews", response_class=HTMLResponse)

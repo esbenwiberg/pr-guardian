@@ -14,7 +14,7 @@
 <!-- Main Content -->
 <div class="ml-16 lg:ml-64">
   <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
-    <h1 class="text-sm font-semibold text-slate-50">Insights</h1>
+    <h1 class="text-lg font-semibold text-slate-50">Insights</h1>
   </header>
 
   <div class="max-w-[1400px] mx-auto p-6">
@@ -26,7 +26,7 @@
       <div class="flex-1">
         <div class="text-base font-semibold text-slate-100">No reviews yet</div>
         <p class="text-sm text-slate-400 mt-1">Once Guardian processes its first PR, decision rates, risk tiers, severity breakdowns, and cost trends will appear here.</p>
-        <a href="/reviews" class="inline-block mt-3 text-sm text-indigo-400 hover:text-indigo-300 font-medium">Trigger your first review →</a>
+        <a href="/reviews" class="inline-block mt-3 text-sm text-accent-400 hover:text-accent-300 font-medium">Trigger your first review →</a>
       </div>
     </div>
   </div>
@@ -327,18 +327,28 @@ function renderDecisionDonut(counts, total) {
     legend.innerHTML = '';
     return;
   }
+  // Reviews still in progress have no decision yet — account for them so the
+  // ring and legend sum to the center total instead of silently falling short.
+  const decided = Object.keys(DECISION_COLORS).reduce((sum, key) => sum + (counts[key] || 0), 0);
+  const inProgress = Math.max(0, total - decided);
+  const slices = Object.entries(DECISION_COLORS).map(([key, color]) => [color, counts[key] || 0]);
+  if (inProgress > 0) slices.push(['#475569', inProgress]);
   const segments = [];
   let cumulative = 0;
-  for (const [key, color] of Object.entries(DECISION_COLORS)) {
-    const pct = ((counts[key] || 0) / total) * 100;
+  for (const [color, count] of slices) {
+    const pct = (count / total) * 100;
     segments.push(`${color} ${cumulative}% ${cumulative + pct}%`);
     cumulative += pct;
   }
   el.style.background = `conic-gradient(${segments.join(', ')})`;
   el.innerHTML = `<div class="donut-hole">${total}</div>`;
-  legend.innerHTML = Object.entries(DECISION_COLORS).map(([key, color]) =>
+  const legendItems = Object.entries(DECISION_COLORS).map(([key, color]) =>
     `<div class="flex items-center gap-2 text-sm"><div class="w-2.5 h-2.5 rounded-full shrink-0" style="background:${color}"></div>${formatDecision(key)} (${counts[key] || 0})</div>`
-  ).join('');
+  );
+  if (inProgress > 0) {
+    legendItems.push(`<div class="flex items-center gap-2 text-sm"><div class="w-2.5 h-2.5 rounded-full shrink-0" style="background:#475569"></div>In progress (${inProgress})</div>`);
+  }
+  legend.innerHTML = legendItems.join('');
 }
 
 function renderRiskBars(counts) {
@@ -422,7 +432,13 @@ function formatDuration(ms) {
   if (ms < 1000) return `${ms}ms`;
   const s = ms / 1000;
   if (s < 60) return `${s.toFixed(1)}s`;
-  return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+  const totalSec = Math.floor(s);
+  const m = Math.floor(totalSec / 60);
+  if (m < 60) return `${m}m ${totalSec % 60}s`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ${m % 60}m`;
+  const d = Math.floor(h / 24);
+  return `${d}d ${h % 24}h`;
 }
 
 function formatTime(iso) {

@@ -66,7 +66,7 @@
     return `
       <a href="${n.url}" class="sidebar-item${isActive(n.url) ? ' active' : ''}" data-nav="${n.key}">
         ${icon(n.icon)}
-        <span class="hidden lg:block">${n.name}</span>
+        <span class="sidebar-label">${n.name}</span>
       </a>`;
   }
 
@@ -104,17 +104,17 @@
     el.innerHTML = `
       <div class="sidebar-header">
         <div class="sidebar-logo">${SHIELD}</div>
-        <span class="text-sm font-semibold text-slate-50 hidden lg:block">PR Guardian</span>
-        <span class="ml-auto text-2xs font-mono text-slate-500 hidden lg:block">v0.1</span>
+        <span class="text-sm font-semibold text-slate-50 sidebar-label">PR Guardian</span>
+        <span class="ml-auto text-2xs font-mono text-slate-500 sidebar-label">v0.1</span>
       </div>
       <nav class="sidebar-nav">
         ${items}
       </nav>
-      <div class="sidebar-footer hidden lg:block">
+      <div class="sidebar-footer sidebar-label">
         <button onclick="window.__cmdPalette?.open()" class="flex items-center gap-2 w-full px-3 py-1.5 text-2xs text-slate-500 hover:text-slate-300 transition-colors rounded-lg hover:bg-slate-800/60 mb-1">
           <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
           <span>Search</span>
-          <kbd class="kbd ml-auto" style="font-size:9px">⌘K</kbd>
+          <kbd class="kbd ml-auto" style="font-size:11px">⌘K</kbd>
         </button>
         ${helpPopover()}
         <div id="sidebar-footer-extra"></div>

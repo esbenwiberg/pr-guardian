@@ -30,6 +30,28 @@
   --accent-950: #022c22;
 }
 
+/* ── Brand-accent interactive states ─────────────────────────────────── */
+/* One hue for "selected / focused / active". Tailwind ships a blue/indigo
+   default ring + native controls inherit the OS/indigo accent; override both
+   with PR Guardian's emerald so blue is freed to mean only "low severity". */
+*, ::before, ::after {
+  --tw-ring-color: color-mix(in srgb, var(--accent-400) 55%, transparent);
+}
+[type="checkbox"], [type="radio"] {
+  accent-color: var(--accent-500);
+}
+:focus-visible {
+  outline-color: var(--accent-400);
+}
+
+/* ── Sidebar responsive labels ───────────────────────────────────────── */
+/* Deliberately NOT named `.hidden`: some pages redefine
+   `.hidden { display:none !important }` for their own show/hide, which would
+   clobber the sidebar's responsive labels (this caused the Profiles page to
+   render an icon-only rail while every other page showed labels). */
+.sidebar-label { display: none; }
+@media (min-width: 1024px) { .sidebar-label { display: block; } }
+
 /* ── Page-specific styles ────────────────────────────────────────────── */
 
 @layer components {
