@@ -14,7 +14,7 @@
 
 <div class="ml-16 lg:ml-64">
   <header class="sticky top-0 z-20 flex items-center justify-between h-14 px-8 border-b border-slate-800 bg-slate-900/80 backdrop-blur-md">
-    <h1 class="text-sm font-semibold text-slate-50">Reviews</h1>
+    <h1 class="text-lg font-semibold text-slate-50">Reviews</h1>
     <div class="flex items-center gap-3">
       <div class="text-2xs text-slate-500 tabular-nums" id="queue-count"></div>
       <button id="btn-identity" title="Configure your GitHub / ADO identity"
@@ -30,7 +30,7 @@
     <div class="mb-5">
       <form id="trigger-form" class="flex flex-col gap-2">
         <div class="flex items-center gap-2">
-          <div class="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/60 focus-within:border-indigo-400/60">
+          <div class="flex-1 flex items-center gap-2 px-3 py-2 rounded-lg border border-slate-700 bg-slate-900/60 focus-within:border-accent-400">
             <svg class="w-4 h-4 text-slate-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607Z"/></svg>
             <input id="trigger-url" type="text"
                    class="flex-1 bg-transparent text-sm text-slate-100 placeholder:text-slate-500 outline-none"
@@ -104,7 +104,7 @@
       </div>
     </div>
 
-    <div class="reviews-grid">
+    <div class="reviews-grid" id="reviews-grid">
       <!-- Queue -->
       <div id="queue" class="rounded-lg border border-slate-800 bg-slate-900/40 divide-y divide-slate-800/80 overflow-hidden">
         <div class="py-16 text-center text-sm text-slate-500" id="queue-empty">Loading…</div>
@@ -130,18 +130,22 @@
     transition: all 120ms;
   }
   .chip:hover { color: rgb(241 245 249); border-color: rgb(71 85 105); }
-  .chip-active { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.5); background: rgb(99 102 241 / 0.08); }
+  .chip-active { color: rgb(110 231 183); border-color: rgb(52 211 153 / 0.5); background: rgb(52 211 153 / 0.08); }
   .reviews-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
+  /* Collapse the detail rail when no readiness candidate is selected so the
+     list claims the full width instead of leaving a quarter-width void. */
+  .reviews-grid.solo { grid-template-columns: minmax(0, 1fr); }
+  .reviews-grid.solo .readiness-panel { display: none; }
   .queue-row { display: flex; align-items: center; gap: 14px; padding: 14px 18px; transition: background 120ms; cursor: pointer; }
   .queue-row:hover { background: rgb(15 23 42 / 0.6); }
-  .queue-row.selected { background: rgb(30 41 59 / 0.58); box-shadow: inset 2px 0 0 rgb(129 140 248); }
+  .queue-row.selected { background: rgb(30 41 59 / 0.58); box-shadow: inset 2px 0 0 rgb(52 211 153); }
   .subject-icon { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; border-radius: 6px; font-size: 10px; font-weight: 600; letter-spacing: 0.04em; color: rgb(148 163 184); border: 1px solid rgb(51 65 85); background: rgb(15 23 42); }
-  .subject-icon.pr { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.45); }
+  .subject-icon.pr { color: rgb(110 231 183); border-color: rgb(52 211 153 / 0.45); }
   .subject-icon.candidate { color: rgb(45 212 191); border-color: rgb(45 212 191 / 0.45); }
   .subject-icon.scan { color: rgb(251 191 36); border-color: rgb(251 191 36 / 0.45); }
   .platform-chip { font-size: 9px; font-weight: 600; padding: 1px 5px; border-radius: 3px; color: rgb(148 163 184); border: 1px solid rgb(51 65 85); }
   .origin-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; color: rgb(148 163 184); border: 1px solid rgb(51 65 85); }
-  .origin-chip.manual, .origin-chip.you-triggered { color: rgb(165 180 252); border-color: rgb(99 102 241 / 0.45); }
+  .origin-chip.manual, .origin-chip.you-triggered { color: rgb(110 231 183); border-color: rgb(52 211 153 / 0.45); }
   .stale-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; color: rgb(251 191 36); border: 1px solid rgb(251 191 36 / 0.45); background: rgb(251 191 36 / 0.06); }
   .status-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600; letter-spacing: 0.02em; }
   .status-chip.merged { color: rgb(192 132 252); border: 1px solid rgb(192 132 252 / 0.45); background: rgb(192 132 252 / 0.06); }
@@ -315,8 +319,8 @@
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2 mb-1">
             ${platform ? `<span class="platform-chip">${platform}</span>` : ''}
-            ${(isPR || candidate) ? `<span class="text-2xs text-slate-500">#${escape(item.pr_id || item.id.replace(/^demo-pr-/,''))}</span>` : ''}
-            <span class="text-sm font-medium text-slate-100 truncate">${escape(item.title)}</span>
+            ${(isPR || candidate) ? `<span class="text-2xs font-mono text-slate-500 shrink-0">#${escape(item.pr_id || item.id.replace(/^demo-pr-/,'').slice(0, 7))}</span>` : ''}
+            <span class="text-sm font-medium text-slate-100 truncate min-w-0">${escape(item.title)}</span>
             ${statusBadge}
             ${failureBadge}
             ${staleBadge}
@@ -406,7 +410,7 @@
     if (!filtered.length) {
       queueEl.innerHTML = `<div class="empty-state py-16 text-center">
         <p class="text-sm text-slate-300 mb-1">No reviews match these filters.</p>
-        <button class="text-xs text-indigo-400 hover:text-indigo-300" onclick="(function(){ document.querySelectorAll('.chip').forEach(c=>c.classList.remove('chip-active')); document.querySelector('.chip[data-filter=all]').classList.add('chip-active'); window.__resetFilters && window.__resetFilters(); })()">Clear filters</button>
+        <button class="text-xs text-accent-400 hover:text-accent-300" onclick="(function(){ document.querySelectorAll('.chip').forEach(c=>c.classList.remove('chip-active')); document.querySelector('.chip[data-filter=all]').classList.add('chip-active'); window.__resetFilters && window.__resetFilters(); })()">Clear filters</button>
       </div>`;
       return;
     }
@@ -449,12 +453,15 @@
   }
 
   function renderPanel() {
+    const grid = document.getElementById('reviews-grid');
     const item = selectedCandidate();
     if (!item) {
+      if (grid) grid.classList.add('solo');
       panelEl.innerHTML = `<div class="text-sm font-semibold text-slate-200">Readiness</div>
         <p class="mt-2 text-xs text-slate-500">Select a waiting or blocked readiness candidate.</p>`;
       return;
     }
+    if (grid) grid.classList.remove('solo');
     SELECTED_CANDIDATE_ID = item.id;
     const snapshot = item.readiness?.snapshot || {};
     const canOverride = Boolean(ME && (ME.is_admin || ME.can_manage_profiles));
@@ -706,16 +713,16 @@
     <label class="block mb-4">
       <span class="text-xs font-medium text-slate-300 block mb-1">GitHub username</span>
       <input id="inp-gh" type="text" placeholder="e.g. octocat"
-             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-indigo-500">
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
     </label>
     <label class="block mb-6">
       <span class="text-xs font-medium text-slate-300 block mb-1">Azure DevOps UPN</span>
       <input id="inp-ado" type="text" placeholder="e.g. alice@company.com"
-             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-indigo-500">
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
     </label>
     <div class="flex gap-3 justify-end">
       <button id="btn-identity-cancel" class="chip">Cancel</button>
-      <button id="btn-identity-save" class="px-4 py-2 text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-colors">Save</button>
+      <button id="btn-identity-save" class="px-4 py-2 text-xs font-semibold bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition-colors">Save</button>
     </div>
   </div>
 </div>
