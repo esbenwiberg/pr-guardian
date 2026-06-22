@@ -132,6 +132,7 @@ sa.Table(
     sa.Column("head_sha", sa.String(64), nullable=False),
     sa.Column("state", sa.String(16), nullable=False, server_default="waiting"),
     sa.Column("reason", sa.String(128), nullable=False, server_default=""),
+    sa.Column("readiness_synced", sa.Boolean, nullable=False, server_default=sa.false()),
     sa.Column("readiness_snapshot", sa.JSON, nullable=False, server_default="{}"),
     sa.Column("profile_snapshot", sa.JSON),
     sa.Column("connection_snapshot", sa.JSON),

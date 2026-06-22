@@ -323,6 +323,37 @@ async def evaluate_candidates_for_sha(
     return evaluated
 
 
+async def reassert_reviewed_readiness(candidate: dict[str, Any]) -> bool:
+    """Re-post guardian/readiness=success for a completed review whose check is stranded.
+
+    A finished review re-asserts readiness=success, but that write is best-effort:
+    when it fails the candidate is already terminal (`reviewed`) and never
+    re-evaluated, so the readiness check stays pending forever. The reconciler
+    calls this for unsynced reviewed candidates. It is idempotent (success→success
+    is a no-op on the platform) and one-shot: a confirmed write flips
+    `readiness_synced`, so the candidate drops out of the reconciler scan. A failed
+    write leaves the flag unset to retry on the next tick.
+    """
+    candidate_id = uuid.UUID(candidate["id"])
+    try:
+        adapter = await _adapter_for_candidate(candidate)
+        pr = _candidate_pr(candidate)
+    except Exception as exc:
+        log.warning(
+            "readiness_reassert_adapter_failed",
+            candidate_id=candidate["id"],
+            error=repr(exc),
+            error_type=type(exc).__name__,
+        )
+        return False
+    written = await _post_readiness_status(
+        adapter, pr, "success", "Guardian readiness: review_completed"
+    )
+    if written:
+        await storage.mark_readiness_synced(candidate_id)
+    return written
+
+
 async def evaluate_candidate(
     candidate_id: uuid.UUID,
     *,

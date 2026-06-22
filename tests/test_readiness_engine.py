@@ -510,6 +510,81 @@ async def test_automatic_review_startup_failure_is_marked_and_reported(monkeypat
         await engine.dispose()
 
 
+async def _reviewed_candidate(link: dict):
+    """Drive a candidate all the way to the terminal ``reviewed`` state."""
+    candidate = await storage.create_readiness_candidate(
+        repo_link_id=uuid.UUID(link["id"]),
+        pr_id="42",
+        head_sha="sha1",
+    )
+    started = await storage.try_start_candidate_review(
+        uuid.UUID(candidate["id"]),
+        _pr(),
+        source="automatic",
+        actor="webhook",
+        reason="ready",
+        readiness_snapshot={"ready": True},
+    )
+    assert started is not None
+    review_id, _ = started
+    assert await storage.mark_candidate_reviewed_for_review(review_id)
+    return candidate
+
+
+async def test_reconciler_reasserts_stranded_readiness_for_reviewed_candidate():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            candidate = await _reviewed_candidate(link)
+
+            # First pass: the stranded check is re-asserted to success and the
+            # candidate is flagged synced.
+            adapter = FakeReadinessAdapter()
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=adapter):
+                assert await reconcile_readiness_once() == 1
+            assert adapter.statuses == [
+                ("guardian/readiness", "success", "Guardian readiness: review_completed")
+            ]
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["state"] == "reviewed"
+            assert updated["readiness_synced"] is True
+
+            # Second pass: the synced flag excludes it — no candidate, no re-post.
+            adapter2 = FakeReadinessAdapter()
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=adapter2):
+                assert await reconcile_readiness_once() == 0
+            assert adapter2.statuses == []
+    finally:
+        await engine.dispose()
+
+
+async def test_reviewed_readiness_reassert_failure_leaves_candidate_unsynced():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            candidate = await _reviewed_candidate(link)
+
+            class _RaisingAdapter(FakeReadinessAdapter):
+                async def set_readiness_status(self, pr, state, description):
+                    raise RuntimeError("status write failed")
+
+            adapter = _RaisingAdapter()
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=adapter):
+                # The reconcile tick survives the failed write (best-effort).
+                assert await reconcile_readiness_once() == 1
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["readiness_synced"] is False
+            # Still eligible, so the next tick retries.
+            recoverable = await storage.list_recoverable_readiness_candidates()
+            assert candidate["id"] in {c["id"] for c in recoverable}
+    finally:
+        await engine.dispose()
+
+
 class _AdoResponse:
     def __init__(self, body: dict, status_code: int = 200):
         self._body = body

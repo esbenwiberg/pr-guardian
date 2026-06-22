@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     true,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -626,6 +627,14 @@ class ReadinessCandidateRow(Base):
     head_sha: Mapped[str] = mapped_column(String(64), index=True)
     state: Mapped[str] = mapped_column(String(16), default="waiting")
     reason: Mapped[str] = mapped_column(String(128), default="")
+    # Set once a *reviewed* candidate's guardian/readiness=success status is
+    # confirmed written. A completed review re-asserts readiness=success, but if
+    # that write fails the candidate is terminal and never re-evaluated, leaving
+    # the readiness check stranded as pending. The reconciler re-asserts it for
+    # unsynced reviewed candidates and flips this flag so it fires exactly once.
+    readiness_synced: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false(), nullable=False
+    )
     readiness_snapshot: Mapped[dict] = mapped_column(_json_type(), default=dict)
     profile_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)
     connection_snapshot: Mapped[dict | None] = mapped_column(_json_type(), nullable=True)

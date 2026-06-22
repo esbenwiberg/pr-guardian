@@ -59,6 +59,10 @@ READINESS_STATES = frozenset(
 )
 TERMINAL_READINESS_STATES = frozenset({"reviewing", "reviewed", "superseded"})
 DEFAULT_REVIEWING_STALE_MINUTES = 15
+# How far back a reviewed candidate stays eligible for a readiness re-assert.
+# Bounds the reconciler scan to recently-completed reviews so a stranded
+# readiness check self-heals without trawling the entire reviewed backlog.
+DEFAULT_REVIEWED_SYNC_WINDOW_MINUTES = 360
 
 add_excluded_repo = _exclusions.add_excluded_repo
 add_exclusion_rule = _exclusions.add_exclusion_rule
@@ -331,6 +335,7 @@ def _candidate_to_dict(row: ReadinessCandidateRow) -> dict[str, Any]:
         "head_sha": row.head_sha,
         "state": row.state,
         "reason": row.reason,
+        "readiness_synced": row.readiness_synced,
         "readiness_snapshot": row.readiness_snapshot or {},
         "profile_snapshot": row.profile_snapshot,
         "connection_snapshot": row.connection_snapshot,
@@ -1265,7 +1270,10 @@ async def list_active_readiness_candidates(
 
 
 async def list_recoverable_readiness_candidates(
-    *, limit: int = 100, reviewing_stale_minutes: int = DEFAULT_REVIEWING_STALE_MINUTES
+    *,
+    limit: int = 100,
+    reviewing_stale_minutes: int = DEFAULT_REVIEWING_STALE_MINUTES,
+    reviewed_sync_window_minutes: int = DEFAULT_REVIEWED_SYNC_WINDOW_MINUTES,
 ) -> list[dict[str, Any]]:
     recoverable_reasons = (
         "",
@@ -1281,6 +1289,7 @@ async def list_recoverable_readiness_candidates(
         "review_worker_stale",
     )
     stale_cutoff = _now() - timedelta(minutes=reviewing_stale_minutes)
+    reviewed_window_cutoff = _now() - timedelta(minutes=reviewed_sync_window_minutes)
     async with async_session() as session:
         rows = (
             await session.scalars(
@@ -1293,6 +1302,13 @@ async def list_recoverable_readiness_candidates(
                     | (
                         (ReadinessCandidateRow.state == "reviewing")
                         & (ReadinessCandidateRow.updated_at < stale_cutoff)
+                    )
+                    | (
+                        # Reviewed but never confirmed readiness=success — re-assert
+                        # the stranded check once (the flag then excludes it).
+                        (ReadinessCandidateRow.state == "reviewed")
+                        & ReadinessCandidateRow.readiness_synced.is_(False)
+                        & (ReadinessCandidateRow.updated_at >= reviewed_window_cutoff)
                     )
                 )
                 .order_by(ReadinessCandidateRow.updated_at.asc())
@@ -1520,6 +1536,24 @@ async def mark_candidate_reviewed_for_review(review_id: uuid.UUID) -> bool:
         candidate.reason = "review_completed"
         candidate.updated_at = _now()
         session.add(transition)
+        await session.commit()
+        return True
+
+
+async def mark_readiness_synced(candidate_id: uuid.UUID) -> bool:
+    """Record that a reviewed candidate's guardian/readiness=success is confirmed.
+
+    Only applies to terminal `reviewed` candidates: it stops the reconciler from
+    re-asserting the readiness check again. Leaves `updated_at` untouched so the
+    flag, not the timestamp, is what excludes the row from future scans.
+    """
+    async with async_session() as session:
+        candidate = await session.get(ReadinessCandidateRow, candidate_id)
+        if candidate is None or candidate.state != "reviewed":
+            return False
+        if candidate.readiness_synced:
+            return True
+        candidate.readiness_synced = True
         await session.commit()
         return True
 

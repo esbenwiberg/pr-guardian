@@ -5,7 +5,7 @@ import uuid
 
 import structlog
 
-from pr_guardian.core.readiness import evaluate_candidate
+from pr_guardian.core.readiness import evaluate_candidate, reassert_reviewed_readiness
 from pr_guardian.persistence import storage
 
 log = structlog.get_logger()
@@ -17,7 +17,12 @@ async def reconcile_readiness_once(*, limit: int = 100) -> int:
     count = 0
     for candidate in candidates:
         try:
-            await evaluate_candidate(candidate_id=uuid.UUID(candidate["id"]))
+            # Terminal `reviewed` candidates short-circuit evaluate_candidate, so
+            # re-assert their stranded readiness check directly instead.
+            if candidate["state"] == "reviewed":
+                await reassert_reviewed_readiness(candidate)
+            else:
+                await evaluate_candidate(candidate_id=uuid.UUID(candidate["id"]))
             count += 1
         except Exception as exc:
             log.warning(
