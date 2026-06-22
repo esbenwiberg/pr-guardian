@@ -186,6 +186,46 @@ async def test_terminal_candidate_at_same_sha_is_not_reposted():
         await engine.dispose()
 
 
+async def test_unchanged_readiness_status_is_not_reposted():
+    # Posting a commit status fires a GitHub `status` webhook that re-triggers
+    # evaluation. Re-posting an *identical* status is a self-amplifying loop
+    # that burns through GitHub's 1000-statuses-per-context-per-SHA cap, after
+    # which writes 422 and the candidate strands in "error". An unchanged
+    # decision must therefore write no new status; a real change still does.
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo()
+            adapter = FakeReadinessAdapter(
+                signals=[PlatformReadinessSignal("ci", "in_progress", "check_run")]
+            )
+            candidate = await create_or_update_candidate_from_pr(
+                _pr(), adapter=adapter, source="webhook"
+            )
+            assert candidate is not None
+            assert candidate["reason"] == "checks_pending"
+
+            def readiness_writes() -> list[tuple[str, str, str]]:
+                return [s for s in adapter.statuses if s[0] == "guardian/readiness"]
+
+            before = len(readiness_writes())
+
+            # Re-evaluate repeatedly with the SAME pending signal: no new writes.
+            for _ in range(3):
+                again = await evaluate_candidate(uuid.UUID(candidate["id"]), adapter=adapter)
+                assert again["reason"] == "checks_pending"
+            assert len(readiness_writes()) == before
+
+            # A genuine change (checks pass) must write again.
+            adapter.signals = [PlatformReadinessSignal("ci", "success", "check_run")]
+            await evaluate_candidate(uuid.UUID(candidate["id"]), adapter=adapter)
+            new_writes = readiness_writes()
+            assert len(new_writes) == before + 1
+            assert new_writes[-1][1] == "success"
+    finally:
+        await engine.dispose()
+
+
 async def test_failed_timeout_fork_and_permission_readiness_outcomes():
     engine, factory = await _make_session_factory()
     try:

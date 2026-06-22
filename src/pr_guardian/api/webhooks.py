@@ -95,6 +95,12 @@ async def github_webhook(
 
     body = await request.json()
     if x_github_event in {"check_run", "check_suite", "status", "workflow_run"}:
+        # A `status` event Guardian itself authored (guardian/readiness,
+        # guardian/review) must not re-trigger evaluation: posting that status
+        # fires this very event, which would re-post it — a loop that exhausts
+        # GitHub's 1000-statuses-per-context-per-SHA cap and 422s thereafter.
+        if x_github_event == "status" and str(body.get("context") or "").startswith("guardian/"):
+            return {"status": "ignored", "reason": "self-authored guardian status"}
         repo, head_sha = _github_repo_and_sha(x_github_event, body)
         if not repo or not head_sha:
             return {"status": "ignored", "reason": "missing repo or head sha"}

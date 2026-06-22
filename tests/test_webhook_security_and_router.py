@@ -235,3 +235,57 @@ def test_github_review_comment_non_reply_ignored(monkeypatch):
 
     assert resp.status_code == 200
     assert resp.json()["reason"] == "not a review-comment reply"
+
+
+def _github_status_payload(context: str) -> dict:
+    return {
+        "context": context,
+        "state": "pending",
+        "sha": "abc123",
+        "repository": {"full_name": "octo/service", "owner": {"login": "octo"}},
+    }
+
+
+def test_guardian_authored_status_event_does_not_retrigger_readiness(monkeypatch):
+    # Posting guardian/readiness fires this very `status` event; re-evaluating
+    # would re-post it, forming a loop that exhausts GitHub's per-context status
+    # cap. Self-authored guardian/* status events must be ignored.
+    monkeypatch.delenv("GUARDIAN_WEBHOOK_DEV_BYPASS", raising=False)
+    monkeypatch.setenv("GITHUB_WEBHOOK_SECRET", "github-secret")
+
+    with (
+        patch(
+            "pr_guardian.api.webhooks.readiness.evaluate_candidates_for_sha",
+            new_callable=AsyncMock,
+            return_value=[],
+        ) as evaluate,
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        guardian_body = json.dumps(_github_status_payload("guardian/readiness")).encode()
+        ignored = client.post(
+            "/api/webhooks/github",
+            content=guardian_body,
+            headers={
+                "X-GitHub-Event": "status",
+                "X-Hub-Signature-256": _signature(guardian_body, "github-secret"),
+                "Content-Type": "application/json",
+            },
+        )
+        assert ignored.status_code == 200
+        assert ignored.json()["status"] == "ignored"
+        evaluate.assert_not_awaited()
+
+        # A third-party status (e.g. CI / CodeRabbit) must still trigger eval.
+        ci_body = json.dumps(_github_status_payload("CodeRabbit")).encode()
+        triggered = client.post(
+            "/api/webhooks/github",
+            content=ci_body,
+            headers={
+                "X-GitHub-Event": "status",
+                "X-Hub-Signature-256": _signature(ci_body, "github-secret"),
+                "Content-Type": "application/json",
+            },
+        )
+        assert triggered.status_code == 200
+        assert triggered.json()["status"] == "evaluated"
+        evaluate.assert_awaited_once()

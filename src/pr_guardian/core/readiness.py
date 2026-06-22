@@ -273,8 +273,13 @@ async def create_or_update_candidate_from_pr(
 
     assert existing is not None
     adapter = adapter or await _adapter_for_candidate(existing)
-    await _post_readiness_status(adapter, pr, "pending", "Guardian readiness waiting")
     if is_new:
+        # Show a neutral pending status immediately on first sight, before the
+        # (possibly slow) evaluation runs. For an existing candidate we skip
+        # straight to evaluate_candidate — it writes the real status and dedupes
+        # it, so re-posting here would be redundant spam that counts against
+        # GitHub's 1000-statuses-per-context-per-SHA cap on every poll pass.
+        await _post_readiness_status(adapter, pr, "pending", "Guardian readiness waiting")
         await _post_review_pending(adapter, pr)
         # Post initial sticky guidance comment (no review deeplink yet)
         await upsert_guidance_comment(adapter, pr, "pending", storage=storage)
@@ -417,12 +422,34 @@ async def evaluate_candidate(
     status_state = (
         "success" if decision.ready else "failure" if decision.state == "blocked" else "pending"
     )
-    status_written = await _post_readiness_status(
-        adapter,
-        pr,
-        status_state,
-        f"Guardian readiness: {decision.reason or decision.state}",
+    status_description = f"Guardian readiness: {decision.reason or decision.state}"
+    # Posting a commit status itself fires a GitHub `status` webhook, which
+    # re-triggers readiness evaluation. Re-posting an *unchanged* status is
+    # therefore a self-amplifying loop that burns through GitHub's hard cap of
+    # 1000 statuses per context per SHA — past which every write 422s and the
+    # candidate gets stranded in "error". Only write when the (sha, state,
+    # description) actually changed from the last status we successfully wrote.
+    prev_write = (candidate.get("readiness_snapshot") or {}).get("status_write") or {}
+    status_unchanged = (
+        prev_write.get("ok") is True
+        and prev_write.get("sha") == pr.head_commit_sha
+        and prev_write.get("state") == status_state
+        and prev_write.get("description") == status_description
     )
+    if status_unchanged:
+        status_written = True
+        decision.snapshot["status_write"] = prev_write
+    else:
+        status_written = await _post_readiness_status(
+            adapter, pr, status_state, status_description
+        )
+        if status_written:
+            decision.snapshot["status_write"] = {
+                "sha": pr.head_commit_sha,
+                "state": status_state,
+                "description": status_description,
+                "ok": True,
+            }
     if not status_written and decision.state != "superseded":
         augmented = {**decision.snapshot, "status_write": {"state": status_state, "ok": False}}
         if decision.ready:
