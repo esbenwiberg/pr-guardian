@@ -513,3 +513,40 @@ def test_validate_profile_settings_accepts_valid_structured_field():
 
     settings = {"severity_floor": {"enabled": False}, "readiness": {"quiet_period_seconds": 5}}
     assert _validate_profile_settings(settings) == settings
+
+
+def test_normalize_ado_org_url_canonicalizes_dev_azure():
+    from pr_guardian.api.profiles import _normalize_ado_org_url
+
+    assert _normalize_ado_org_url("https://dev.azure.com/xmp") == "https://dev.azure.com/xmp"
+    # Trailing slash is stripped before parsing.
+    assert _normalize_ado_org_url("https://dev.azure.com/xmp/") == "https://dev.azure.com/xmp"
+
+
+def test_normalize_ado_org_url_rewrites_legacy_visualstudio_host():
+    from pr_guardian.api.profiles import _normalize_ado_org_url
+
+    # Legacy {org}.visualstudio.com must collapse to the canonical dev.azure.com
+    # form so sync-built PR URLs parse with the single dev.azure.com regex used
+    # by start-wizard / start-review (regression for "Failed to start review.").
+    assert _normalize_ado_org_url("https://xmp.visualstudio.com") == "https://dev.azure.com/xmp"
+    assert _normalize_ado_org_url("https://xmp.visualstudio.com/") == "https://dev.azure.com/xmp"
+
+
+def test_normalize_ado_org_url_rejects_bad_hosts_and_paths():
+    import pytest
+
+    from pr_guardian.api.profiles import _normalize_ado_org_url
+
+    # Non-ADO host.
+    with pytest.raises(HTTPException) as exc:
+        _normalize_ado_org_url("https://evil.example.com/xmp")
+    assert exc.value.status_code == 400
+
+    # visualstudio.com with a path is rejected (org lives in the subdomain).
+    with pytest.raises(HTTPException):
+        _normalize_ado_org_url("https://xmp.visualstudio.com/PowerGantt")
+
+    # Non-HTTPS / SSRF-style input.
+    with pytest.raises(HTTPException):
+        _normalize_ado_org_url("http://169.254.169.254/latest")

@@ -81,7 +81,14 @@ def _normalize_ado_org_url(org_url: str) -> str:
         raise HTTPException(400, "ADO org_url host must be dev.azure.com or visualstudio.com")
     elif parsed.path not in ("", "/"):
         raise HTTPException(400, "ADO visualstudio.com org_url must not include a path")
-    return f"https://{host}"
+    # Normalize the legacy ``{org}.visualstudio.com`` host to the canonical
+    # ``https://dev.azure.com/{org}`` form so every stored org_url — and the PR
+    # URLs derived from it in pr_sync — parse with the single dev.azure.com regex
+    # used downstream (see api/review.py:_ADO_PR_RE).
+    org = host[: -len(".visualstudio.com")]
+    if not org or "." in org:
+        raise HTTPException(400, "ADO org_url must be https://{organization}.visualstudio.com")
+    return f"https://dev.azure.com/{org}"
 
 
 def _validate_profile_settings(settings: dict[str, Any]) -> dict[str, Any]:
@@ -291,6 +298,8 @@ class RepoLinkPayload(BaseModel):
             raise HTTPException(400, "GitHub repo links require repo_owner")
         if self.platform == "ado" and not self.org_url:
             raise HTTPException(400, "ADO repo links require org_url")
+        if self.platform == "ado" and self.org_url:
+            self.org_url = _normalize_ado_org_url(self.org_url)
         return self
 
 
@@ -828,6 +837,8 @@ async def update_repo_link(
             if body.require_review_check is not None
             else current.get("require_review_check", True)
         )
+        if platform == "ado" and body.org_url:
+            body.org_url = _normalize_ado_org_url(body.org_url)
         if platform == "github" and auto_review_enabled and not paused and require_review_check:
             await _ensure_github_gate_for_repo(
                 connection_id=body.connection_id or uuid.UUID(str(current["connection_id"])),
