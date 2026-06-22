@@ -31,6 +31,7 @@ ACTIVE_PROFILE_KEYS = {
     "readiness",
     "side_effects",
     "escalation_policy",
+    "dependency_policy",
 }
 
 _DORMANT_THRESHOLD_KEYS = {"human_review_min_score"}

@@ -14,9 +14,17 @@ dently parse it, we return ``True`` (keep escalating). We only return ``False``
 when we can positively prove the changed lines touch non-dependency content
 (project metadata, scripts, build config, comments, structure).
 
-The decision is based on *added* lines only: the signal is "adds dependencies".
-A version bump of an existing dependency still shows an added line, so it is
-caught; a pure removal is not treated as an addition.
+The same detectors answer two narrower questions, selected by which diff side we
+inspect: ``manifest_change_adds_dependency`` looks at *added* lines (adds + version
+bumps — a bump of an existing dep still shows an added line) and
+``manifest_change_removes_dependency`` looks at *deleted* lines (removals). The
+content-aware guards (project version field, scripts, build config) apply to both
+sides, so a release-please version bump is still not mistaken for a dependency
+change in either direction.
+
+Lockfile churn is detected separately by name via ``is_dependency_lockfile`` —
+lockfiles are generated artifacts with no human-readable dependency sections to
+parse, so any change to one is treated as a dependency change.
 """
 
 from __future__ import annotations
@@ -28,6 +36,31 @@ from typing import Literal
 
 LineKind = Literal["add", "del", "ctx"]
 
+# Lockfiles carry the *resolved* (often transitive) dependency set. They are
+# generated, so we don't parse them — any change is a dependency change. Matched
+# by exact basename (case-insensitive).
+_LOCKFILE_NAMES = frozenset(
+    {
+        "package-lock.json",
+        "npm-shrinkwrap.json",
+        "yarn.lock",
+        "pnpm-lock.yaml",
+        "poetry.lock",
+        "pdm.lock",
+        "uv.lock",
+        "cargo.lock",
+        "go.sum",
+        "packages.lock.json",
+        "composer.lock",
+        "gemfile.lock",
+    }
+)
+
+
+def is_dependency_lockfile(path: str) -> bool:
+    """True when ``path`` is a recognized dependency lockfile."""
+    return os.path.basename(path).lower() in _LOCKFILE_NAMES
+
 
 def manifest_change_adds_dependency(path: str, patch: str) -> bool:
     """True if the manifest patch plausibly adds/changes a dependency.
@@ -37,6 +70,19 @@ def manifest_change_adds_dependency(path: str, patch: str) -> bool:
     added lines are provably non-dependency content (e.g. a project version
     bump).
     """
+    return _manifest_change_touches_dependency(path, patch, "add")
+
+
+def manifest_change_removes_dependency(path: str, patch: str) -> bool:
+    """True if the manifest patch plausibly removes a dependency.
+
+    Mirror of :func:`manifest_change_adds_dependency` but inspects deleted lines.
+    Same fail-safe behavior for empty/unparseable patches and unknown manifests.
+    """
+    return _manifest_change_touches_dependency(path, patch, "del")
+
+
+def _manifest_change_touches_dependency(path: str, patch: str, side: LineKind) -> bool:
     # No patch to inspect (large/binary file omitted by the platform, or a
     # synthetic diff). Can't prove it's clean → keep escalating.
     if not patch.strip():
@@ -46,7 +92,7 @@ def manifest_change_adds_dependency(path: str, patch: str) -> bool:
     if detector is None:
         # Classified as a dependency file but we have no parser for it → safe.
         return True
-    return detector(patch)
+    return detector(patch, side)
 
 
 def _detector_for(path: str):
@@ -156,7 +202,7 @@ _NPM_TOP_KEY = re.compile(r'^  "([^"]+)"\s*:')
 _NPM_ENTRY = re.compile(r'^\s*"([^"]+)"\s*:')
 
 
-def _npm(patch: str) -> bool:
+def _npm(patch: str, side: LineKind) -> bool:
     # Current top-level section, tracked from 2-space-indented keys (standard
     # JSON formatting, which release-please / npm / prettier all emit).
     section: str | None = None
@@ -164,12 +210,12 @@ def _npm(patch: str) -> bool:
         top = _NPM_TOP_KEY.match(text)
         if top:
             section = top.group(1).lower()
-        if kind == "add" and _npm_add_is_dep(text, section):
+        if kind == side and _npm_line_is_dep(text, section):
             return True
     return False
 
 
-def _npm_add_is_dep(text: str, section: str | None) -> bool:
+def _npm_line_is_dep(text: str, section: str | None) -> bool:
     stripped = text.strip()
     if not stripped or stripped in {"{", "}", "},", "[", "]", "],"}:
         return False
@@ -201,9 +247,9 @@ def _npm_add_is_dep(text: str, section: str | None) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _requirements(patch: str) -> bool:
+def _requirements(patch: str, side: LineKind) -> bool:
     for kind, text in _iter_patch_lines(patch):
-        if kind != "add":
+        if kind != side:
             continue
         stripped = text.strip()
         if not stripped or stripped.startswith("#"):
@@ -222,7 +268,7 @@ _TOML_TABLE = re.compile(r"^\s*\[+([^\]]+)\]+")
 _TOML_ARRAY_KEY = re.compile(r"^\s*([A-Za-z0-9_.\-]+)\s*=\s*\[")
 
 
-def _pyproject(patch: str) -> bool:
+def _pyproject(patch: str, side: LineKind) -> bool:
     section: str | None = None
     in_dep_array = False
     for kind, text in _iter_patch_lines(patch):
@@ -237,12 +283,12 @@ def _pyproject(patch: str) -> bool:
         if text.strip() == "]":
             in_dep_array = False
 
-        if kind == "add" and _pyproject_add_is_dep(text, section, in_dep_array):
+        if kind == side and _pyproject_line_is_dep(text, section, in_dep_array):
             return True
     return False
 
 
-def _pyproject_add_is_dep(text: str, section: str | None, in_dep_array: bool) -> bool:
+def _pyproject_line_is_dep(text: str, section: str | None, in_dep_array: bool) -> bool:
     stripped = text.strip()
     if not stripped or stripped.startswith("#"):
         return False
@@ -260,13 +306,13 @@ def _pyproject_add_is_dep(text: str, section: str | None, in_dep_array: bool) ->
     return False
 
 
-def _pipfile(patch: str) -> bool:
+def _pipfile(patch: str, side: LineKind) -> bool:
     section: str | None = None
     for kind, text in _iter_patch_lines(patch):
         table = _TOML_TABLE.match(text)
         if table:
             section = table.group(1).strip().lower()
-        if kind == "add":
+        if kind == side:
             stripped = text.strip()
             if not stripped or stripped.startswith("#"):
                 continue
@@ -280,13 +326,13 @@ def _pipfile(patch: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _cargo(patch: str) -> bool:
+def _cargo(patch: str, side: LineKind) -> bool:
     section: str | None = None
     for kind, text in _iter_patch_lines(patch):
         table = _TOML_TABLE.match(text)
         if table:
             section = table.group(1).strip().lower()
-        if kind == "add":
+        if kind == side:
             stripped = text.strip()
             if not stripped or stripped.startswith("#"):
                 continue
@@ -303,7 +349,7 @@ _GO_BLOCK = re.compile(r"^\s*(require|replace|exclude)\s*\(")
 _GO_DIRECTIVE = re.compile(r"^\s*(require|replace|exclude)\s")
 
 
-def _go_mod(patch: str) -> bool:
+def _go_mod(patch: str, side: LineKind) -> bool:
     in_block = False
     for kind, text in _iter_patch_lines(patch):
         if _GO_BLOCK.match(text):
@@ -311,7 +357,7 @@ def _go_mod(patch: str) -> bool:
         elif text.strip() == ")":
             in_block = False
 
-        if kind == "add":
+        if kind == side:
             stripped = text.strip()
             if not stripped or stripped.startswith("//"):
                 continue
@@ -327,7 +373,7 @@ def _go_mod(patch: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _pom(patch: str) -> bool:
+def _pom(patch: str, side: LineKind) -> bool:
     in_deps = False
     for kind, text in _iter_patch_lines(patch):
         if "<dependencies>" in text or "<dependencyManagement>" in text:
@@ -335,7 +381,7 @@ def _pom(patch: str) -> bool:
         if "</dependencies>" in text or "</dependencyManagement>" in text:
             in_deps = False
 
-        if kind == "add":
+        if kind == side:
             if in_deps:
                 # Ignore pure structural/whitespace additions inside the block.
                 if text.strip():
@@ -359,7 +405,7 @@ _GRADLE_CONFIG = re.compile(
 )
 
 
-def _gradle(patch: str) -> bool:
+def _gradle(patch: str, side: LineKind) -> bool:
     in_deps = False
     for kind, text in _iter_patch_lines(patch):
         if _GRADLE_DEPS_OPEN.search(text):
@@ -367,7 +413,7 @@ def _gradle(patch: str) -> bool:
         elif text.strip() == "}":
             in_deps = False
 
-        if kind == "add":
+        if kind == side:
             stripped = text.strip()
             if not stripped or stripped.startswith("//") or stripped in {"}", "{"}:
                 continue
@@ -381,15 +427,15 @@ def _gradle(patch: str) -> bool:
 # --------------------------------------------------------------------------- #
 
 
-def _packages_config(patch: str) -> bool:
+def _packages_config(patch: str, side: LineKind) -> bool:
     for kind, text in _iter_patch_lines(patch):
-        if kind == "add" and "<package " in text:
+        if kind == side and "<package " in text:
             return True
     return False
 
 
-def _csproj(patch: str) -> bool:
+def _csproj(patch: str, side: LineKind) -> bool:
     for kind, text in _iter_patch_lines(patch):
-        if kind == "add" and ("<PackageReference" in text or "<PackageVersion" in text):
+        if kind == side and ("<PackageReference" in text or "<PackageVersion" in text):
             return True
     return False

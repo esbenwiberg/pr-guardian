@@ -54,6 +54,10 @@ class ReviewResult:
     reviewer_group_override: str | None = None
     escalated_from: str | None = None
 
+    # Whether auto-approve was reachable for this review (explicit trust-tier
+    # rules or Archmap available). Persisted so re-review replays the same gate.
+    auto_approve_unlocked: bool = True
+
     total_input_tokens: int = 0
     total_output_tokens: int = 0
     cost_usd: float = 0.0

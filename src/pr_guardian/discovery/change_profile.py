@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from pr_guardian.config.schema import FileRolesConfig
-from pr_guardian.discovery.dependency_change import manifest_change_adds_dependency
+from pr_guardian.discovery.dependency_change import (
+    is_dependency_lockfile,
+    manifest_change_adds_dependency,
+    manifest_change_removes_dependency,
+)
 from pr_guardian.discovery.file_roles import classify_file_roles
 from pr_guardian.models.context import (
     BlastRadius,
@@ -56,10 +60,22 @@ def build_change_profile(
     # when a patch is missing or unparseable). This stops release-please-style
     # version bumps in package.json from force-escalating to human review.
     patch_by_path = {df.path: df.patch for df in diff.files}
+    dependency_manifests = [
+        path for path, roles in file_roles.items() if FileRole.DEPENDENCY in roles
+    ]
     profile.adds_dependencies = any(
         manifest_change_adds_dependency(path, patch_by_path.get(path, ""))
-        for path, roles in file_roles.items()
-        if FileRole.DEPENDENCY in roles
+        for path in dependency_manifests
+    )
+    profile.removes_dependencies = any(
+        manifest_change_removes_dependency(path, patch_by_path.get(path, ""))
+        for path in dependency_manifests
+    )
+    # Lockfiles are classified GENERATED, not DEPENDENCY, so they are not in
+    # file_roles' dependency set — check the changed-file list by name. Any
+    # lockfile change is a (often transitive) dependency change.
+    profile.changes_dependency_lockfile = any(
+        is_dependency_lockfile(path) for path in changed_files
     )
 
     # Check for new API endpoints (heuristic: new files in controller/handler/api dirs)

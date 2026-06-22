@@ -18,6 +18,8 @@ from pr_guardian.config.schema import (
 from pr_guardian.decision.actions import build_summary_comment, get_review_labels
 from pr_guardian.decision.engine import decide
 from pr_guardian.models.context import (
+    ArchmapContext,
+    ArchmapFile,
     BlastRadius,
     ChangeProfile,
     RepoRiskClass,
@@ -48,6 +50,24 @@ from pr_guardian.triage.trust_escalation import maybe_escalate_trust
 # ---------------------------------------------------------------------------
 
 
+def _unlocked_archmap() -> ArchmapContext:
+    """A minimal non-hub Archmap so auto-approve is unlocked (trust-tier tests)."""
+    return ArchmapContext(
+        files={
+            "src/app.py": ArchmapFile(
+                path="src/app.py",
+                classification="leaf",
+                ca=0,
+                tca=0,
+                instability=0.0,
+                risk=0,
+                overridden=False,
+                reason="leaf",
+            )
+        }
+    )
+
+
 def _make_context(**overrides) -> ReviewContext:
     defaults = dict(
         pr=PlatformPR(
@@ -72,6 +92,7 @@ def _make_context(**overrides) -> ReviewContext:
         security_surface=SecuritySurface(),
         blast_radius=BlastRadius(),
         change_profile=ChangeProfile(),
+        archmap=_unlocked_archmap(),
     )
     defaults.update(overrides)
     return ReviewContext(**defaults)

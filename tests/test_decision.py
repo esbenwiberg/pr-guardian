@@ -7,6 +7,8 @@ from pr_guardian.decision.engine import (
     validated_certainty,
 )
 from pr_guardian.models.context import (
+    ArchmapContext,
+    ArchmapFile,
     BlastRadius,
     ChangeProfile,
     RepoRiskClass,
@@ -49,6 +51,24 @@ def _make_finding(**overrides) -> Finding:
     return Finding(**defaults)
 
 
+def _unlocked_archmap() -> ArchmapContext:
+    """A minimal non-hub Archmap so auto-approve is unlocked (matrix tests)."""
+    return ArchmapContext(
+        files={
+            "src/app.py": ArchmapFile(
+                path="src/app.py",
+                classification="leaf",
+                ca=0,
+                tca=0,
+                instability=0.0,
+                risk=0,
+                overridden=False,
+                reason="leaf",
+            )
+        }
+    )
+
+
 def _make_context(**overrides) -> ReviewContext:
     defaults = dict(
         pr=PlatformPR(
@@ -73,6 +93,7 @@ def _make_context(**overrides) -> ReviewContext:
         security_surface=SecuritySurface(),
         blast_radius=BlastRadius(),
         change_profile=ChangeProfile(),
+        archmap=_unlocked_archmap(),
     )
     defaults.update(overrides)
     return ReviewContext(**defaults)

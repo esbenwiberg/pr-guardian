@@ -99,16 +99,20 @@ def classify_trust_tier(
     changed_files: list[str],
     config: GuardianConfig,
     repo_risk_class: RepoRiskClass = RepoRiskClass.STANDARD,
+    archmap_available: bool = False,
 ) -> TrustTierResult:
     """Classify the PR's trust tier based on changed file paths.
 
-    Uses a 3-layer fallback:
+    Resolution order:
     1. Explicit trust_tiers.rules from config (if defined)
-    2. Derived from security_surface patterns (if no explicit rules)
-    3. Built-in defaults (always available)
+    2. Derived from security_surface patterns (if customized)
+    3. If archmap is available, NO path globs apply — every file falls to
+       default_tier and Archmap topology (the ``archmap_hub`` sticky trigger)
+       drives escalation instead of one-size-fits-all built-in globs.
+    4. Built-in defaults (always available, last resort)
     """
     trust_config = config.trust_tiers
-    rules = _resolve_rules(trust_config, config.security_surface)
+    rules = _resolve_rules(trust_config, config.security_surface, archmap_available)
     default_tier = _parse_tier(trust_config.default_tier, TrustTier.SPOT_CHECK)
 
     result = TrustTierResult(resolved_tier=default_tier)
@@ -177,8 +181,9 @@ def _parse_tier(value: str, default: TrustTier) -> TrustTier:
 def _resolve_rules(
     trust_config: TrustTierConfig,
     surface_config: SecuritySurfaceConfig,
+    archmap_available: bool = False,
 ) -> list[tuple[TrustTier, list[str], str]]:
-    """Resolve effective rules using the 3-layer fallback."""
+    """Resolve effective trust-tier rules (see :func:`classify_trust_tier`)."""
     # Layer 3: Explicit rules take full precedence
     if trust_config.rules:
         return [
@@ -191,6 +196,12 @@ def _resolve_rules(
     derived = _derive_from_surface(surface_config)
     if derived:
         return derived
+
+    # Archmap retires the built-in path globs: with topology data available and
+    # no operator-defined rules, no glob escalates — files default to
+    # default_tier and the archmap_hub sticky trigger handles risky files.
+    if archmap_available:
+        return []
 
     # Layer 1: Built-in defaults
     return list(_BUILTIN_RULES)

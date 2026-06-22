@@ -298,6 +298,22 @@ class EscalationPolicyConfig(BaseModel):
     reject_threshold: Literal["confident_only", "medium_plus", "any"] = "confident_only"
 
 
+class DependencyPolicyConfig(BaseModel):
+    """Whether dependency/package changes force a human review.
+
+    ``require_human`` is the master toggle. When on (default), a PR that adds or
+    bumps a dependency escalates to human review. ``include_lockfiles`` extends
+    that to lockfile-only churn (transitive/supply-chain bumps that never touch a
+    manifest), and ``include_removals`` extends it to dependency removals. Bot
+    authors are still short-circuited earlier via ``auto_approve.exempt_authors``,
+    so this gates human-authored package changes.
+    """
+
+    require_human: bool = True
+    include_lockfiles: bool = True
+    include_removals: bool = True
+
+
 class GuardianConfig(BaseModel):
     """Top-level config: merged from service defaults + resolved Profile policy."""
 
@@ -330,3 +346,4 @@ class GuardianConfig(BaseModel):
     guardian_clearance: bool = False
     platform_approval_enabled: bool = False
     escalation_policy: EscalationPolicyConfig = Field(default_factory=EscalationPolicyConfig)
+    dependency_policy: DependencyPolicyConfig = Field(default_factory=DependencyPolicyConfig)
