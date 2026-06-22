@@ -109,6 +109,7 @@ async def github_webhook(
             repo=repo,
             head_sha=head_sha,
             source=f"github:{x_github_event}",
+            base_url=str(request.base_url).rstrip("/"),
         )
         return {"status": "evaluated", "count": len(updated)}
 

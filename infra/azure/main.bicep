@@ -34,6 +34,9 @@ param entraClientSecret string = ''
 @description('Entra ID tenant ID')
 param entraTenantId string = ''
 
+@description('Public origin for review deeplinks (no trailing slash). Empty derives the ingress FQDN.')
+param guardianBaseUrl string = ''
+
 var prefix = 'prguardian-${envName}'
 var registryName = replace('prguardian${envName}acr', '-', '')
 
@@ -84,6 +87,7 @@ module containerApp 'container-app.bicep' = {
     entraClientId: entraClientId
     entraClientSecret: entraClientSecret
     entraTenantId: entraTenantId
+    guardianBaseUrl: guardianBaseUrl
   }
 }
 

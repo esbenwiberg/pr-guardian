@@ -22,10 +22,15 @@ _AGENT_LABELS: dict[str, str] = {
 def build_review_detail_url(review_id: str, base_url: str = "") -> str | None:
     """Build the URL to the findings detail page.
 
-    Uses the provided base_url (inferred from the incoming request), falling
-    back to the GUARDIAN_BASE_URL env var for reverse-proxy overrides.
+    ``GUARDIAN_BASE_URL`` is the authoritative public origin and wins when set:
+    this is a hosted service behind a reverse proxy (Entra/Envoy), so the
+    request-derived ``base_url`` is the *internal* pod host and produces broken
+    links. The request ``base_url`` is only a fallback for local dev where the
+    env var is unset. Several review-trigger paths (status/check webhooks, the
+    reconciler poll) carry no request at all and pass an empty ``base_url`` —
+    the env var is the only thing that yields a working deeplink for them.
     """
-    base = base_url.rstrip("/") or os.environ.get("GUARDIAN_BASE_URL", "").rstrip("/")
+    base = os.environ.get("GUARDIAN_BASE_URL", "").rstrip("/") or base_url.rstrip("/")
     if not base or not review_id:
         return None
     return f"{base}/reviews/{review_id}"
