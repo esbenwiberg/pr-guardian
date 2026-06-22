@@ -146,6 +146,36 @@ class TestBucketSplit:
         assert sticky == []
         assert any("flagged for human review" in r for r in finding_reasons)
 
+    def test_flag_human_bare_says_no_finding_cited(self):
+        ctx = _ctx()
+        agent = _agent_result(verdict=Verdict.FLAG_HUMAN)
+        _, finding_reasons = check_overrides([agent], ctx, CONFIG)
+        assert any("no specific finding cited" in r for r in finding_reasons)
+
+    def test_flag_human_with_error_reads_as_degraded_run(self):
+        ctx = _ctx()
+        agent = AgentResult(
+            agent_name="hotspot",
+            verdict=Verdict.FLAG_HUMAN,
+            error="Invalid JSON response from LLM",
+        )
+        _, finding_reasons = check_overrides([agent], ctx, CONFIG)
+        # An errored agent did not *judge* the PR — the reason must say so, not
+        # masquerade as a finding signal.
+        assert any(
+            "could not complete" in r and "safety fallback" in r for r in finding_reasons
+        )
+
+    def test_flag_human_with_explanation_surfaces_reasoning(self):
+        ctx = _ctx()
+        agent = AgentResult(
+            agent_name="test_quality",
+            verdict=Verdict.FLAG_HUMAN,
+            verdict_explanation="No new tests cover the rAF timing path.",
+        )
+        _, finding_reasons = check_overrides([agent], ctx, CONFIG)
+        assert any("No new tests cover the rAF timing path." in r for r in finding_reasons)
+
     def test_suspected_threshold_goes_to_finding_reasons(self):
         suspected_finding = Finding(
             severity=Severity.MEDIUM,

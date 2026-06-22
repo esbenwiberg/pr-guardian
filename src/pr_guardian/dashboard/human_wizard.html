@@ -449,7 +449,45 @@ function buildCapabilitiesAndDecisions(reviewData, diffData, capsData) {
       });
     });
   }
-  return { capabilities, decisions };
+
+  // Agents that flagged for human review but produced no decision-class finding
+  // have no file anchor — they can't become a capability concern, so they used
+  // to vanish and leave the human in an empty wizard ("0 capabilities to walk").
+  // Surface each as a standalone "domain" chapter carrying the agent's own
+  // reasoning so the reviewer learns why/where the PR was flagged. Matches the
+  // FLAG_HUMAN gating in decision/engine.py + triage/trust_escalation.py.
+  const AGENT_LABELS = {
+    security_privacy: 'Security & Privacy',
+    performance: 'Performance',
+    architecture_intent: 'Architecture & Intent',
+    code_quality_observability: 'Code Quality',
+    test_quality: 'Test Quality',
+    hotspot: 'Hotspots',
+  };
+  const agentFlags = [];
+  for (const agent of (reviewData.agent_results || [])) {
+    if ((agent.verdict || '').toLowerCase() !== 'flag_human') continue;
+    // Already represented as a capability concern? Then skip — no phantom chapter.
+    const hasDecision = (agent.findings || []).some(f => f.file && f.triage === 'decision');
+    if (hasDecision) continue;
+    const failed = !!agent.error;
+    const explanation = failed
+      ? `This agent could not complete its review (${agent.error}). It was escalated `
+        + `to a human as a safety fallback — there's no specific finding to show, so `
+        + `review this area manually.`
+      : (agent.verdict_explanation
+          || 'This agent flagged the PR for human review but cited no specific finding. '
+             + 'Review this area manually.');
+    agentFlags.push({
+      id: `flag-${agent.agent_name}`,
+      agent_name: agent.agent_name,
+      label: AGENT_LABELS[agent.agent_name] || agent.agent_name,
+      failed,
+      explanation,
+    });
+  }
+
+  return { capabilities, decisions, agentFlags };
 }
 
 function buildWWH(reviewData, capabilities, files, capsData) {
@@ -559,10 +597,12 @@ async function loadAndBuild() {
   const capsData = (capsResp.status === 'fulfilled' && capsResp.value.ok)
     ? await capsResp.value.json() : null;
 
-  const { capabilities, decisions } = buildCapabilitiesAndDecisions(reviewData, diffData, capsData);
+  const { capabilities, decisions, agentFlags } = buildCapabilitiesAndDecisions(reviewData, diffData, capsData);
   window.PR_TITLE = reviewData.title
     ? `${reviewData.repo} #${reviewData.pr_id} — ${reviewData.title}`
     : `${reviewData.repo} #${reviewData.pr_id}`;
+  window.PR_URL = reviewData.pr_url || null;
+  window.AGENT_FLAGS = agentFlags;
   window.PR_STATS = buildStats(reviewData, files, decisions, capabilities);
   window.WWH = buildWWH(reviewData, capabilities, files, capsData);
   window.CAPABILITIES = capabilities;
@@ -575,6 +615,7 @@ async function loadAndBuild() {
 <script>
 // Populated by initState() after loadAndBuild() resolves.
 let decisions, capabilities, stats;
+let agentFlags, agentFlagState;
 let nonCleanCaps, cleanCaps, steps;
 let decisionState;
 let triggerState = [];
@@ -585,6 +626,8 @@ let stepIdx = 0;
 function initState() {
   decisions = window.DECISIONS;
   capabilities = window.CAPABILITIES;
+  agentFlags = window.AGENT_FLAGS || [];
+  agentFlagState = agentFlags.map(() => "pending");
   stats = window.PR_STATS;
   // Seed from any existing dismissals on the review (chapter-view dismissals
   // show through here too) so the reviewer sees their prior state on reload.
@@ -619,6 +662,7 @@ function initState() {
     steps = [
       { kind: "briefing", label: "Briefing" },
       ...nonCleanCaps.map(c => ({ kind: "capability", capId: c.id, label: c.name })),
+      ...agentFlags.map(f => ({ kind: "agent_flag", flagId: f.id, label: f.label })),
       { kind: "wrap", label: "Wrap-up" },
     ];
   }
@@ -656,6 +700,10 @@ function isStepDone(idx) {
   }
   if (s.kind === "verification") {
     return triggerState.length > 0 && triggerState.every(st => st !== "pending");
+  }
+  if (s.kind === "agent_flag") {
+    const idx = agentFlags.findIndex(f => f.id === s.flagId);
+    return idx >= 0 && agentFlagState[idx] !== "pending";
   }
   return false;
 }
@@ -726,8 +774,14 @@ function renderBriefing() {
           <span class="cap-preview-tag ${c.clean ? 'clean' : 'has'}">${c.clean ? '✓ clean' : decs.length + ' concern' + (decs.length === 1 ? '' : 's')}</span>
         </div>`;
       }).join("")}
+      ${agentFlags.map(f => `<div class="cap-preview-row">
+        <span class="cap-preview-dot has"></span>
+        <span class="cap-preview-name">${escapeHtml(f.label)}</span>
+        <span class="cap-preview-meta">no file anchor</span>
+        <span class="cap-preview-tag has">${f.failed ? 'agent failed' : 'flagged'}</span>
+      </div>`).join("")}
       <p style="font-size: 12.5px; color: var(--muted); margin: 14px 0 0; line-height: 1.55;">
-        Clean capabilities are skipped from the wizard — the agent reviewed them and found nothing for you. They're listed at the wrap-up.
+        ${agentFlags.length ? `${agentFlags.length} agent${agentFlags.length === 1 ? '' : 's'} flagged this PR without a specific finding — you'll walk those below so you know why it needs a human. ` : ''}Clean capabilities are skipped from the wizard — the agent reviewed them and found nothing for you. They're listed at the wrap-up.
       </p>
     </div>
   `;
@@ -796,6 +850,57 @@ function renderCapability(capId) {
         const msg = (err && err.message) ? err.message : String(err);
         alert(`Couldn't save decision: ${msg}`);
       }
+      render();
+    });
+  });
+}
+
+// Agent-flag chapter: an agent asked for a human eye but cited no finding (or
+// could not complete). There's no finding_id or trigger to persist against, so
+// acknowledgement is client-side only — the point is to tell the human WHY the
+// PR was flagged and WHERE to look, not to record a dismissal.
+function renderAgentFlag(flagId) {
+  const idx = agentFlags.findIndex(f => f.id === flagId);
+  const flag = agentFlags[idx];
+  const st = agentFlagState[idx];
+  const flagNum = idx + 1;
+  const decidedTag = st === 'acknowledged'
+    ? `<span class="decided-tag accepted">✓ acknowledged</span>`
+    : st === 'needs_fix'
+    ? `<span class="decided-tag fix">✎ needs fix</span>`
+    : '';
+  const prLink = window.PR_URL
+    ? `<a class="ghost" style="text-decoration:none" href="${escapeHtml(window.PR_URL)}" target="_blank" rel="noopener">Open PR ↗</a>`
+    : '';
+  document.getElementById("step").innerHTML = `
+    <div class="eyebrow">Step ${stepIdx + 1} of ${steps.length} · Agent flag ${flagNum} of ${agentFlags.length}</div>
+    <h1 class="step-title">${escapeHtml(flag.label)} flagged this PR</h1>
+    <p class="subtitle">${flag.failed
+      ? 'This agent could not finish — it was escalated to you as a safety fallback. No specific finding was produced.'
+      : 'This agent asked for a human eye but cited no specific finding. Here&rsquo;s its reasoning:'}</p>
+    <div class="concern ${flag.failed ? 'sev-medium' : 'sev-low'}" data-flag-idx="${idx}">
+      <div class="concern-head">
+        <h3>${flag.failed ? 'Agent did not complete' : 'Why it flagged'}</h3>
+        ${decidedTag}
+      </div>
+      <div class="concern-prose"><p>${escapeHtml(flag.explanation)}</p></div>
+      <div class="concern-actions">
+        <button class="primary ${st === 'acknowledged' ? 'active' : ''}" data-fact="acknowledge" data-flag-idx="${idx}">✓ Acknowledge</button>
+        <button class="danger ${st === 'needs_fix' ? 'active' : ''}" data-fact="needs_fix" data-flag-idx="${idx}">✎ Needs fix</button>
+        <span class="concern-actions-right">
+          ${st !== 'pending' ? `<button class="clear" data-fact="clear" data-flag-idx="${idx}">clear</button>` : ''}
+          ${prLink}
+        </span>
+      </div>
+    </div>
+  `;
+  document.querySelectorAll('[data-fact]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const act = btn.dataset.fact;
+      const i = parseInt(btn.dataset.flagIdx, 10);
+      agentFlagState[i] = act === 'clear' ? 'pending'
+        : act === 'acknowledge' ? 'acknowledged' : 'needs_fix';
       render();
     });
   });
@@ -969,6 +1074,12 @@ function renderWrap() {
       <div class="summary-card pending"><div class="num">${pending}</div><div class="lbl">Pending</div></div>
     </div>
 
+    ${agentFlags.length ? `<div class="also-reviewed">
+      <strong>Agent flags:</strong> ${agentFlags.map(f => escapeHtml(f.label)).join(" · ")}
+      — ${agentFlagState.filter(s => s !== 'pending').length} of ${agentFlags.length} acknowledged.
+      These agents asked for a human eye without citing a specific finding.
+    </div>` : ''}
+
     ${cleanCaps.length ? `<div class="also-reviewed">
       <strong>Also reviewed (clean):</strong> ${cleanCaps.map(c => escapeHtml(c.name)).join(" · ")}.
       The agent looked at these capabilities and surfaced no concerns for you.
@@ -1040,10 +1151,17 @@ function renderNav() {
     const decided = decs.filter(({ i }) => decisionState[i] !== "pending").length;
     status = `${decided} of ${decs.length} decided · pending decisions are fine, you can revisit`;
   } else if (s.kind === "briefing") {
-    status = `${nonCleanCaps.length} capabilities to walk · ${cleanCaps.length} clean (skipped)`;
+    const capBit = `${nonCleanCaps.length} capabilit${nonCleanCaps.length === 1 ? 'y' : 'ies'} to walk`;
+    const flagBit = agentFlags.length
+      ? ` · ${agentFlags.length} agent flag${agentFlags.length === 1 ? '' : 's'} to review`
+      : '';
+    status = `${capBit}${flagBit} · ${cleanCaps.length} clean (skipped)`;
   } else if (s.kind === "verification") {
     const acted = triggerState.filter(st => st !== "pending").length;
     status = `${acted} of ${triggerState.length} acknowledged`;
+  } else if (s.kind === "agent_flag") {
+    const acted = agentFlagState.filter(st => st !== "pending").length;
+    status = `${acted} of ${agentFlagState.length} agent flag${agentFlagState.length === 1 ? '' : 's'} acknowledged`;
   } else {
     status = "Final step — pick your verdict";
   }
@@ -1064,6 +1182,7 @@ function render() {
   if (s.kind === "briefing") renderBriefing();
   else if (s.kind === "capability") renderCapability(s.capId);
   else if (s.kind === "verification") renderVerification();
+  else if (s.kind === "agent_flag") renderAgentFlag(s.flagId);
   else renderWrap();
   renderNav();
 }

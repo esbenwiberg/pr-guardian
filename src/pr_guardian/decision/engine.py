@@ -139,7 +139,26 @@ def finding_overrides(
     suspected_count = 0
     for result in agent_results:
         if result.verdict == Verdict.FLAG_HUMAN:
-            finding_reasons.append(f"Agent {result.agent_name} flagged for human review")
+            # A FLAG_HUMAN verdict reaches here three ways (see agents/base.py):
+            # a degraded run (LLM/JSON error → fail-safe escalation), a genuine
+            # flag carrying the agent's reasoning, or a flag with neither. Keep
+            # these honest — an errored agent did not *judge* the PR, and a bare
+            # flag with no evidence shouldn't read like a cited finding.
+            if result.error:
+                finding_reasons.append(
+                    f"Agent {result.agent_name} could not complete its review "
+                    f"({result.error}) — escalated to a human as a safety fallback"
+                )
+            elif result.verdict_explanation:
+                finding_reasons.append(
+                    f"Agent {result.agent_name} flagged for human review: "
+                    f"{result.verdict_explanation}"
+                )
+            else:
+                finding_reasons.append(
+                    f"Agent {result.agent_name} flagged for human review "
+                    f"(no specific finding cited)"
+                )
         for finding in result.findings:
             validated = validated_certainty(finding, config)
             if validated == Certainty.DETECTED and finding.severity in (
