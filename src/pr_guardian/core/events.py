@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -36,13 +37,19 @@ class EventBus:
             except asyncio.QueueFull:
                 pass  # drop if subscriber is slow
 
-    async def subscribe(self) -> AsyncIterator[ReviewEvent]:
+    @contextlib.asynccontextmanager
+    async def subscription(self) -> AsyncIterator[asyncio.Queue[ReviewEvent]]:
+        """Register a subscriber queue for the duration of the context.
+
+        Lower-level than a bare event iterator: the caller (the SSE layer) runs
+        its own receive loop with a heartbeat timeout so idle streams aren't
+        reaped by the ingress proxy, and so a disconnected client tears the
+        subscription down promptly instead of parking forever on an empty queue.
+        """
         q: asyncio.Queue[ReviewEvent] = asyncio.Queue(maxsize=256)
         self._subscribers.append(q)
         try:
-            while True:
-                event = await q.get()
-                yield event
+            yield q
         finally:
             self._subscribers.remove(q)
 

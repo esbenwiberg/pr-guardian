@@ -1291,14 +1291,33 @@ async def _find_review_for_finding(finding_id: uuid.UUID) -> dict | None:
         }
 
 
+# Comment line emitted on idle to keep the stream alive. EventSource clients
+# ignore comment lines (those starting with ":"), so no client change is needed.
+# Kept well under the ingress idle-stream timeout: the ACA (Envoy) ingress reaps
+# an idle stream with a bare "stream timeout" body, and between reviews this
+# stream carries no other traffic for minutes at a time.
+_SSE_HEARTBEAT_SECONDS = 15
+
+
 @router.get("/events")
 async def dashboard_events():
-    """SSE stream of real-time review progress events."""
+    """SSE stream of real-time review progress events.
+
+    A periodic heartbeat keeps the stream non-idle (so the ingress doesn't reap
+    it) and gives the generator a wake-up to notice a disconnected client and
+    drop its subscription, rather than parking forever on an empty queue.
+    """
 
     async def generate():
         yield 'data: {"type": "connected"}\n\n'
-        async for event in event_bus.subscribe():
-            yield event.to_sse()
+        async with event_bus.subscription() as q:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=_SSE_HEARTBEAT_SECONDS)
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                yield event.to_sse()
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 
