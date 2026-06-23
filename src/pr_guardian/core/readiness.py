@@ -53,6 +53,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _exc_http_status(exc: Exception) -> int | None:
+    """Duck-type the HTTP status off an exception so core/ stays free of httpx.
+
+    httpx.HTTPStatusError carries `.response.status_code`. 401/403/404 are
+    persistent auth/access/not-found errors an operator must fix; everything
+    else (5xx, 429, timeouts, network) is a transient blip worth retrying.
+    """
+    return getattr(getattr(exc, "response", None), "status_code", None)
+
+
 def _parse_dt(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -694,9 +704,7 @@ async def evaluate_readiness(
 
         signals = _filtered_signals(await adapter.fetch_readiness_signals(pr), settings)
     except Exception as exc:
-        # Duck-type the HTTP status off the exception so core/ stays free of httpx.
-        # httpx.HTTPStatusError carries `.response.status_code`.
-        status = getattr(getattr(exc, "response", None), "status_code", None)
+        status = _exc_http_status(exc)
         # 401/403/404 are auth/access/not-found: the credential can't see this repo
         # or PR. That won't self-heal by retrying — it needs an operator to fix the
         # connection's access, so it gets a distinct, *visible* reason. Everything
@@ -742,7 +750,33 @@ async def evaluate_readiness(
         try:
             found = await adapter.find_archmap_artifact(pr, candidate["head_sha"])
         except Exception as exc:
-            snapshot["archmap"] = {"found": False, "error": str(exc)}
+            status = _exc_http_status(exc)
+            # A persistent 401/403/404 means the credential can't read the Actions
+            # artifacts API (most often the GitHub App is missing `Actions: Read`).
+            # That never self-heals by waiting, so surface it as a visible access
+            # error instead of silently sitting in archmap_wait until the soft
+            # timeout — the same treatment the PR-metadata fetch above gets.
+            if status in (401, 403, 404):
+                snapshot["archmap"] = {"found": False, "error": repr(exc), "error_status": status}
+                snapshot["error"] = repr(exc)
+                snapshot["error_type"] = type(exc).__name__
+                snapshot["error_status"] = status
+                log.warning(
+                    "readiness_archmap_access_error",
+                    candidate_id=candidate["id"],
+                    repo=pr.repo,
+                    pr_id=pr.pr_id,
+                    connection_id=candidate.get("connection_id"),
+                    status=status,
+                    error=repr(exc),
+                    error_type=type(exc).__name__,
+                    exc_info=exc,
+                )
+                return ReadinessDecision("error", "platform_access_error", snapshot)
+            # Transient blip (5xx/429/timeout/network): Archmap is best-effort, so
+            # keep waiting and let the reconciler retry — the soft timeout still
+            # applies, so a flaky artifacts API can't strand the candidate forever.
+            snapshot["archmap"] = {"found": False, "error": repr(exc)}
             found = False
         if not found:
             deadline = first_archmap_wait + timedelta(minutes=settings["archmap_max_wait_minutes"])

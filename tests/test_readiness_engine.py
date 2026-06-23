@@ -39,11 +39,13 @@ class FakeReadinessAdapter:
         signals: list[PlatformReadinessSignal] | None = None,
         metadata_error: Exception | None = None,
         archmap_found: bool = True,
+        archmap_error: Exception | None = None,
     ):
         self.metadata = metadata or PlatformPRMetadata(head_sha="sha1")
         self.signals = signals or []
         self.metadata_error = metadata_error
         self.archmap_found = archmap_found
+        self.archmap_error = archmap_error
         self.statuses: list[tuple[str, str, str]] = []
 
     async def fetch_pr_metadata(self, pr: PlatformPR) -> PlatformPRMetadata:
@@ -61,6 +63,8 @@ class FakeReadinessAdapter:
         self.statuses.append(("guardian/review", state, description))
 
     async def find_archmap_artifact(self, pr: PlatformPR, head_sha: str) -> bool:
+        if self.archmap_error:
+            raise self.archmap_error
         return self.archmap_found
 
 
@@ -804,5 +808,64 @@ async def test_archmap_wait_times_out_soft_and_ado_uses_sha_artifact_name():
             assert any(
                 params.get("artifactName") == "archmap-abc123" for _, params in client.calls
             )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("status", [401, 403, 404])
+async def test_archmap_persistent_access_error_is_visible_not_silent_wait(status):
+    """A 401/403/404 from the artifacts API (e.g. the GitHub App lacks Actions:Read)
+    never self-heals by waiting. It must surface as the visible 'platform_access_error'
+    reason, not masquerade as 'archmap_wait' until the soft timeout."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo(
+                {"readiness": {"quiet_period_seconds": 0, "archmap_expected": True}}
+            )
+            candidate = await create_or_update_candidate_from_pr(
+                _pr(),
+                adapter=FakeReadinessAdapter(
+                    signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+                    archmap_error=_FakeHTTPError(status),
+                ),
+            )
+
+            assert candidate is not None
+            assert candidate["state"] == "error"
+            assert candidate["reason"] == "platform_access_error"
+            assert candidate["readiness_snapshot"].get("error_status") == status
+            assert candidate["readiness_snapshot"]["archmap"]["found"] is False
+    finally:
+        await engine.dispose()
+
+
+async def test_archmap_transient_error_keeps_waiting_then_soft_times_out():
+    """A transient blip (5xx/timeout) on the artifacts API is best-effort: Archmap
+    keeps waiting and the soft timeout still fires, so a flaky API can't strand the
+    candidate or hard-error it the way a persistent access failure does."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo(
+                {
+                    "readiness": {
+                        "quiet_period_seconds": 0,
+                        "archmap_expected": True,
+                        "archmap_max_wait_minutes": 0,
+                    }
+                }
+            )
+            candidate = await create_or_update_candidate_from_pr(
+                _pr(),
+                adapter=FakeReadinessAdapter(
+                    signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+                    archmap_error=_FakeHTTPError(503),
+                ),
+            )
+
+            assert candidate is not None
+            assert candidate["state"] == "reviewing"
+            assert candidate["readiness_snapshot"]["archmap"]["warning"] == "archmap_timeout"
     finally:
         await engine.dispose()

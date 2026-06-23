@@ -23,6 +23,7 @@ This guide walks through creating the App, installing it, and wiring it into Gua
 
    | Permission | Access |
    |---|---|
+   | Actions | Read |
    | Contents | Read |
    | Pull requests | Read & Write |
    | Issues | Read & Write |
@@ -32,6 +33,10 @@ This guide walks through creating the App, installing it, and wiring it into Gua
 
    > `Administration: Write` is required for Guardian to add the `guardian/review`
    > required check to branch protection rules.
+   >
+   > `Actions: Read` is required for the Archmap readiness gate — Guardian polls
+   > the Actions artifacts API for an `archmap-<head_sha>` artifact. Without it
+   > the call 403s and PRs strand in `archmap_wait` until the soft timeout.
 
 4. Set **Subscribe to events**:
    - `Pull request`
