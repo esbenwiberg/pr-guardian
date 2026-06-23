@@ -73,6 +73,7 @@ DEPLOY_OUTPUT=$(az deployment group create \
         entraClientId="${ENTRA_CLIENT_ID:-}" \
         entraClientSecret="${ENTRA_CLIENT_SECRET:-}" \
         entraTenantId="${ENTRA_TENANT_ID:-}" \
+        guardianBaseUrl="${GUARDIAN_BASE_URL:-}" \
     --output json)
 
 REGISTRY=$(echo "$DEPLOY_OUTPUT" | jq -r '.properties.outputs.registryLoginServer.value')

@@ -24,6 +24,9 @@ param entraClientSecret string = ''
 @description('Entra ID tenant ID')
 param entraTenantId string = ''
 
+@description('Public origin Guardian builds deeplinks from (no trailing slash). Leave empty to derive the ingress FQDN. Set to a custom domain if one fronts the app.')
+param guardianBaseUrl string = ''
+
 // Log Analytics workspace
 resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
   name: '${prefix}-logs'
@@ -120,6 +123,14 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
             {
               name: 'GITHUB_WEBHOOK_SECRET'
               secretRef: 'github-webhook-secret'
+            }
+            {
+              // Authoritative public origin for review deeplinks in PR comments.
+              // request.base_url is the internal pod host behind Entra/Envoy, and
+              // status/reconciler-triggered reviews carry no request at all — so
+              // this env var is what makes the deeplink resolve in prod.
+              name: 'GUARDIAN_BASE_URL'
+              value: empty(guardianBaseUrl) ? 'https://${prefix}-app.${environment.properties.defaultDomain}' : guardianBaseUrl
             }
           ]
           probes: [

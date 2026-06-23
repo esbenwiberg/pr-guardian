@@ -651,9 +651,10 @@ class TestCommentWithTrustTier:
         comment = build_summary_comment(result)
         assert "Trust" not in comment
 
-    def test_comment_includes_review_deeplink_and_rereview_tag_guidance(self):
+    def test_comment_includes_review_deeplink_and_rereview_tag_guidance(self, monkeypatch):
         from pr_guardian.models.output import ReviewResult
 
+        monkeypatch.delenv("GUARDIAN_BASE_URL", raising=False)
         result = ReviewResult(
             pr_id="1",
             repo="test",
@@ -667,3 +668,28 @@ class TestCommentWithTrustTier:
 
         assert "https://guardian.example/reviews/review-123" in comment
         assert "`@pr-guardian re-review`" in comment
+
+    def test_guardian_base_url_env_overrides_request_base_url(self, monkeypatch):
+        """The configured public origin must win: request.base_url is the internal
+        pod host behind the reverse proxy, so an env override has to take priority."""
+        from pr_guardian.decision.actions import build_review_detail_url
+
+        monkeypatch.setenv("GUARDIAN_BASE_URL", "https://guardian.public")
+
+        # Even when a (wrong, internal) request base_url is passed, the env wins.
+        assert (
+            build_review_detail_url("review-123", base_url="http://10.0.0.5:8000")
+            == "https://guardian.public/reviews/review-123"
+        )
+
+    def test_review_deeplink_resolves_from_env_when_base_url_empty(self, monkeypatch):
+        """Status/reconciler-triggered reviews carry no request base_url; the env
+        var is the only thing that yields a working deeplink for them."""
+        from pr_guardian.decision.actions import build_review_detail_url
+
+        monkeypatch.setenv("GUARDIAN_BASE_URL", "https://guardian.public")
+
+        assert (
+            build_review_detail_url("review-123", base_url="")
+            == "https://guardian.public/reviews/review-123"
+        )

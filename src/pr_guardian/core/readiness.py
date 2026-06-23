@@ -321,6 +321,7 @@ async def evaluate_candidates_for_sha(
     repo: str,
     head_sha: str,
     source: str,
+    base_url: str = "",
 ) -> list[dict[str, Any]]:
     candidates = await storage.list_active_readiness_candidates(
         platform=platform,
@@ -330,7 +331,9 @@ async def evaluate_candidates_for_sha(
     )
     evaluated: list[dict[str, Any]] = []
     for candidate in candidates:
-        evaluated.append(await evaluate_candidate(uuid.UUID(candidate["id"]), source=source))
+        evaluated.append(
+            await evaluate_candidate(uuid.UUID(candidate["id"]), source=source, base_url=base_url)
+        )
     return evaluated
 
 
