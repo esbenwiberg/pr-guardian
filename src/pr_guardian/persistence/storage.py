@@ -1805,6 +1805,7 @@ async def save_review_result(review_id: uuid.UUID, result: ReviewResult) -> None
             "sticky_triggers": [asdict(t) for t in result.sticky_triggers],
             "finding_reasons": result.finding_reasons,
             "gate_read": result.gate_read,
+            "auto_approve_unlocked": result.auto_approve_unlocked,
         }
         row.summary = result.summary
         row.pipeline_log = result.pipeline_log
@@ -2828,10 +2829,23 @@ def _unpack_override_reasons(raw: dict | list | None) -> dict:
             "sticky_triggers": raw.get("sticky_triggers", []),
             "finding_reasons": raw.get("finding_reasons", []),
             "gate_read": raw.get("gate_read"),
+            # Legacy rows predate the gate → default locked (safe: re-review of an
+            # unconfigured repo stays human rather than newly auto-approving).
+            "auto_approve_unlocked": raw.get("auto_approve_unlocked", False),
         }
     if isinstance(raw, list):
-        return {"sticky_triggers": [], "finding_reasons": raw, "gate_read": None}
-    return {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
+        return {
+            "sticky_triggers": [],
+            "finding_reasons": raw,
+            "gate_read": None,
+            "auto_approve_unlocked": False,
+        }
+    return {
+        "sticky_triggers": [],
+        "finding_reasons": [],
+        "gate_read": None,
+        "auto_approve_unlocked": False,
+    }
 
 
 def _review_to_dict(row: ReviewRow) -> dict[str, Any]:

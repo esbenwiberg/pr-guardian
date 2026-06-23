@@ -448,11 +448,15 @@ async def _run_pipeline(
         change_profile=change_profile,
     )
 
-    # Trust tier classification (path-based, deterministic)
+    # Trust tier classification (path-based, deterministic). When Archmap
+    # topology is available it drives escalation, so the built-in path globs
+    # are retired (see classify_trust_tier).
+    archmap_available = bool(archmap.files) and not archmap.error
     trust_tier_result = classify_trust_tier(
         changed_files,
         config,
         context.repo_risk_class,
+        archmap_available=archmap_available,
     )
     context.trust_tier_result = trust_tier_result
     _plog(
@@ -1342,6 +1346,13 @@ async def _run_re_review_pipeline(
     sticky_triggers = _replay_sticky_triggers(original_review.get("sticky_triggers", []))
     finding_reasons = finding_overrides(kept_findings, config)
 
+    # Replay whether auto-approve was unlocked at original review time (archmap is
+    # a runtime signal we can't recompute here); OR with current config so adding
+    # explicit trust-tier rules after the fact also unlocks.
+    auto_approve_unlocked = bool(original_review.get("auto_approve_unlocked")) or bool(
+        config.trust_tiers.rules
+    )
+
     decision = resolve_decision(
         risk_tier=risk_tier,
         repo_risk=repo_risk,
@@ -1352,6 +1363,7 @@ async def _run_re_review_pipeline(
         sticky_triggers=sticky_triggers,
         finding_reasons=finding_reasons,
         target_branch=target_branch,
+        auto_approve_unlocked=auto_approve_unlocked,
     )
 
     resolved_count_total = active_findings - all_kept
@@ -1378,6 +1390,7 @@ async def _run_re_review_pipeline(
         decision=decision,
         agent_results=kept_findings,
         combined_score=score,
+        auto_approve_unlocked=auto_approve_unlocked,
         summary=summary_text,
         pipeline_log=pipeline_log,
         total_input_tokens=total_input_tokens,

@@ -10,7 +10,11 @@ import pytest
 
 from pr_guardian.config.schema import FileRolesConfig
 from pr_guardian.discovery.change_profile import build_change_profile
-from pr_guardian.discovery.dependency_change import manifest_change_adds_dependency
+from pr_guardian.discovery.dependency_change import (
+    is_dependency_lockfile,
+    manifest_change_adds_dependency,
+    manifest_change_removes_dependency,
+)
 from pr_guardian.models.context import BlastRadius, SecuritySurface
 from pr_guardian.models.pr import Diff, DiffFile
 
@@ -265,3 +269,66 @@ def test_manifest_without_patch_still_escalates():
         FileRolesConfig(),
     )
     assert profile.adds_dependencies is True
+
+
+NPM_DEP_REMOVE = """\
+@@ -10,7 +10,6 @@
+   "dependencies": {
+     "axios": "^1.6.0",
+-    "left-pad": "^1.3.0",
+     "react": "^18.0.0"
+   },
+"""
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("package-lock.json", True),
+        ("yarn.lock", True),
+        ("pnpm-lock.yaml", True),
+        ("poetry.lock", True),
+        ("Cargo.lock", True),
+        ("go.sum", True),
+        ("packages.lock.json", True),
+        ("composer.lock", True),
+        ("Gemfile.lock", True),
+        ("src/nested/package-lock.json", True),
+        ("package.json", False),
+        ("src/app.py", False),
+    ],
+)
+def test_is_dependency_lockfile(name, expected):
+    assert is_dependency_lockfile(name) is expected
+
+
+def test_dependency_removal_is_detected():
+    assert manifest_change_removes_dependency("package.json", NPM_DEP_REMOVE) is True
+
+
+def test_version_bump_is_not_a_removal():
+    # The project's own version field changing is not a dependency removal.
+    assert manifest_change_removes_dependency("package.json", NPM_VERSION_BUMP) is False
+
+
+def test_dependency_add_is_not_a_removal():
+    assert manifest_change_removes_dependency("package.json", NPM_DEP_ADD) is False
+
+
+def test_build_change_profile_sets_removal_and_lockfile_signals():
+    diff = Diff(
+        files=[
+            DiffFile(path="package.json", status="modified", patch=NPM_DEP_REMOVE),
+            DiffFile(path="package-lock.json", status="modified", patch="@@ -1 +1 @@\n-x\n+y\n"),
+        ]
+    )
+    profile = build_change_profile(
+        ["package.json", "package-lock.json"],
+        diff,
+        SecuritySurface(),
+        BlastRadius(),
+        FileRolesConfig(),
+    )
+    assert profile.removes_dependencies is True
+    assert profile.changes_dependency_lockfile is True
+    assert profile.adds_dependencies is False

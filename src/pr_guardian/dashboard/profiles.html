@@ -149,6 +149,67 @@
             <p class="text-xs text-slate-400 mt-2">&#9432; Findings never summon a human in this mode &mdash; they post as comments or bounce the PR back to the author to fix.</p>
           </div>
         </fieldset>
+
+        <fieldset class="fieldset">
+          <legend>Auto-approve &amp; trust tiers</legend>
+          <div id="auto-approve-banner" class="text-xs rounded px-3 py-2 mb-3"></div>
+          <p class="text-xs text-slate-400 mb-3">Auto-approve only fires when this profile has at least one trust-tier rule below, <em>or</em> Archmap topology is available for the repo at review time. With no rules and no Archmap, every PR goes to a human.</p>
+          <label class="field">Default tier (files matching no rule)
+            <select id="trust-default-tier" class="form-select">
+              <option value="ai_only">AI only (auto-approve eligible)</option>
+              <option value="spot_check">Spot check (auto-approve eligible)</option>
+              <option value="mandatory_human">Mandatory human</option>
+              <option value="human_primary">Human primary</option>
+            </select>
+          </label>
+          <div id="trust-tier-rows" class="space-y-2 mt-3"></div>
+          <div class="flex gap-2 mt-2">
+            <button type="button" id="add-trust-rule" class="btn btn-sm">+ Add rule</button>
+            <button type="button" id="load-trust-defaults" class="btn btn-sm btn-ghost">Load defaults</button>
+          </div>
+        </fieldset>
+
+        <fieldset class="fieldset">
+          <legend>Path risk</legend>
+          <p class="text-xs text-slate-400 mb-2">Floor or cap the trust tier for matching paths. Critical paths raise the floor; safe paths lower the ceiling.</p>
+          <div class="text-xs text-slate-300 font-medium">Critical paths</div>
+          <div id="path-risk-critical-rows" class="space-y-2 mt-1"></div>
+          <button type="button" id="add-path-critical" class="btn btn-sm mt-1">+ Add critical path</button>
+          <div class="text-xs text-slate-300 font-medium mt-3">Safe paths</div>
+          <div id="path-risk-safe-rows" class="space-y-2 mt-1"></div>
+          <button type="button" id="add-path-safe" class="btn btn-sm mt-1">+ Add safe path</button>
+        </fieldset>
+
+        <fieldset class="fieldset">
+          <legend>Security surface</legend>
+          <p class="text-xs text-slate-400 mb-2">Glob patterns (comma or newline separated) marking sensitive files. Matches escalate and feed trust-tier classification.</p>
+          <label class="field">Security-critical
+            <textarea id="surface-security-critical" class="form-input" rows="2" placeholder="**/auth/**, **/crypto/**"></textarea>
+          </label>
+          <label class="field">Input handling
+            <textarea id="surface-input-handling" class="form-input" rows="2" placeholder="**/api/**, **/handlers/**"></textarea>
+          </label>
+          <label class="field">Data access
+            <textarea id="surface-data-access" class="form-input" rows="2" placeholder="**/repositories/**, **/models/**"></textarea>
+          </label>
+          <label class="field">Configuration
+            <textarea id="surface-configuration" class="form-input" rows="2" placeholder="**/config/**, **/.env*"></textarea>
+          </label>
+          <label class="field">Infrastructure
+            <textarea id="surface-infrastructure" class="form-input" rows="2" placeholder="**/terraform/**, **/k8s/**"></textarea>
+          </label>
+          <button type="button" id="load-surface-defaults" class="btn btn-sm btn-ghost mt-1">Load defaults</button>
+        </fieldset>
+
+        <fieldset class="fieldset">
+          <legend>Dependency policy</legend>
+          <p class="text-xs text-slate-400 mb-2">Route package changes to a human (bot authors are exempt separately).</p>
+          <div class="flex flex-col gap-2">
+            <label class="toggle-line"><input id="dep-require-human" type="checkbox"> <span>Require human for dependency changes</span></label>
+            <label class="toggle-line"><input id="dep-include-lockfiles" type="checkbox"> <span>Include lockfile-only changes</span></label>
+            <label class="toggle-line"><input id="dep-include-removals" type="checkbox"> <span>Include dependency removals</span></label>
+          </div>
+        </fieldset>
       </form>
 
       <aside class="panel p-4 space-y-4">
@@ -306,6 +367,7 @@
     gates: {},
     selectedProfileId: null,
     activeTab: 'profiles',
+    configDefaults: null,
   };
 
   const els = {
@@ -349,7 +411,102 @@
     escalationMode: document.getElementById('escalation-mode'),
     escalationGateThreshold: document.getElementById('escalation-gate-threshold'),
     escalationRejectThreshold: document.getElementById('escalation-reject-threshold'),
+    trustDefaultTier: document.getElementById('trust-default-tier'),
+    trustTierRows: document.getElementById('trust-tier-rows'),
+    autoApproveBanner: document.getElementById('auto-approve-banner'),
+    pathCriticalRows: document.getElementById('path-risk-critical-rows'),
+    pathSafeRows: document.getElementById('path-risk-safe-rows'),
+    surfaceSecurityCritical: document.getElementById('surface-security-critical'),
+    surfaceInputHandling: document.getElementById('surface-input-handling'),
+    surfaceDataAccess: document.getElementById('surface-data-access'),
+    surfaceConfiguration: document.getElementById('surface-configuration'),
+    surfaceInfrastructure: document.getElementById('surface-infrastructure'),
+    depRequireHuman: document.getElementById('dep-require-human'),
+    depIncludeLockfiles: document.getElementById('dep-include-lockfiles'),
+    depIncludeRemovals: document.getElementById('dep-include-removals'),
   };
+
+  const TRUST_TIERS = ['ai_only', 'spot_check', 'mandatory_human', 'human_primary'];
+
+  function parseGlobs(value) {
+    return String(value || '').split(/[\n,]/).map(v => v.trim()).filter(Boolean);
+  }
+
+  function globsText(value) {
+    return Array.isArray(value) ? value.join(', ') : '';
+  }
+
+  function tierOptions(selected) {
+    return TRUST_TIERS.map(t => `<option value="${t}" ${t === selected ? 'selected' : ''}>${t}</option>`).join('');
+  }
+
+  function tierOptionsWithBlank(selected) {
+    return `<option value="">—</option>` + tierOptions(selected);
+  }
+
+  function addTrustTierRow(rule) {
+    rule = rule || {};
+    const row = document.createElement('div');
+    row.className = 'trust-tier-row flex flex-wrap gap-2 items-start';
+    row.innerHTML = `
+      <select class="form-select tt-tier" style="max-width:11rem">${tierOptions(rule.tier || 'spot_check')}</select>
+      <input class="form-input tt-patterns" style="flex:1;min-width:14rem" placeholder="globs (comma/newline)" value="${escapeHtml(globsText(rule.patterns))}">
+      <input class="form-input tt-reason" style="flex:1;min-width:10rem" placeholder="reason" value="${escapeHtml(rule.reason || '')}">
+      <button type="button" class="btn btn-sm btn-ghost tt-remove">✕</button>`;
+    profileInputs.trustTierRows.appendChild(row);
+  }
+
+  function addPathRiskRow(container, entry) {
+    entry = entry || {};
+    const row = document.createElement('div');
+    row.className = 'path-risk-row flex flex-wrap gap-2 items-start';
+    row.innerHTML = `
+      <input class="form-input pr-pattern" style="flex:1;min-width:12rem" placeholder="glob pattern" value="${escapeHtml(entry.pattern || '')}">
+      <select class="form-select pr-min" title="min tier (floor)" style="max-width:9rem">${tierOptionsWithBlank(entry.min_tier || '')}</select>
+      <select class="form-select pr-max" title="max tier (ceiling)" style="max-width:9rem">${tierOptionsWithBlank(entry.max_tier || '')}</select>
+      <input class="form-input pr-reason" style="flex:1;min-width:8rem" placeholder="reason" value="${escapeHtml(entry.reason || '')}">
+      <input class="form-input pr-condition" style="max-width:11rem" placeholder="condition" value="${escapeHtml(entry.condition || '')}">
+      <button type="button" class="btn btn-sm btn-ghost pr-remove">✕</button>`;
+    container.appendChild(row);
+  }
+
+  function collectTrustRules() {
+    return Array.from(profileInputs.trustTierRows.querySelectorAll('.trust-tier-row')).map(row => {
+      const patterns = parseGlobs(row.querySelector('.tt-patterns').value);
+      if (!patterns.length) return null;
+      return {
+        tier: row.querySelector('.tt-tier').value,
+        patterns,
+        reason: row.querySelector('.tt-reason').value.trim(),
+      };
+    }).filter(Boolean);
+  }
+
+  function collectPathEntries(container) {
+    return Array.from(container.querySelectorAll('.path-risk-row')).map(row => {
+      const pattern = row.querySelector('.pr-pattern').value.trim();
+      if (!pattern) return null;
+      return compact({
+        pattern,
+        min_tier: row.querySelector('.pr-min').value,
+        max_tier: row.querySelector('.pr-max').value,
+        reason: row.querySelector('.pr-reason').value.trim(),
+        condition: row.querySelector('.pr-condition').value.trim(),
+      });
+    }).filter(Boolean);
+  }
+
+  function updateAutoApproveBanner() {
+    const banner = profileInputs.autoApproveBanner;
+    const hasRules = profileInputs.trustTierRows.querySelectorAll('.trust-tier-row').length > 0;
+    if (hasRules) {
+      banner.textContent = '✓ Auto-approve enabled — trust-tier rules configured.';
+      banner.className = 'text-xs rounded px-3 py-2 mb-3 bg-emerald-500/10 text-emerald-300';
+    } else {
+      banner.textContent = '🔒 Auto-approve locked — no trust-tier rules. (Archmap, if available at review time, also unlocks it.)';
+      banner.className = 'text-xs rounded px-3 py-2 mb-3 bg-amber-500/10 text-amber-300';
+    }
+  }
 
   function escapeHtml(value) {
     const div = document.createElement('div');
@@ -540,6 +697,31 @@
     document.querySelectorAll('[data-side-effect]').forEach(input => {
       input.checked = Boolean(sideEffects[input.dataset.sideEffect]);
     });
+
+    const trustTiers = settings.trust_tiers || {};
+    profileInputs.trustDefaultTier.value = trustTiers.default_tier || 'spot_check';
+    profileInputs.trustTierRows.innerHTML = '';
+    (trustTiers.rules || []).forEach(addTrustTierRow);
+    updateAutoApproveBanner();
+
+    const pathRisk = settings.path_risk || {};
+    profileInputs.pathCriticalRows.innerHTML = '';
+    (pathRisk.critical_paths || []).forEach(e => addPathRiskRow(profileInputs.pathCriticalRows, e));
+    profileInputs.pathSafeRows.innerHTML = '';
+    (pathRisk.safe_paths || []).forEach(e => addPathRiskRow(profileInputs.pathSafeRows, e));
+
+    const surface = settings.security_surface || {};
+    profileInputs.surfaceSecurityCritical.value = globsText(surface.security_critical);
+    profileInputs.surfaceInputHandling.value = globsText(surface.input_handling);
+    profileInputs.surfaceDataAccess.value = globsText(surface.data_access);
+    profileInputs.surfaceConfiguration.value = globsText(surface.configuration);
+    profileInputs.surfaceInfrastructure.value = globsText(surface.infrastructure);
+
+    const depPolicy = settings.dependency_policy || {};
+    profileInputs.depRequireHuman.checked = depPolicy.require_human !== false;
+    profileInputs.depIncludeLockfiles.checked = depPolicy.include_lockfiles !== false;
+    profileInputs.depIncludeRemovals.checked = depPolicy.include_removals !== false;
+
     const usage = state.repoLinks.filter(link => link.profile_id === profile.id).length;
     els.profileUsage.textContent = String(usage);
     els.sideEffects.innerHTML = Object.keys(sideEffects).length
@@ -556,10 +738,46 @@
     document.querySelectorAll('[data-side-effect]').forEach(input => {
       sideEffects[input.dataset.sideEffect] = input.checked;
     });
+
+    const trustRules = collectTrustRules();
+    const trustTiers = (trustRules.length || profileInputs.trustDefaultTier.value !== 'spot_check')
+      ? { default_tier: profileInputs.trustDefaultTier.value, rules: trustRules }
+      : undefined;
+
+    const criticalPaths = collectPathEntries(profileInputs.pathCriticalRows);
+    const safePaths = collectPathEntries(profileInputs.pathSafeRows);
+    const pathRisk = (criticalPaths.length || safePaths.length)
+      ? { critical_paths: criticalPaths, safe_paths: safePaths }
+      : undefined;
+
+    // Only send classifications the operator filled in; a blank field falls back
+    // to the service default for that classification.
+    const surface = {};
+    const surfaceFields = {
+      security_critical: profileInputs.surfaceSecurityCritical.value,
+      input_handling: profileInputs.surfaceInputHandling.value,
+      data_access: profileInputs.surfaceDataAccess.value,
+      configuration: profileInputs.surfaceConfiguration.value,
+      infrastructure: profileInputs.surfaceInfrastructure.value,
+    };
+    Object.entries(surfaceFields).forEach(([key, raw]) => {
+      const globs = parseGlobs(raw);
+      if (globs.length) surface[key] = globs;
+    });
+    const securitySurface = Object.keys(surface).length ? surface : undefined;
+
     return {
       name: profileInputs.name.value.trim(),
       description: profileInputs.description.value.trim(),
       settings: compact({
+        trust_tiers: trustTiers,
+        path_risk: pathRisk,
+        security_surface: securitySurface,
+        dependency_policy: {
+          require_human: profileInputs.depRequireHuman.checked,
+          include_lockfiles: profileInputs.depIncludeLockfiles.checked,
+          include_removals: profileInputs.depIncludeRemovals.checked,
+        },
         repo_risk_class: profileInputs.repoRiskClass.value,
         human_review: { reviewer_group: profileInputs.reviewerGroup.value.trim() },
         thresholds: {
@@ -878,6 +1096,53 @@
         'hidden', profileInputs.escalationMode.value !== 'structural_only'
       );
     });
+
+    document.getElementById('add-trust-rule').addEventListener('click', () => {
+      addTrustTierRow({});
+      updateAutoApproveBanner();
+    });
+    document.getElementById('load-trust-defaults').addEventListener('click', async () => {
+      const defaults = await loadConfigDefaults();
+      if (!defaults) return;
+      profileInputs.trustDefaultTier.value = defaults.trust_tiers.default_tier || 'spot_check';
+      profileInputs.trustTierRows.innerHTML = '';
+      defaults.trust_tiers.rules.forEach(addTrustTierRow);
+      updateAutoApproveBanner();
+    });
+    profileInputs.trustTierRows.addEventListener('click', event => {
+      if (event.target.classList.contains('tt-remove')) {
+        event.target.closest('.trust-tier-row').remove();
+        updateAutoApproveBanner();
+      }
+    });
+    document.getElementById('add-path-critical').addEventListener('click', () => addPathRiskRow(profileInputs.pathCriticalRows, {}));
+    document.getElementById('add-path-safe').addEventListener('click', () => addPathRiskRow(profileInputs.pathSafeRows, {}));
+    [profileInputs.pathCriticalRows, profileInputs.pathSafeRows].forEach(container => {
+      container.addEventListener('click', event => {
+        if (event.target.classList.contains('pr-remove')) event.target.closest('.path-risk-row').remove();
+      });
+    });
+    document.getElementById('load-surface-defaults').addEventListener('click', async () => {
+      const defaults = await loadConfigDefaults();
+      if (!defaults) return;
+      const s = defaults.security_surface;
+      profileInputs.surfaceSecurityCritical.value = globsText(s.security_critical);
+      profileInputs.surfaceInputHandling.value = globsText(s.input_handling);
+      profileInputs.surfaceDataAccess.value = globsText(s.data_access);
+      profileInputs.surfaceConfiguration.value = globsText(s.configuration);
+      profileInputs.surfaceInfrastructure.value = globsText(s.infrastructure);
+    });
+  }
+
+  async function loadConfigDefaults() {
+    if (state.configDefaults) return state.configDefaults;
+    try {
+      state.configDefaults = await api('/config-defaults');
+      return state.configDefaults;
+    } catch (err) {
+      showToast('Failed to load defaults');
+      return null;
+    }
   }
 
   function uniqueName(base) {

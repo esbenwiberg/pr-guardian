@@ -8,6 +8,8 @@ from pr_guardian.decision.engine import check_overrides, decide
 from pr_guardian.persistence.storage import _unpack_override_reasons
 from pr_guardian.decision.types import StickyTrigger
 from pr_guardian.models.context import (
+    ArchmapContext,
+    ArchmapFile,
     BlastRadius,
     ChangeProfile,
     RepoRiskClass,
@@ -28,6 +30,24 @@ from pr_guardian.models.findings import (
 from pr_guardian.models.languages import LanguageMap
 from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.models.pr import Diff, Platform, PlatformPR
+
+
+def _unlocked_archmap() -> ArchmapContext:
+    """A minimal non-hub Archmap so auto-approve is unlocked by default."""
+    return ArchmapContext(
+        files={
+            "src/app.py": ArchmapFile(
+                path="src/app.py",
+                classification="leaf",
+                ca=0,
+                tca=0,
+                instability=0.0,
+                risk=0,
+                overridden=False,
+                reason="leaf",
+            )
+        }
+    )
 
 
 def _ctx(**overrides) -> ReviewContext:
@@ -55,6 +75,7 @@ def _ctx(**overrides) -> ReviewContext:
         blast_radius=BlastRadius(),
         change_profile=ChangeProfile(),
         hotspots=set(),
+        archmap=_unlocked_archmap(),
     )
     base.update(overrides)
     return ReviewContext(**base)
@@ -264,7 +285,12 @@ class TestUnpackOverrideReasons:
 
     def test_empty_dict_format(self):
         out = _unpack_override_reasons({"sticky_triggers": [], "finding_reasons": []})
-        assert out == {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
+        assert out == {
+            "sticky_triggers": [],
+            "finding_reasons": [],
+            "gate_read": None,
+            "auto_approve_unlocked": False,
+        }
 
     def test_legacy_list_format(self):
         raw = ["Old override reason A", "Old override reason B"]
@@ -274,11 +300,21 @@ class TestUnpackOverrideReasons:
 
     def test_none_input(self):
         out = _unpack_override_reasons(None)
-        assert out == {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
+        assert out == {
+            "sticky_triggers": [],
+            "finding_reasons": [],
+            "gate_read": None,
+            "auto_approve_unlocked": False,
+        }
 
     def test_unexpected_type_returns_empty(self):
         out = _unpack_override_reasons("unexpected string")
-        assert out == {"sticky_triggers": [], "finding_reasons": [], "gate_read": None}
+        assert out == {
+            "sticky_triggers": [],
+            "finding_reasons": [],
+            "gate_read": None,
+            "auto_approve_unlocked": False,
+        }
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]

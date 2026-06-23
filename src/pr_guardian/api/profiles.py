@@ -42,6 +42,7 @@ _PROFILE_SETTING_KEYS = {
     "readiness",
     "side_effects",
     "escalation_policy",
+    "dependency_policy",
 }
 
 _SECRET_SETTING_MARKERS = ("api_key", "password", "secret", "token")
@@ -505,6 +506,45 @@ async def env_imports(identity: Identity = Depends(require_profile_manager)):
     return {
         "ADO_PAT": {"available": bool(os.environ.get("ADO_PAT"))},
         "ADO_ORG_URL": {"available": bool(os.environ.get("ADO_ORG_URL"))},
+    }
+
+
+@router.get("/config-defaults")
+async def config_defaults(identity: Identity = Depends(require_profile_manager)):
+    """Built-in glob defaults the Profile UI seeds into its editors.
+
+    Single source of truth for the "Load defaults" buttons so the frontend never
+    hardcodes a second copy of the trust-tier / security-surface / path-risk
+    globs.
+    """
+    from pr_guardian.config.schema import (
+        PathRiskConfig,
+        SecuritySurfaceConfig,
+        TrustTierConfig,
+    )
+    from pr_guardian.triage.trust_classifier import _BUILTIN_RULES
+
+    surface = SecuritySurfaceConfig()
+    path_risk = PathRiskConfig()
+    return {
+        "trust_tiers": {
+            "default_tier": TrustTierConfig().default_tier,
+            "rules": [
+                {"tier": tier.value, "patterns": list(patterns), "reason": reason}
+                for tier, patterns, reason in _BUILTIN_RULES
+            ],
+        },
+        "security_surface": {
+            "security_critical": surface.security_critical,
+            "input_handling": surface.input_handling,
+            "data_access": surface.data_access,
+            "configuration": surface.configuration,
+            "infrastructure": surface.infrastructure,
+        },
+        "path_risk": {
+            "critical_paths": [e.model_dump() for e in path_risk.critical_paths],
+            "safe_paths": [e.model_dump() for e in path_risk.safe_paths],
+        },
     }
 
 

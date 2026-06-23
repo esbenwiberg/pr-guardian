@@ -515,6 +515,45 @@ def test_validate_profile_settings_accepts_valid_structured_field():
     assert _validate_profile_settings(settings) == settings
 
 
+def test_validate_profile_settings_accepts_glob_editors_and_dependency_policy():
+    from pr_guardian.api.profiles import _validate_profile_settings
+
+    settings = {
+        "trust_tiers": {
+            "default_tier": "ai_only",
+            "rules": [{"tier": "human_primary", "patterns": ["**/auth/**"], "reason": "auth"}],
+        },
+        "path_risk": {
+            "critical_paths": [{"pattern": "**/infra/**", "min_tier": "mandatory_human"}],
+            "safe_paths": [{"pattern": "**/docs/**", "max_tier": "ai_only"}],
+        },
+        "security_surface": {"security_critical": ["**/secrets/**"]},
+        "dependency_policy": {
+            "require_human": True,
+            "include_lockfiles": False,
+            "include_removals": True,
+        },
+    }
+    assert _validate_profile_settings(settings) == settings
+
+
+def test_config_defaults_endpoint_shape():
+    import asyncio
+
+    from pr_guardian.api import profiles
+
+    out = asyncio.run(profiles.config_defaults(identity=None))
+    assert out["trust_tiers"]["rules"], "expected built-in trust-tier rules"
+    assert {r["tier"] for r in out["trust_tiers"]["rules"]} <= {
+        "ai_only",
+        "spot_check",
+        "mandatory_human",
+        "human_primary",
+    }
+    assert "security_critical" in out["security_surface"]
+    assert "critical_paths" in out["path_risk"]
+
+
 def test_normalize_ado_org_url_canonicalizes_dev_azure():
     from pr_guardian.api.profiles import _normalize_ado_org_url
 

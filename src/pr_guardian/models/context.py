@@ -144,6 +144,8 @@ class ChangeProfile:
     touches_data_layer: bool = False
     touches_shared_code: bool = False
     adds_dependencies: bool = False
+    removes_dependencies: bool = False
+    changes_dependency_lockfile: bool = False
     adds_api_endpoints: bool = False
     crosses_architecture_boundary: bool = False
 

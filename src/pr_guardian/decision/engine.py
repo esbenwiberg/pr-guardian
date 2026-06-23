@@ -4,9 +4,10 @@ from fnmatch import fnmatch
 
 import structlog
 
-from pr_guardian.config.schema import GuardianConfig
+from pr_guardian.config.schema import DependencyPolicyConfig, GuardianConfig
 from pr_guardian.decision.types import StickyTrigger
 from pr_guardian.models.context import (
+    ChangeProfile,
     RepoRiskClass,
     ReviewContext,
     RiskTier,
@@ -180,6 +181,41 @@ def finding_overrides(
     return finding_reasons
 
 
+def _dependency_trigger(
+    profile: ChangeProfile, policy: DependencyPolicyConfig
+) -> StickyTrigger | None:
+    """Build the dependency-change sticky trigger per the configured policy.
+
+    Returns ``None`` when no escalation is warranted (policy off, or the only
+    dependency change is of a kind the policy excludes).
+    """
+    if not policy.require_human:
+        return None
+
+    if profile.adds_dependencies:
+        return StickyTrigger(
+            kind="new_dep",
+            label="Dependency added or changed",
+            source="adds_dependencies",
+            reason="PR adds or changes an external dependency",
+        )
+    if policy.include_lockfiles and profile.changes_dependency_lockfile:
+        return StickyTrigger(
+            kind="new_dep",
+            label="Dependency lockfile changed",
+            source="changes_dependency_lockfile",
+            reason="PR changes a dependency lockfile (resolved/transitive deps)",
+        )
+    if policy.include_removals and profile.removes_dependencies:
+        return StickyTrigger(
+            kind="new_dep",
+            label="Dependency removed",
+            source="removes_dependencies",
+            reason="PR removes an external dependency",
+        )
+    return None
+
+
 def check_overrides(
     agent_results: list[AgentResult],
     context: ReviewContext,
@@ -189,15 +225,9 @@ def check_overrides(
     sticky: list[StickyTrigger] = []
     finding_reasons: list[str] = finding_overrides(agent_results, config)
 
-    if context.change_profile.adds_dependencies:
-        sticky.append(
-            StickyTrigger(
-                kind="new_dep",
-                label="New dependency added",
-                source="adds_dependencies",
-                reason="PR introduces a new external dependency",
-            )
-        )
+    dep_trigger = _dependency_trigger(context.change_profile, config.dependency_policy)
+    if dep_trigger is not None:
+        sticky.append(dep_trigger)
 
     if context.repo_risk_class in (RepoRiskClass.ELEVATED, RepoRiskClass.CRITICAL):
         sticky.append(
@@ -265,6 +295,7 @@ def resolve_decision(
     sticky_triggers: list[StickyTrigger],
     finding_reasons: list[str],
     target_branch: str,
+    auto_approve_unlocked: bool = True,
     gate_result: GateResult | None = None,
 ) -> Decision:
     """Apply the decision matrix + overrides to a set of findings.
@@ -295,6 +326,7 @@ def resolve_decision(
             trust_tier=trust_tier,
             sticky_triggers=sticky_triggers,
             finding_reasons=finding_reasons,
+            auto_approve_unlocked=auto_approve_unlocked,
             gate_result=gate_result,
         )
 
@@ -335,6 +367,15 @@ def resolve_decision(
         decision = Decision.HUMAN_REVIEW
         finding_reasons.append("Auto-approve is disabled")
 
+    # Override: auto-approve is locked until the repo is configured to be judged
+    # (explicit trust-tier rules) or Archmap topology is available. Unconfigured
+    # repos are never auto-approved — they always go to a human.
+    if not auto_approve_unlocked and decision == Decision.AUTO_APPROVE:
+        decision = Decision.HUMAN_REVIEW
+        finding_reasons.append(
+            "Auto-approve locked: profile has no trust-tier rules and no archmap"
+        )
+
     # Reject: high-confidence, actionable findings — no human needed
     if decision == Decision.HUMAN_REVIEW:
         reject_reasons = _check_reject(agent_results, config)
@@ -370,6 +411,11 @@ def decide(
     repo_risk = context.repo_risk_class
     trust_tier = trust_tier_result.resolved_tier if trust_tier_result else None
 
+    # Auto-approve is locked unless the repo is configured to be judged: explicit
+    # trust-tier rules, or Archmap topology available for this PR.
+    archmap_available = bool(context.archmap.files) and not context.archmap.error
+    auto_approve_unlocked = bool(config.trust_tiers.rules) or archmap_available
+
     decision = resolve_decision(
         risk_tier=risk_tier,
         repo_risk=repo_risk,
@@ -380,6 +426,7 @@ def decide(
         sticky_triggers=sticky_triggers,
         finding_reasons=finding_reasons,
         target_branch=context.pr.target_branch,
+        auto_approve_unlocked=auto_approve_unlocked,
         gate_result=gate_result,
     )
 
@@ -412,6 +459,7 @@ def decide(
         trust_tier_files=trust_tier_files,
         reviewer_group_override=reviewer_group_override,
         escalated_from=escalated_from,
+        auto_approve_unlocked=auto_approve_unlocked,
     )
 
     log.info(
@@ -486,6 +534,7 @@ def _resolve_structural_only(
     trust_tier: TrustTier | None,
     sticky_triggers: list[StickyTrigger],
     finding_reasons: list[str],
+    auto_approve_unlocked: bool,
     gate_result: GateResult | None,
 ) -> Decision:
     """Structural-only decision branch.
@@ -528,6 +577,13 @@ def _resolve_structural_only(
                 )
             )
         decision = Decision.HUMAN_REVIEW
+
+    # Locked auto-approve (no trust-tier rules, no archmap) → human review.
+    if not auto_approve_unlocked and decision == Decision.AUTO_APPROVE:
+        decision = Decision.HUMAN_REVIEW
+        finding_reasons.append(
+            "Auto-approve locked: profile has no trust-tier rules and no archmap"
+        )
 
     # Findings drive REJECT (not human review) at the configured threshold.
     # This runs unconditionally — a confident finding on safe paths → REJECT,
