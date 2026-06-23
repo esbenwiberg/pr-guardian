@@ -345,6 +345,7 @@ function renderPanel() {
     </div>
     <div class="mt-6 flex flex-col gap-2">
       <button type="button" class="btn btn-primary text-sm justify-center" id="start-review-btn">Start Review Now</button>
+      ${pr.guardian_review_id ? `<a class="btn btn-secondary text-sm justify-center" href="/reviews/${encodeURIComponent(pr.guardian_review_id)}">View latest review</a>` : ''}
       <a class="btn btn-secondary text-sm justify-center" href="${href}" target="_blank" rel="noopener">Open in GitHub/ADO</a>
       <button type="button" class="btn btn-secondary text-sm justify-center" id="hide-repo-btn">Hide repo from browse</button>
     </div>
