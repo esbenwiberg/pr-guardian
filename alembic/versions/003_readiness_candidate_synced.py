@@ -49,8 +49,7 @@ def upgrade() -> None:
         # Back-fill existing reviewed candidates as already synced so the
         # reconciler doesn't re-post success across the historical backlog.
         op.execute(
-            "UPDATE readiness_candidates SET readiness_synced = true "
-            "WHERE state = 'reviewed'"
+            "UPDATE readiness_candidates SET readiness_synced = true WHERE state = 'reviewed'"
         )
 
 

@@ -162,9 +162,7 @@ class TestBucketSplit:
         _, finding_reasons = check_overrides([agent], ctx, CONFIG)
         # An errored agent did not *judge* the PR — the reason must say so, not
         # masquerade as a finding signal.
-        assert any(
-            "could not complete" in r and "safety fallback" in r for r in finding_reasons
-        )
+        assert any("could not complete" in r and "safety fallback" in r for r in finding_reasons)
 
     def test_flag_human_with_explanation_surfaces_reasoning(self):
         ctx = _ctx()
