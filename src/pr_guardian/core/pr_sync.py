@@ -18,6 +18,15 @@ log = structlog.get_logger()
 _STALE_DAYS = 5
 _MERGED_RETENTION_DAYS = 7
 
+# pr-sync is the webhook-free safety net that mints readiness candidates for open
+# PRs. The readiness reconciler re-mints for moved heads within ~30s, so the poll's
+# only unique job is catching a *missed opened webhook* — a brand-new PR no
+# candidate ever existed for. Off-hours used to idle at 30 min, which let such a PR
+# strand for half an hour. 10 min off-hours bounds that without slamming the
+# all-projects sync (GitHub API + DB pressure + the boot-sync OOM ceiling) at night.
+_WORK_HOURS_INTERVAL_SECONDS = 5 * 60
+_OFF_HOURS_INTERVAL_SECONDS = 10 * 60
+
 
 def _is_work_hours() -> bool:
     """True if current local hour is between 09:00 and 18:00."""
@@ -531,7 +540,7 @@ async def run_pr_sync() -> None:
 
 
 async def pr_sync_loop() -> None:
-    """Long-running loop: sync every 5min during 09-18, 30min outside.
+    """Long-running loop: sync every 5min during 09-18, 10min outside.
 
     Gated behind a Postgres advisory lock so only the leader replica syncs —
     every replica runs this loop, but uncoordinated parallel passes multiply
@@ -549,6 +558,8 @@ async def pr_sync_loop() -> None:
                     log.debug("pr_sync_skipped_not_leader")
         except Exception as exc:
             log.error("pr_sync_loop_error", error=str(exc))
-        interval = 5 * 60 if _is_work_hours() else 30 * 60
+        interval = (
+            _WORK_HOURS_INTERVAL_SECONDS if _is_work_hours() else _OFF_HOURS_INTERVAL_SECONDS
+        )
         log.debug("pr_sync_sleeping", seconds=interval)
         await asyncio.sleep(interval)

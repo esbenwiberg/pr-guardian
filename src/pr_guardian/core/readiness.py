@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -219,6 +219,7 @@ async def create_or_update_candidate_from_pr(
     source: str = "webhook",
     adapter: PlatformAdapter | None = None,
     base_url: str = "",
+    remint: bool = True,
 ) -> dict[str, Any] | None:
     """Create/update a candidate for an exact opted-in repo and evaluate it."""
     link = await storage.get_active_repo_link_for_repo(
@@ -284,7 +285,12 @@ async def create_or_update_candidate_from_pr(
         # Post initial sticky guidance comment (no review deeplink yet)
         await upsert_guidance_comment(adapter, pr, "pending", storage=storage)
     return await evaluate_candidate(
-        uuid.UUID(existing["id"]), source=source, adapter=adapter, pr=pr, base_url=base_url
+        uuid.UUID(existing["id"]),
+        source=source,
+        adapter=adapter,
+        pr=pr,
+        base_url=base_url,
+        remint=remint,
     )
 
 
@@ -367,6 +373,7 @@ async def evaluate_candidate(
     pr: PlatformPR | None = None,
     start_review: bool = True,
     base_url: str = "",
+    remint: bool = True,
 ) -> dict[str, Any]:
     candidate = await storage.get_readiness_candidate_by_id(candidate_id)
     if candidate is None:
@@ -470,28 +477,59 @@ async def evaluate_candidate(
             raise LookupError(f"Readiness candidate not found after handoff: {candidate_id}")
         return updated
 
-    if candidate["state"] != decision.state or candidate.get("reason") != decision.reason:
-        await storage.record_candidate_transition(
-            candidate_id,
-            to_state=decision.state,
-            source=source,
-            actor=pr.platform.value,
-            reason=decision.reason,
-            readiness_snapshot=decision.snapshot,
-        )
-    else:
-        await storage.record_candidate_transition(
-            candidate_id,
-            to_state=decision.state,
-            source=source,
-            actor=pr.platform.value,
-            reason=decision.reason,
-            readiness_snapshot=decision.snapshot,
-        )
+    await storage.record_candidate_transition(
+        candidate_id,
+        to_state=decision.state,
+        source=source,
+        actor=pr.platform.value,
+        reason=decision.reason,
+        readiness_snapshot=decision.snapshot,
+    )
+    if remint and decision.state == "superseded" and decision.reason == "new_commit":
+        await _remint_for_live_head(pr, decision, source=source, base_url=base_url)
     updated = await storage.get_readiness_candidate_by_id(candidate_id)
     if updated is None:
         raise LookupError(f"Readiness candidate not found after update: {candidate_id}")
     return updated
+
+
+async def _remint_for_live_head(
+    stale_pr: PlatformPR,
+    decision: ReadinessDecision,
+    *,
+    source: str,
+    base_url: str,
+) -> None:
+    """Mint a candidate for the PR's *current* head after a new_commit supersede.
+
+    Candidates are keyed per head SHA. The reconciler and the check/workflow
+    webhooks can only re-drive candidates that already exist — they never create
+    one for a head that has moved on. A candidate for the new head is minted only
+    by the pull_request webhook, manual Sync, or the pr-sync poll (every 5 min in
+    work hours, 10 min off-hours). When that webhook is missed, the live head
+    strands with no candidate driving it until the slow poll catches up: the old
+    candidate self-supersedes here as new_commit and nothing replaces it. So
+    re-mint for the live head right now, collapsing recovery to the next 30s
+    reconcile tick. remint=False bounds this to a single hop (no recursion if the
+    re-minted head is itself already stale).
+    """
+    live_head = str((decision.snapshot.get("metadata") or {}).get("head_sha") or "")
+    if not live_head or live_head == stale_pr.head_commit_sha:
+        return
+    live_pr = replace(stale_pr, head_commit_sha=live_head)
+    try:
+        await create_or_update_candidate_from_pr(
+            live_pr, source=source, base_url=base_url, remint=False
+        )
+    except Exception as exc:
+        log.warning(
+            "readiness_remint_failed",
+            repo=stale_pr.repo,
+            pr_id=stale_pr.pr_id,
+            head_sha=live_head,
+            error=repr(exc),
+            error_type=type(exc).__name__,
+        )
 
 
 async def _start_automatic_review(

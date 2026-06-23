@@ -625,6 +625,125 @@ async def test_reviewed_readiness_reassert_failure_leaves_candidate_unsynced():
         await engine.dispose()
 
 
+async def test_new_commit_supersede_remints_candidate_for_live_head():
+    """A candidate whose head moved on is retired as new_commit. The reconciler and
+    the check/workflow webhooks only re-drive candidates that already exist — they
+    never mint one for the new head (only the pull_request webhook, manual Sync, or
+    the pr-sync poll do). If that webhook is missed, the live head would strand with
+    no candidate driving it until the slow poll. evaluate_candidate must therefore
+    re-mint a candidate for the live head in the same pass."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            stale = await storage.create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="42",
+                head_sha="sha1",
+            )
+            await storage.record_candidate_transition(
+                uuid.UUID(stale["id"]),
+                to_state="waiting",
+                source="fixture",
+                reason="archmap_wait",
+                readiness_snapshot={},
+            )
+
+            # The live PR has advanced to sha2; that commit's checks are green.
+            adapter = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="sha2"),
+                signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+            )
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=adapter):
+                result = await evaluate_candidate(uuid.UUID(stale["id"]))
+
+            # The stale candidate is retired as new_commit ...
+            assert result["state"] == "superseded"
+            assert result["reason"] == "new_commit"
+
+            # ... and a fresh candidate for the live head was minted and advanced.
+            live = await storage.get_readiness_candidate(
+                platform="github",
+                repo="octo/service",
+                org_url="octo",
+                project="",
+                pr_id="42",
+                head_sha="sha2",
+            )
+            assert live is not None
+            assert live["id"] != stale["id"]
+            assert live["state"] == "reviewing"
+            assert live["reason"] == "ready"
+    finally:
+        await engine.dispose()
+
+
+async def test_remint_is_bounded_to_a_single_hop():
+    """The re-mint must not recurse. If the PR head keeps advancing (every metadata
+    fetch reports a newer commit), the re-minted candidate is evaluated with
+    remint=False, so it is superseded once and the chain stops — rather than minting
+    a fresh candidate for every new head forever."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            stale = await storage.create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="42",
+                head_sha="sha1",
+            )
+            await storage.record_candidate_transition(
+                uuid.UUID(stale["id"]),
+                to_state="waiting",
+                source="fixture",
+                reason="archmap_wait",
+                readiness_snapshot={},
+            )
+
+            class _AdvancingHeadAdapter(FakeReadinessAdapter):
+                """The PR never settles: each metadata fetch reports a newer head."""
+
+                def __init__(self):
+                    super().__init__()
+                    self._n = 1
+
+                async def fetch_pr_metadata(self, pr: PlatformPR) -> PlatformPRMetadata:
+                    self._n += 1
+                    return PlatformPRMetadata(head_sha=f"sha{self._n}")
+
+            adapter = _AdvancingHeadAdapter()
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", return_value=adapter):
+                result = await evaluate_candidate(uuid.UUID(stale["id"]))
+
+            # sha1 retired (saw sha2), one re-mint to sha2 which itself retired
+            # (saw sha3) — and then it stops. No sha3 candidate, nothing active.
+            assert result["state"] == "superseded"
+            sha2 = await storage.get_readiness_candidate(
+                platform="github",
+                repo="octo/service",
+                org_url="octo",
+                project="",
+                pr_id="42",
+                head_sha="sha2",
+            )
+            assert sha2 is not None and sha2["state"] == "superseded"
+            sha3 = await storage.get_readiness_candidate(
+                platform="github",
+                repo="octo/service",
+                org_url="octo",
+                project="",
+                pr_id="42",
+                head_sha="sha3",
+            )
+            assert sha3 is None
+            active = await storage.list_active_readiness_candidates(
+                platform="github", repo="octo/service", pr_id="42"
+            )
+            assert active == []
+    finally:
+        await engine.dispose()
+
+
 class _AdoResponse:
     def __init__(self, body: dict, status_code: int = 200):
         self._body = body
