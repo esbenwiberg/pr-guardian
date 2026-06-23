@@ -457,6 +457,7 @@ async def _run_pipeline(
         config,
         context.repo_risk_class,
         archmap_available=archmap_available,
+        has_production_changes=change_profile.has_production_changes,
     )
     context.trust_tier_result = trust_tier_result
     _plog(

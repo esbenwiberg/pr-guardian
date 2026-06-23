@@ -456,16 +456,25 @@
     profileInputs.trustTierRows.appendChild(row);
   }
 
-  function addPathRiskRow(container, entry) {
+  function addPathRiskRow(container, entry, kind) {
     entry = entry || {};
+    // Only one tier control is live per section: critical paths raise a floor
+    // (min_tier), safe paths lower a ceiling (max_tier). The condition gate
+    // (no_production_changes) is honored on safe paths only.
+    const isCritical = kind === 'critical';
+    const tierSelect = isCritical
+      ? `<select class="form-select pr-min" title="min tier (floor)" style="max-width:9rem">${tierOptionsWithBlank(entry.min_tier || '')}</select>`
+      : `<select class="form-select pr-max" title="max tier (ceiling)" style="max-width:9rem">${tierOptionsWithBlank(entry.max_tier || '')}</select>`;
+    const conditionInput = isCritical
+      ? ''
+      : `<input class="form-input pr-condition" style="max-width:11rem" placeholder="condition" value="${escapeHtml(entry.condition || '')}">`;
     const row = document.createElement('div');
     row.className = 'path-risk-row flex flex-wrap gap-2 items-start';
     row.innerHTML = `
       <input class="form-input pr-pattern" style="flex:1;min-width:12rem" placeholder="glob pattern" value="${escapeHtml(entry.pattern || '')}">
-      <select class="form-select pr-min" title="min tier (floor)" style="max-width:9rem">${tierOptionsWithBlank(entry.min_tier || '')}</select>
-      <select class="form-select pr-max" title="max tier (ceiling)" style="max-width:9rem">${tierOptionsWithBlank(entry.max_tier || '')}</select>
+      ${tierSelect}
       <input class="form-input pr-reason" style="flex:1;min-width:8rem" placeholder="reason" value="${escapeHtml(entry.reason || '')}">
-      <input class="form-input pr-condition" style="max-width:11rem" placeholder="condition" value="${escapeHtml(entry.condition || '')}">
+      ${conditionInput}
       <button type="button" class="btn btn-sm btn-ghost pr-remove">✕</button>`;
     container.appendChild(row);
   }
@@ -486,12 +495,15 @@
     return Array.from(container.querySelectorAll('.path-risk-row')).map(row => {
       const pattern = row.querySelector('.pr-pattern').value.trim();
       if (!pattern) return null;
+      const minSel = row.querySelector('.pr-min');
+      const maxSel = row.querySelector('.pr-max');
+      const condInput = row.querySelector('.pr-condition');
       return compact({
         pattern,
-        min_tier: row.querySelector('.pr-min').value,
-        max_tier: row.querySelector('.pr-max').value,
+        min_tier: minSel ? minSel.value : '',
+        max_tier: maxSel ? maxSel.value : '',
         reason: row.querySelector('.pr-reason').value.trim(),
-        condition: row.querySelector('.pr-condition').value.trim(),
+        condition: condInput ? condInput.value.trim() : '',
       });
     }).filter(Boolean);
   }
@@ -706,9 +718,9 @@
 
     const pathRisk = settings.path_risk || {};
     profileInputs.pathCriticalRows.innerHTML = '';
-    (pathRisk.critical_paths || []).forEach(e => addPathRiskRow(profileInputs.pathCriticalRows, e));
+    (pathRisk.critical_paths || []).forEach(e => addPathRiskRow(profileInputs.pathCriticalRows, e, 'critical'));
     profileInputs.pathSafeRows.innerHTML = '';
-    (pathRisk.safe_paths || []).forEach(e => addPathRiskRow(profileInputs.pathSafeRows, e));
+    (pathRisk.safe_paths || []).forEach(e => addPathRiskRow(profileInputs.pathSafeRows, e, 'safe'));
 
     const surface = settings.security_surface || {};
     profileInputs.surfaceSecurityCritical.value = globsText(surface.security_critical);
@@ -1115,8 +1127,8 @@
         updateAutoApproveBanner();
       }
     });
-    document.getElementById('add-path-critical').addEventListener('click', () => addPathRiskRow(profileInputs.pathCriticalRows, {}));
-    document.getElementById('add-path-safe').addEventListener('click', () => addPathRiskRow(profileInputs.pathSafeRows, {}));
+    document.getElementById('add-path-critical').addEventListener('click', () => addPathRiskRow(profileInputs.pathCriticalRows, {}, 'critical'));
+    document.getElementById('add-path-safe').addEventListener('click', () => addPathRiskRow(profileInputs.pathSafeRows, {}, 'safe'));
     [profileInputs.pathCriticalRows, profileInputs.pathSafeRows].forEach(container => {
       container.addEventListener('click', event => {
         if (event.target.classList.contains('pr-remove')) event.target.closest('.path-risk-row').remove();

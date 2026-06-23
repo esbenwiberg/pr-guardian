@@ -13,7 +13,6 @@ from pr_guardian.models.context import (
     RiskTier,
 )
 from pr_guardian.triage.hotspots import check_hotspot_hits
-from pr_guardian.triage.path_risk import apply_path_risk
 
 log = structlog.get_logger()
 
@@ -140,14 +139,8 @@ def _apply_amplifiers(
         result.agent_set = set(ALL_AGENTS)
         result.reasons.append("Amplifier: critical repo risk class")
 
-    # Apply path-level risk from config
-    result.risk_tier, path_reasons = apply_path_risk(
-        result.risk_tier,
-        context.changed_files,
-        config.path_risk,
-        context.change_profile.has_production_changes,
-    )
-    result.reasons.extend(path_reasons)
+    # Path-risk floors/ceilings are applied on the trust-tier axis in
+    # classify_trust_tier (governance), not on the RiskTier scoring axis.
 
     log.info(
         "triage_complete",

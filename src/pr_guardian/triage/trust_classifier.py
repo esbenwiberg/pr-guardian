@@ -11,7 +11,12 @@ from fnmatch import fnmatch
 
 import structlog
 
-from pr_guardian.config.schema import GuardianConfig, SecuritySurfaceConfig, TrustTierConfig
+from pr_guardian.config.schema import (
+    GuardianConfig,
+    PathRiskConfig,
+    SecuritySurfaceConfig,
+    TrustTierConfig,
+)
 from pr_guardian.models.context import (
     RepoRiskClass,
     TrustTier,
@@ -100,6 +105,7 @@ def classify_trust_tier(
     config: GuardianConfig,
     repo_risk_class: RepoRiskClass = RepoRiskClass.STANDARD,
     archmap_available: bool = False,
+    has_production_changes: bool = False,
 ) -> TrustTierResult:
     """Classify the PR's trust tier based on changed file paths.
 
@@ -140,6 +146,17 @@ def classify_trust_tier(
     result.resolved_tier = pr_tier
     result.triggering_files = triggering
 
+    # Operator path-risk floors/ceilings. Applied before the repo-risk-class
+    # floor below so a safe-path ceiling can never pierce the CRITICAL hard
+    # floor — a docs-only PR in a CRITICAL repo still gets a human.
+    result.resolved_tier, path_reasons = _apply_path_risk(
+        result.resolved_tier,
+        changed_files,
+        config.path_risk,
+        has_production_changes,
+    )
+    result.reasons.extend(path_reasons)
+
     # Repo risk class floor: critical repos never go below MANDATORY_HUMAN
     if repo_risk_class == RepoRiskClass.CRITICAL:
         if _TIER_ORDER[result.resolved_tier] < _TIER_ORDER[TrustTier.MANDATORY_HUMAN]:
@@ -176,6 +193,65 @@ def _parse_tier(value: str, default: TrustTier) -> TrustTier:
         return TrustTier(value)
     except ValueError:
         return default
+
+
+def _parse_tier_or_none(value: str) -> TrustTier | None:
+    """Parse a trust-tier string, or None if blank/unrecognized.
+
+    Unlike :func:`_parse_tier`, an empty or junk value means "no constraint"
+    rather than falling back to a default — a path-risk entry with no tier set
+    simply does not apply.
+    """
+    try:
+        return TrustTier(value)
+    except ValueError:
+        return None
+
+
+def _apply_path_risk(
+    tier: TrustTier,
+    changed_files: list[str],
+    path_risk: PathRiskConfig,
+    has_production_changes: bool,
+) -> tuple[TrustTier, list[str]]:
+    """Apply operator path-risk floors and ceilings to a resolved trust tier.
+
+    ``critical_paths`` raise the floor (``min_tier`` — can only increase
+    governance); ``safe_paths`` lower the ceiling (``max_tier`` — can only
+    decrease governance). A blank tier means no constraint. ``safe_paths`` may
+    carry a ``no_production_changes`` condition that voids the ceiling when the
+    PR also touches production code. Mirrors the floor/ceiling editor in the
+    profiles UI.
+    """
+    reasons: list[str] = []
+
+    # Critical paths — floor: raise the tier up to min_tier on a match.
+    for entry in path_risk.critical_paths:
+        min_tier = _parse_tier_or_none(entry.min_tier)
+        if min_tier is None:
+            continue
+        if not any(_path_matches(f, entry.pattern) for f in changed_files):
+            continue
+        if _TIER_ORDER[min_tier] > _TIER_ORDER[tier]:
+            tier = min_tier
+            suffix = f" ({entry.reason})" if entry.reason else ""
+            reasons.append(f"Path risk: {entry.pattern} → floor {min_tier.value}{suffix}")
+
+    # Safe paths — ceiling: lower the tier down to max_tier on a match.
+    for entry in path_risk.safe_paths:
+        max_tier = _parse_tier_or_none(entry.max_tier)
+        if max_tier is None:
+            continue
+        if not any(_path_matches(f, entry.pattern) for f in changed_files):
+            continue
+        if entry.condition == "no_production_changes" and has_production_changes:
+            continue
+        if _TIER_ORDER[max_tier] < _TIER_ORDER[tier]:
+            tier = max_tier
+            suffix = f" ({entry.reason})" if entry.reason else ""
+            reasons.append(f"Safe path: {entry.pattern} → ceiling {max_tier.value}{suffix}")
+
+    return tier, reasons
 
 
 def _resolve_rules(
