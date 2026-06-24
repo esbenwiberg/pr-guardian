@@ -1111,33 +1111,51 @@ function renderWrap() {
   if (ta) ta.addEventListener("input", () => { reviewerComment = ta.value; });
 
   document.querySelectorAll("[data-verdict]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const verdict = btn.dataset.verdict;
-      const status = document.getElementById("verdict-status");
-      const buttons = document.querySelectorAll("[data-verdict]");
-      buttons.forEach(b => b.disabled = true);
-      status.textContent = `Posting ${verdict.replace(/_/g, " ")}…`;
-      status.style.color = "var(--muted)";
-      try {
-        const resp = await fetch(`/api/dashboard/reviews/${REVIEW_ID}/submit-verdict`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ verdict, comment: reviewerComment }),
-        });
-        const text = await resp.text();
-        if (!resp.ok) throw new Error(`HTTP ${resp.status} ${text}`);
-        let result; try { result = JSON.parse(text); } catch { result = {}; }
-        const actions = (result.platform_actions || []).join(", ") || "no platform calls";
-        status.textContent = `✓ Verdict posted to platform (${actions}). You can close this tab.`;
-        status.style.color = "var(--green)";
-      } catch (err) {
-        const msg = (err && err.message) ? err.message : String(err);
-        status.textContent = `✗ Couldn't post verdict: ${msg}`;
-        status.style.color = "var(--red)";
-        buttons.forEach(b => b.disabled = false);
-      }
-    });
+    btn.addEventListener("click", () => postVerdict(btn.dataset.verdict, false));
   });
+
+  async function postVerdict(verdict, confirmHeadMoved) {
+    const status = document.getElementById("verdict-status");
+    const buttons = document.querySelectorAll("[data-verdict]");
+    buttons.forEach(b => b.disabled = true);
+    status.textContent = `Posting ${verdict.replace(/_/g, " ")}…`;
+    status.style.color = "var(--muted)";
+    try {
+      const resp = await fetch(`/api/dashboard/reviews/${REVIEW_ID}/submit-verdict`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ verdict, comment: reviewerComment, confirm_head_moved: !!confirmHeadMoved }),
+      });
+      const text = await resp.text();
+      if (!resp.ok) throw new Error(`HTTP ${resp.status} ${text}`);
+      let result; try { result = JSON.parse(text); } catch { result = {}; }
+      // PR head moved since the review ran — confirm before carrying the
+      // verdict forward onto unreviewed commits.
+      if (result.needs_head_confirmation) {
+        const reviewed = (result.reviewed_sha || "").slice(0, 9);
+        const live = (result.live_sha || "").slice(0, 9);
+        const ok = window.confirm(
+          `The PR head moved since this review ran.\n\n` +
+          `Reviewed commit: ${reviewed}\nCurrent PR head: ${live}\n\n` +
+          `Commits pushed after the review were not part of it. ` +
+          `Carry your "${verdict.replace(/_/g, " ")}" verdict forward to the current head anyway?`
+        );
+        if (ok) return postVerdict(verdict, true);
+        status.textContent = "Verdict not posted — PR head moved since the review.";
+        status.style.color = "var(--muted)";
+        buttons.forEach(b => b.disabled = false);
+        return;
+      }
+      const actions = (result.platform_actions || []).join(", ") || "no platform calls";
+      status.textContent = `✓ Verdict posted to platform (${actions}). You can close this tab.`;
+      status.style.color = "var(--green)";
+    } catch (err) {
+      const msg = (err && err.message) ? err.message : String(err);
+      status.textContent = `✗ Couldn't post verdict: ${msg}`;
+      status.style.color = "var(--red)";
+      buttons.forEach(b => b.disabled = false);
+    }
+  }
 }
 
 // ── Footer nav ──

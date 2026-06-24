@@ -55,6 +55,31 @@ def recover_org_project_from_pr_url(pr_url: str) -> tuple[str, str]:
         return "", ""
 
 
+async def fetch_live_head_sha(adapter: object, pr: PlatformPR) -> str | None:
+    """Best-effort fetch of the PR's *current* head SHA from the platform.
+
+    Human-finalize handlers build their PlatformPR from the stored review row,
+    whose ``head_commit_sha`` is the SHA captured when the review ran. If the
+    author pushed commits afterwards, posting the verdict's commit status to
+    that stale SHA lands it on a dead commit while branch protection evaluates
+    the live head — so ``guardian/review`` never goes green. Callers compare
+    this live SHA against the stored one to detect that drift.
+
+    Returns the live head SHA, or ``None`` if the adapter can't report it or
+    the platform call fails — callers fall back to the stored SHA on ``None``
+    (no worse than the historical behaviour, just not improved).
+    """
+    fetch = getattr(adapter, "fetch_pr_metadata", None)
+    if fetch is None:
+        return None
+    try:
+        meta = await fetch(pr)
+    except Exception as exc:  # noqa: BLE001 — best-effort; never break finalize
+        log.warning("live_head_fetch_failed", pr_id=pr.pr_id, repo=pr.repo, error=str(exc))
+        return None
+    return getattr(meta, "head_sha", None) or None
+
+
 class ReviewRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

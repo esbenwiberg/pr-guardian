@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
-from pr_guardian.platform.protocol import InlinePostResult
+from pr_guardian.platform.protocol import InlinePostResult, PlatformPRMetadata
 
 import pytest
 from fastapi.testclient import TestClient
@@ -88,7 +88,7 @@ def _patch_endpoint_deps(monkeypatch, fake_review, mock_adapter, *, dismissals=N
     return appended
 
 
-def _make_mock_adapter():
+def _make_mock_adapter(*, head_sha="abc123"):
     adapter = AsyncMock()
     adapter.approve_pr = AsyncMock(return_value=None)
     adapter.request_changes = AsyncMock(return_value=None)
@@ -96,6 +96,9 @@ def _make_mock_adapter():
     adapter.post_inline_comments = AsyncMock(
         return_value=InlinePostResult(posted_ids=["thread-1"], skipped=[])
     )
+    # Pin the live head to the stored review SHA so the head-moved gate stays
+    # inert by default; the stale-head tests override head_sha.
+    adapter.fetch_pr_metadata = AsyncMock(return_value=PlatformPRMetadata(head_sha=head_sha))
     return adapter
 
 
@@ -364,6 +367,68 @@ def test_approve_succeeds_when_adapter_has_no_set_review_status(client, fake_rev
     actions = resp.json()["platform_actions"]
     assert "set_status:success" not in actions
     assert "approve_pr" in actions
+
+
+def test_unconfirmed_stale_head_posts_nothing(client, fake_review, monkeypatch):
+    """If the PR head moved since the review ran, submit-verdict must NOT post
+    (it would land guardian/review on a dead commit). It returns a
+    needs_head_confirmation signal and touches no platform endpoint."""
+    adapter = _make_mock_adapter(head_sha="def456")  # live head moved off "abc123"
+    appended = _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["needs_head_confirmation"] is True
+    assert body["reviewed_sha"] == "abc123"
+    assert body["live_sha"] == "def456"
+    adapter.approve_pr.assert_not_awaited()
+    adapter.post_comment.assert_not_awaited()
+    adapter.set_review_status.assert_not_awaited()
+    # Nothing posted → no audit attempt recorded yet.
+    assert appended == []
+
+
+def test_confirmed_stale_head_posts_status_to_live_head(client, fake_review, monkeypatch):
+    """With confirm_head_moved=true, the verdict is carried forward: the commit
+    status targets the LIVE head, not the stored stale SHA."""
+    adapter = _make_mock_adapter(head_sha="def456")
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": "", "confirm_head_moved": True},
+    )
+    assert resp.status_code == 200, resp.text
+    actions = resp.json()["platform_actions"]
+    assert "head_carried_forward" in actions
+    assert "set_status:success" in actions
+    status_pr = adapter.set_review_status.await_args.args[0]
+    assert status_pr.head_commit_sha == "def456"
+    comment = adapter.post_comment.await_args.args[1]
+    assert "carried forward" in comment
+
+
+def test_decline_on_moved_head_carries_forward_silently(client, fake_review, monkeypatch):
+    """A decline on a moved head needs no confirmation — the failure belongs on
+    the live head, posted straight through."""
+    adapter = _make_mock_adapter(head_sha="def456")
+    _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "decline", "comment": "nope"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "needs_head_confirmation" not in body
+    actions = body["platform_actions"]
+    assert "head_carried_forward" in actions
+    assert adapter.set_review_status.await_args.args[0].head_commit_sha == "def456"
+    assert adapter.set_review_status.await_args.args[1] == "failure"
 
 
 def test_invalid_verdict_returns_400(client, fake_review, monkeypatch):

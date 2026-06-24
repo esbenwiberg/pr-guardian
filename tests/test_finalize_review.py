@@ -10,7 +10,7 @@ from __future__ import annotations
 import uuid
 from unittest.mock import AsyncMock
 
-from pr_guardian.platform.protocol import InlinePostResult
+from pr_guardian.platform.protocol import InlinePostResult, PlatformPRMetadata
 
 import httpx
 import pytest
@@ -85,7 +85,7 @@ def _github_review_with_finding() -> dict:
     return review
 
 
-def _make_adapter(*, inline_ids=None):
+def _make_adapter(*, inline_ids=None, head_sha="abc123"):
     a = AsyncMock()
     a.approve_pr = AsyncMock(return_value=None)
     a.request_changes = AsyncMock(return_value=None)
@@ -93,6 +93,9 @@ def _make_adapter(*, inline_ids=None):
     a.post_inline_comments = AsyncMock(
         return_value=InlinePostResult(posted_ids=inline_ids or [], skipped=[])
     )
+    # Pin the live head to the stored review SHA by default so finalize's
+    # head-moved gate stays inert; the stale-head tests override head_sha.
+    a.fetch_pr_metadata = AsyncMock(return_value=PlatformPRMetadata(head_sha=head_sha))
     return a
 
 
@@ -522,6 +525,118 @@ def test_finalize_inline_request_changes_defaults_actionable_findings(client, mo
     assert "Fix-requested findings" in summary
     assert resp.json()["decisions"] == {finding["id"]: "fix"}
     assert appended[0]["decisions"] == {finding["id"]: "fix"}
+
+
+def test_finalize_unconfirmed_stale_head_posts_nothing(client, monkeypatch):
+    """If the PR head moved since the review ran, finalize must NOT post the
+    verdict (it would land guardian/review on a dead commit). It returns a
+    needs_head_confirmation signal and touches no platform endpoint."""
+    review = _github_review()  # stored head_commit_sha == "abc123"
+    adapter = _make_adapter(head_sha="def456")  # live head moved
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={"verdict": "approve", "comment_mode": "summary", "decisions": {}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["needs_head_confirmation"] is True
+    assert body["reviewed_sha"] == "abc123"
+    assert body["live_sha"] == "def456"
+    adapter.approve_pr.assert_not_awaited()
+    adapter.post_comment.assert_not_awaited()
+    adapter.set_review_status.assert_not_awaited()
+
+
+def test_finalize_confirmed_stale_head_posts_status_to_live_head(client, monkeypatch):
+    """With confirm_head_moved=true, finalize carries the verdict forward: the
+    commit status is posted against the LIVE head, not the stored stale SHA, so
+    branch protection on the current head actually clears."""
+    review = _github_review()
+    adapter = _make_adapter(head_sha="def456")
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={
+            "verdict": "approve",
+            "comment_mode": "summary",
+            "decisions": {},
+            "confirm_head_moved": True,
+        },
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["posted"] is True
+    assert "head_carried_forward" in body["actions"]
+    assert "set_status:success" in body["actions"]
+    # Status must target the live head, not the stored "abc123".
+    status_pr = adapter.set_review_status.await_args.args[0]
+    assert status_pr.head_commit_sha == "def456"
+    # The carry-forward is disclosed in the comment.
+    comment = adapter.post_comment.await_args.args[1]
+    assert "carried forward" in comment
+
+
+def test_finalize_request_changes_on_moved_head_carries_forward_silently(client, monkeypatch):
+    """A blocking verdict on a moved head needs no confirmation — the failure
+    belongs on the live head, posted straight through."""
+    review = _github_review()
+    adapter = _make_adapter(head_sha="def456")
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={"verdict": "request_changes", "comment_mode": "summary", "decisions": {}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "needs_head_confirmation" not in body
+    assert body["posted"] is True
+    assert "head_carried_forward" in body["actions"]
+    assert adapter.set_review_status.await_args.args[0].head_commit_sha == "def456"
+    assert adapter.set_review_status.await_args.args[1] == "failure"
+
+
+def test_finalize_head_unchanged_does_not_gate(client, monkeypatch):
+    """The common case: head unchanged → no confirmation, posts as before."""
+    review = _github_review()
+    adapter = _make_adapter(head_sha="abc123")  # matches stored
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={"verdict": "approve", "comment_mode": "summary", "decisions": {}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["posted"] is True
+    assert "head_carried_forward" not in body["actions"]
+    adapter.set_review_status.assert_awaited_once()
+
+
+def test_finalize_head_fetch_failure_falls_back_to_stored(client, monkeypatch):
+    """If the live-head lookup fails, finalize must not block — it falls back to
+    the stored SHA (no worse than the historical behaviour)."""
+    review = _github_review()
+    adapter = _make_adapter()
+    adapter.fetch_pr_metadata = AsyncMock(side_effect=RuntimeError("boom"))
+    _patch(monkeypatch, review, adapter)
+
+    resp = client.post(
+        f"/api/reviews/{review['id']}/finalize",
+        json={"verdict": "approve", "comment_mode": "summary", "decisions": {}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["posted"] is True
+    assert "head_carried_forward" not in resp.json()["actions"]
+    adapter.set_review_status.assert_awaited_once()
 
 
 def test_finalize_inline_omits_finding_list_when_inline_comments_post(client, monkeypatch):

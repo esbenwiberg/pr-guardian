@@ -606,6 +606,9 @@ class FinalizeRequest(BaseModel):
     comment_to_author: str = ""
     verdict: str = "approve"
     comment_mode: str = "inline"
+    # Set true to carry the verdict forward to the PR's *current* head when it
+    # has moved since the review ran (the UI asks the human to confirm first).
+    confirm_head_moved: bool = False
 
 
 class OverrideReadinessRequest(BaseModel):
@@ -905,6 +908,8 @@ def _build_summary_comment(
     *,
     include_fix_findings: bool = True,
     review_url: str | None = None,
+    carried_forward_from: str | None = None,
+    carried_forward_to: str | None = None,
 ) -> str:
     """Compose the summary comment posted alongside the verdict."""
     headline = {
@@ -921,6 +926,13 @@ def _build_summary_comment(
     parts: list[str] = [headline]
     if comment_to_author.strip():
         parts.append(comment_to_author.strip())
+
+    if carried_forward_from and carried_forward_to:
+        parts.append(
+            f"⚠️ _Verdict carried forward across new commits: this review covered "
+            f"`{carried_forward_from[:9]}`; the PR head is now `{carried_forward_to[:9]}`. "
+            f"Commits pushed after the review were not individually reviewed._"
+        )
 
     if any(counts.values()):
         bits = []
@@ -1103,6 +1115,35 @@ async def finalize_review(
         except LookupError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+        # Detect a head that moved since the review ran. The verdict's commit
+        # status is SHA-pinned (set_status → /statuses/{sha}); posting it to the
+        # stored (stale) SHA leaves guardian/review red on the live head. If the
+        # head moved we ask the human to confirm before carrying the verdict
+        # forward — the new commits were not part of this review.
+        from pr_guardian.api.review import fetch_live_head_sha
+
+        stored_sha = pr.head_commit_sha or ""
+        live_sha = await fetch_live_head_sha(adapter, pr)
+        head_moved = bool(live_sha and stored_sha and live_sha != stored_sha)
+        # Only an *approving* verdict on a moved head needs human confirmation —
+        # it would clear merge on commits the review never saw. A blocking
+        # verdict carries forward silently (the block belongs on the live head).
+        if head_moved and body.verdict == "approve" and not body.confirm_head_moved:
+            return {
+                "needs_head_confirmation": True,
+                "reviewed_sha": stored_sha,
+                "live_sha": live_sha,
+                "next_id": None,
+            }
+        if head_moved:
+            # Carry forward: target the live head so the status actually unblocks
+            # merge. Also moves the readiness re-assert onto the live head.
+            # PlatformPR is a frozen dataclass — rebind via replace().
+            from dataclasses import replace
+
+            pr = replace(pr, head_commit_sha=live_sha or stored_sha)
+            actions.append("head_carried_forward")
+
         try:
             # Inline comments — only for "fix" decisions, and only if mode requests them.
             if body.comment_mode == "inline" and fix_findings:
@@ -1152,6 +1193,8 @@ async def finalize_review(
                 body.verdict,
                 include_fix_findings=include_fix_findings_in_summary,
                 review_url=review_url,
+                carried_forward_from=stored_sha if head_moved else None,
+                carried_forward_to=pr.head_commit_sha if head_moved else None,
             )
 
             # Summary + verdict.

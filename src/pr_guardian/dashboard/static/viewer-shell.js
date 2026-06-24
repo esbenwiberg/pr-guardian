@@ -359,7 +359,7 @@
     overlay.querySelector('#prg-wrap-cancel').addEventListener('click', close);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
 
-    overlay.querySelector('#prg-wrap-post').addEventListener('click', async () => {
+    async function submitFinalize(confirmHeadMoved) {
       const btn = overlay.querySelector('#prg-wrap-post');
       const errEl = overlay.querySelector('#prg-wrap-error');
       btn.disabled = true;
@@ -373,9 +373,26 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             decisions, comment_to_author: comment, verdict, comment_mode: mode,
+            confirm_head_moved: !!confirmHeadMoved,
           }),
         });
         const data = await r.json().catch(() => ({}));
+        // PR head moved since the review ran — the verdict status would land on
+        // a stale commit. Confirm before carrying it forward to the live head.
+        if (data.needs_head_confirmation) {
+          const reviewed = (data.reviewed_sha || '').slice(0, 9);
+          const live = (data.live_sha || '').slice(0, 9);
+          const ok = window.confirm(
+            `The PR head moved since this review ran.\n\n` +
+            `Reviewed commit: ${reviewed}\nCurrent PR head: ${live}\n\n` +
+            `Commits pushed after the review were not part of it. ` +
+            `Carry your "${verdict}" verdict forward to the current head anyway?`
+          );
+          if (ok) { return submitFinalize(true); }
+          btn.disabled = false;
+          btn.textContent = 'Post →';
+          return;
+        }
         if (!r.ok || data.posted === false) {
           throw new Error(data.error || data.detail || `HTTP ${r.status}`);
         }
@@ -407,7 +424,8 @@
         btn.disabled = false;
         btn.textContent = 'Post →';
       }
-    });
+    }
+    overlay.querySelector('#prg-wrap-post').addEventListener('click', () => submitFinalize(false));
   }
 
   function mountFloating() {

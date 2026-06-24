@@ -877,6 +877,9 @@ _VALID_VERDICTS = {"approve", "approve_with_fixes", "decline"}
 class SubmitVerdictRequest(BaseModel):
     verdict: str
     comment: str = ""
+    # Set true to carry the verdict forward to the PR's *current* head when it
+    # has moved since the review ran (the UI asks the human to confirm first).
+    confirm_head_moved: bool = False
 
 
 async def _enrich_with_persisted_dismissals(review: dict) -> None:
@@ -946,6 +949,8 @@ def _build_verdict_body(
     reviewer_comment: str,
     decision_counts: dict[str, int],
     review_url: str | None = None,
+    carried_forward_from: str | None = None,
+    carried_forward_to: str | None = None,
 ) -> str:
     """Compose the comment body posted to the platform alongside the verdict."""
     accepted = decision_counts.get("acknowledged", 0)
@@ -961,6 +966,13 @@ def _build_verdict_body(
     parts: list[str] = [headline]
     if reviewer_comment.strip():
         parts.append(reviewer_comment.strip())
+
+    if carried_forward_from and carried_forward_to:
+        parts.append(
+            f"⚠️ _Verdict carried forward across new commits: this review covered "
+            f"`{carried_forward_from[:9]}`; the PR head is now `{carried_forward_to[:9]}`. "
+            f"Commits pushed after the review were not individually reviewed._"
+        )
 
     summary_bits: list[str] = []
     if accepted:
@@ -1040,12 +1052,47 @@ async def submit_verdict(
         adapter = await create_adapter_for_review(review, platform_str)
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    actions: list[str] = []
+
+    # Detect a head that moved since the review ran (see fetch_live_head_sha).
+    # The verdict's commit status is SHA-pinned; posting it to the stored stale
+    # SHA leaves guardian/review red on the live head. Confirm with the human
+    # before carrying the verdict forward onto unreviewed commits.
+    from pr_guardian.api.review import fetch_live_head_sha
+
+    stored_sha = pr.head_commit_sha or ""
+    live_sha = await fetch_live_head_sha(adapter, pr)
+    head_moved = bool(live_sha and stored_sha and live_sha != stored_sha)
+    # Only an *approving* verdict on a moved head needs human confirmation — it
+    # would clear merge on commits the review never saw. A decline carries
+    # forward silently (the block belongs on the live head).
+    approving = body.verdict in ("approve", "approve_with_fixes")
+    if head_moved and approving and not body.confirm_head_moved:
+        return {
+            "needs_head_confirmation": True,
+            "reviewed_sha": stored_sha,
+            "live_sha": live_sha,
+        }
+    if head_moved:
+        # PlatformPR is a frozen dataclass — rebind via replace().
+        from dataclasses import replace
+
+        pr = replace(pr, head_commit_sha=live_sha or stored_sha)
+        actions.append("head_carried_forward")
+
     decision_counts = _summarise_decisions(review)
     base_url = str(request.base_url).rstrip("/")
     review_url = _detail_url(str(review_id), base_url)
-    comment_body = _build_verdict_body(body.verdict, body.comment, decision_counts, review_url)
+    comment_body = _build_verdict_body(
+        body.verdict,
+        body.comment,
+        decision_counts,
+        review_url,
+        carried_forward_from=stored_sha if head_moved else None,
+        carried_forward_to=pr.head_commit_sha if head_moved else None,
+    )
 
-    actions: list[str] = []
     posted = True
     error: str | None = None
     fix_findings = _will_fix_findings(review)
