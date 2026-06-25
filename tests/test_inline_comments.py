@@ -453,6 +453,7 @@ def _mock_adapter() -> MagicMock:
         return_value=InlinePostResult(posted_ids=["id-1", "id-2"], skipped=[])
     )
     adapter.delete_inline_comments = AsyncMock()
+    adapter.upsert_marker_comment = AsyncMock(return_value="cid")
     adapter.add_label = AsyncMock()
     adapter.set_status = AsyncMock()
     adapter.request_reviewers = AsyncMock()
@@ -502,7 +503,7 @@ async def test_inline_mode_filters_below_threshold():
 
 @pytest.mark.asyncio
 async def test_inline_mode_posts_summary_after_inline():
-    """In inline mode, post_comment (summary) is called after post_inline_comments."""
+    """In inline mode, the sticky summary upsert runs after post_inline_comments."""
     pr = _make_github_pr()
     result = _make_result([_inline_finding(Severity.HIGH)])
 
@@ -513,7 +514,13 @@ async def test_inline_mode_posts_summary_after_inline():
             call_order.append("inline") or InlinePostResult(posted_ids=["id-1"], skipped=[])
         )
     )
-    adapter.post_comment = AsyncMock(side_effect=lambda *a, **kw: call_order.append("summary"))
+
+    def _record_marker(*a, **kw):
+        if kw.get("marker") == SUMMARY_MARKER:
+            call_order.append("summary")
+        return "cid"
+
+    adapter.upsert_marker_comment = AsyncMock(side_effect=_record_marker)
     storage = _mock_storage()
 
     await _post_results(
@@ -970,3 +977,183 @@ async def test_automatic_github_review_posts_inline_comments_and_sticky_guidance
     # postback_meta records both
     assert result.postback_meta.get("inline_comments_posted", 0) > 0
     assert result.postback_meta.get("guidance_posted") is True
+
+
+# ---------------------------------------------------------------------------
+# Reject-threshold union + unanchored findings comment
+# ---------------------------------------------------------------------------
+
+from pr_guardian.config.schema import EscalationPolicyConfig
+from pr_guardian.decision.actions import (
+    SUMMARY_MARKER,
+    UNANCHORED_MARKER,
+    build_unanchored_findings_comment,
+)
+
+_UNANCHORED_HEADER = "findings not anchored to the diff"
+
+
+def _unanchored_bodies(adapter) -> list[str]:
+    """Bodies upserted under the unanchored marker."""
+    return [
+        c.args[1]
+        for c in adapter.upsert_marker_comment.call_args_list
+        if c.kwargs.get("marker") == UNANCHORED_MARKER
+    ]
+
+
+def _any_reject_config() -> GuardianConfig:
+    """reject_threshold='any' → every finding bounces the PR (the 'Any finding'
+    profile from the dashboard)."""
+    return GuardianConfig(escalation_policy=EscalationPolicyConfig(reject_threshold="any"))
+
+
+@pytest.mark.asyncio
+async def test_low_finding_inlined_when_it_drove_reject():
+    """Under reject_threshold='any', a LOW finding bounced the PR — it must reach
+    post_inline_comments even though it's below the MEDIUM severity floor."""
+    pr = _make_github_pr()
+    low = _inline_finding(Severity.LOW, line=10)
+    result = _make_result([low])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter,
+        pr,
+        result,
+        _any_reject_config(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
+        manual_comment_override=True,
+    )
+
+    adapter.post_inline_comments.assert_called_once()
+    passed = adapter.post_inline_comments.call_args[0][1]
+    assert Severity.LOW in {f.severity for f in passed}
+
+
+@pytest.mark.asyncio
+async def test_no_line_reject_finding_posted_as_standalone_comment():
+    """A surfaced finding with no line can't be inline-anchored — it must be posted
+    as its own standalone comment instead of vanishing."""
+    pr = _make_github_pr()
+    no_line = _inline_finding(Severity.HIGH, line=None)
+    result = _make_result([no_line])
+
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter,
+        pr,
+        result,
+        _any_reject_config(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
+        manual_comment_override=True,
+    )
+
+    # No line → never sent to inline posting...
+    adapter.post_inline_comments.assert_not_called()
+    # ...but surfaced in a sticky standalone comment.
+    assert any(_UNANCHORED_HEADER in b for b in _unanchored_bodies(adapter))
+
+
+@pytest.mark.asyncio
+async def test_inline_skipped_finding_falls_back_to_standalone_comment():
+    """A finding GitHub rejects (line not in diff → InlinePostResult.skipped) must be
+    re-surfaced in the standalone unanchored comment."""
+    pr = _make_github_pr()
+    high = _inline_finding(Severity.HIGH, line=20)
+    result = _make_result([high])
+
+    adapter = _mock_adapter()
+    adapter.post_inline_comments = AsyncMock(
+        return_value=InlinePostResult(posted_ids=[], skipped=[high])
+    )
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
+        manual_comment_override=True,
+    )
+
+    assert any(_UNANCHORED_HEADER in b for b in _unanchored_bodies(adapter))
+
+
+def test_build_unanchored_findings_comment_empty_is_blank():
+    assert build_unanchored_findings_comment([]) == ""
+
+
+def test_build_unanchored_findings_comment_lists_findings():
+    with_line = _inline_finding(Severity.HIGH, line=42)
+    no_line = _inline_finding(Severity.LOW, line=None)
+    body = build_unanchored_findings_comment([with_line, no_line])
+    assert _UNANCHORED_HEADER in body
+    assert "`src/app.py:42`" in body
+    assert "`src/app.py`" in body  # no-line finding shows file only
+    assert "**HIGH**" in body and "**LOW**" in body
+
+
+@pytest.mark.asyncio
+async def test_summary_is_sticky_via_marker():
+    """The inline-mode summary is upserted under the summary marker (sticky) so it
+    updates in place rather than stacking a fresh comment each review."""
+    pr = _make_github_pr()
+    result = _make_result([_inline_finding(Severity.HIGH, line=10)])
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
+        manual_comment_override=True,
+    )
+
+    markers = [c.kwargs.get("marker") for c in adapter.upsert_marker_comment.call_args_list]
+    assert SUMMARY_MARKER in markers
+
+
+@pytest.mark.asyncio
+async def test_rereview_clears_stale_unanchored_comment():
+    """A re-review where everything is now anchored clears the prior unanchored
+    comment in place, without creating a new one."""
+    pr = _make_github_pr()
+    result = _make_result([_inline_finding(Severity.HIGH, line=10)])  # anchored, none left over
+    adapter = _mock_adapter()
+    storage = _mock_storage()
+
+    await _post_results(
+        adapter,
+        pr,
+        result,
+        GuardianConfig(),
+        comment_mode="inline",
+        review_id=_uuid.uuid4(),
+        storage=storage,
+        original_review_id=str(_uuid.uuid4()),
+        manual_comment_override=True,
+    )
+
+    unanchored_calls = [
+        c
+        for c in adapter.upsert_marker_comment.call_args_list
+        if c.kwargs.get("marker") == UNANCHORED_MARKER
+    ]
+    assert len(unanchored_calls) == 1
+    assert unanchored_calls[0].kwargs.get("create_if_missing") is False

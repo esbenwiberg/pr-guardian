@@ -26,11 +26,14 @@ from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.decision.actions import (
     SEVERITY_ORDER,
+    SUMMARY_MARKER,
+    UNANCHORED_MARKER,
     build_review_detail_url,
     build_summary_comment,
+    build_unanchored_findings_comment,
     get_review_labels,
 )
-from pr_guardian.decision.engine import decide
+from pr_guardian.decision.engine import decide, finding_meets_reject_threshold
 from pr_guardian.decision.severity_filter import filter_findings
 from pr_guardian.decision.validator import validate_findings
 from pr_guardian.discovery.blast_radius import compute_blast_radius
@@ -57,7 +60,10 @@ from pr_guardian.models.findings import (
 )
 from pr_guardian.models.output import Decision, MechanicalResult, ReviewResult
 from pr_guardian.models.pr import PlatformPR
-from pr_guardian.platform.guidance import upsert_guidance_comment as _upsert_guidance_comment
+from pr_guardian.platform.guidance import (
+    upsert_guidance_comment as _upsert_guidance_comment,
+    upsert_marker_comment as _upsert_marker_comment,
+)
 from pr_guardian.platform.protocol import PlatformAdapter
 from pr_guardian.triage.classifier import classify
 from pr_guardian.triage.hotspots import load_hotspots
@@ -1815,16 +1821,29 @@ async def _post_inline_and_summary(
     threshold = config.inline_comments.severity_threshold.lower()
     threshold_ord = SEVERITY_ORDER.get(threshold, SEVERITY_ORDER["medium"])
 
-    # Collect qualifying findings from agent results. Stamp primary_agent with
-    # the AgentResult's name (the value the re-review dismissal filter matches on)
-    # so a reply-to-comment dismissal resolves to the right signature.
+    # A finding is surfaced inline if it clears the severity floor OR if it met
+    # the reject threshold — the findings that bounced the PR must always be
+    # visible on the code, regardless of the floor (otherwise an author can be
+    # sent "Changes Requested" over a finding they never see on the diff).
+    def _should_surface(f: Finding) -> bool:
+        return (
+            SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord
+            or finding_meets_reject_threshold(f, config)
+        )
+
+    # Collect surfaced findings from agent results. Stamp primary_agent with the
+    # AgentResult's name (the value the re-review dismissal filter matches on) so
+    # a reply-to-comment dismissal resolves to the right signature. Findings with
+    # no line can't be inline-anchored — they go to the standalone comment below.
     qualifying: list[Finding] = []
+    unanchored: list[Finding] = []
     for ar in result.agent_results:
         for f in ar.findings:
-            if f.line is not None and SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord:
-                if not f.primary_agent:
-                    f.primary_agent = ar.agent_name
-                qualifying.append(f)
+            if not _should_surface(f):
+                continue
+            if not f.primary_agent:
+                f.primary_agent = ar.agent_name
+            (qualifying if f.line is not None else unanchored).append(f)
 
     # Collect qualifying findings from mechanical results
     for mech in result.mechanical_results:
@@ -1870,7 +1889,10 @@ async def _post_inline_and_summary(
                     id_to_findings=inline_result.id_to_findings,
                 )
             postback["inline_comments_posted"] = len(inline_result.posted_ids)
+            # Findings GitHub rejected (line not in diff) join the unanchored set
+            # so they're surfaced in the standalone comment rather than vanishing.
             if inline_result.skipped:
+                unanchored.extend(inline_result.skipped)
                 log.warning(
                     "inline_comments_not_anchored",
                     pr_id=pr.pr_id,
@@ -1882,10 +1904,34 @@ async def _post_inline_and_summary(
     else:
         postback["inline_comments_posted"] = 0
 
-    # Summary comment posts last in inline mode when comments are enabled.
+    # Findings that couldn't be anchored to a line get their own sticky comment,
+    # so a reviewer still sees them on the PR instead of only in the dashboard.
+    if post_summary:
+        if unanchored:
+            await _upsert_marker_comment(
+                adapter,
+                pr,
+                build_unanchored_findings_comment(unanchored),
+                marker=UNANCHORED_MARKER,
+            )
+            postback["unanchored_findings_posted"] = len(unanchored)
+        elif original_review_id:
+            # Re-review with everything now anchored: clear a stale comment left by
+            # a prior review in place, but don't create one where none exists.
+            await _upsert_marker_comment(
+                adapter,
+                pr,
+                f"{UNANCHORED_MARKER}\n"
+                "*PR Guardian — all findings are now anchored to the diff.*",
+                marker=UNANCHORED_MARKER,
+                create_if_missing=False,
+            )
+
+    # Summary comment posts last in inline mode when comments are enabled. Sticky:
+    # updates Guardian's existing summary in place instead of stacking a new one.
     try:
         if post_summary:
-            await adapter.post_comment(pr, comment)
+            await _upsert_marker_comment(adapter, pr, comment, marker=SUMMARY_MARKER)
         if labels_enabled:
             for label in labels:
                 await adapter.add_label(pr, label)

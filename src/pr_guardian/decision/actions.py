@@ -19,6 +19,12 @@ _AGENT_LABELS: dict[str, str] = {
 }
 
 
+# Hidden markers let Guardian find and update its own comments in place instead
+# of stacking a new one on every review. Rendered invisibly by GitHub markdown.
+SUMMARY_MARKER = "<!-- guardian-summary -->"
+UNANCHORED_MARKER = "<!-- guardian-unanchored -->"
+
+
 def build_review_detail_url(review_id: str, base_url: str = "") -> str | None:
     """Build the URL to the findings detail page.
 
@@ -47,7 +53,7 @@ def build_summary_comment(result: ReviewResult, *, base_url: str = "") -> str:
     All detailed findings live on the review detail page — the PR comment is
     deliberately short so it never hits platform comment size limits.
     """
-    lines: list[str] = []
+    lines: list[str] = [SUMMARY_MARKER]
 
     # ── Header ──────────────────────────────────────────────────────
     decision_display = {
@@ -161,6 +167,29 @@ def get_review_labels(result: ReviewResult) -> list[str]:
             labels.append("guardian-approved")
 
     return labels
+
+
+def build_unanchored_findings_comment(findings: list[Finding]) -> str:
+    """Standalone comment for findings that can't be posted as inline code
+    comments — no line reference, or the line isn't part of the PR diff. They'd
+    otherwise be invisible on the PR (only counted in the summary), so surface
+    them here as a general comment. Returns "" when there's nothing to post."""
+    if not findings:
+        return ""
+
+    lines = [
+        UNANCHORED_MARKER,
+        "### PR Guardian — findings not anchored to the diff",
+        "",
+        "These couldn't be attached to a specific line (no line reference, or "
+        "the line isn't part of this PR's diff):",
+        "",
+    ]
+    for f in findings:
+        loc = f.file if f.line is None else f"{f.file}:{f.line}"
+        lines.append(f"- **{f.severity.value.upper()}** `{loc}` — {f.description}")
+    lines += ["", "*PR Guardian — automated review*"]
+    return "\n".join(lines)
 
 
 GUIDANCE_MARKER = "<!-- guardian-guidance -->"

@@ -464,25 +464,26 @@ class GitHubAdapter:
             )
         return signals
 
-    async def upsert_guidance_comment(
+    async def upsert_marker_comment(
         self,
         pr: PlatformPR,
         body: str,
         *,
+        marker: str,
         stored_comment_id: str | None = None,
-    ) -> str:
-        """Create or update the sticky guidance comment on a PR.
+        create_if_missing: bool = True,
+    ) -> str | None:
+        """Create or update a sticky comment identified by a hidden ``marker``.
 
         Recovery order:
         1. If stored_comment_id is given, attempt PATCH; skip recovery on 404.
-        2. If no stored ID or the stored comment was deleted, scan PR comments
-           for the hidden marker and patch that comment.
-        3. If not found at all, create a new comment.
+        2. Otherwise scan PR comments for the marker and patch that comment.
+        3. If not found and ``create_if_missing`` is True, create a new comment;
+           otherwise no-op (used to clear a stale comment without creating one).
 
-        Returns the platform comment ID (new or existing).
+        Returns the platform comment ID (new or existing), or None when nothing
+        was found and creation was suppressed.
         """
-        from pr_guardian.decision.actions import GUIDANCE_MARKER
-
         client = self._get_client()
 
         if stored_comment_id:
@@ -498,7 +499,7 @@ class GitHubAdapter:
         # Scan existing PR comments for the hidden marker
         comments = await self.list_issue_comments(pr.repo, pr.pr_id)
         for c in comments:
-            if GUIDANCE_MARKER in (c.get("body") or ""):
+            if marker in (c.get("body") or ""):
                 found_id = str(c["id"])
                 resp = await client.patch(
                     f"/repos/{pr.repo}/issues/comments/{found_id}",
@@ -507,6 +508,9 @@ class GitHubAdapter:
                 resp.raise_for_status()
                 return found_id
 
+        if not create_if_missing:
+            return None
+
         # No existing comment — create one
         resp = await client.post(
             f"/repos/{pr.repo}/issues/{pr.pr_id}/comments",
@@ -514,6 +518,23 @@ class GitHubAdapter:
         )
         resp.raise_for_status()
         return str(resp.json()["id"])
+
+    async def upsert_guidance_comment(
+        self,
+        pr: PlatformPR,
+        body: str,
+        *,
+        stored_comment_id: str | None = None,
+    ) -> str:
+        """Create or update the sticky guidance comment on a PR."""
+        from pr_guardian.decision.actions import GUIDANCE_MARKER
+
+        comment_id = await self.upsert_marker_comment(
+            pr, body, marker=GUIDANCE_MARKER, stored_comment_id=stored_comment_id
+        )
+        # create_if_missing defaults True, so a str id is always returned here.
+        assert comment_id is not None
+        return comment_id
 
     async def set_readiness_status(self, pr: PlatformPR, state: str, description: str) -> None:
         await self.set_status(pr, state, description, context="guardian/readiness")

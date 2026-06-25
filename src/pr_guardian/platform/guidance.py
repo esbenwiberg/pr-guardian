@@ -16,6 +16,35 @@ from pr_guardian.models.pr import PlatformPR
 log = structlog.get_logger(__name__)
 
 
+async def upsert_marker_comment(
+    adapter: Any,
+    pr: PlatformPR,
+    body: str,
+    *,
+    marker: str,
+    create_if_missing: bool = True,
+) -> bool:
+    """Post ``body`` as a sticky comment keyed by ``marker`` — update the existing
+    one in place rather than stacking a new comment each review.
+
+    Adapters that don't implement ``upsert_marker_comment`` (e.g. ADO) fall back
+    to a plain comment when creating, and no-op when only clearing a stale one.
+    Returns True if a comment was posted or updated.
+    """
+    fn = getattr(adapter, "upsert_marker_comment", None)
+    if fn is None:
+        if create_if_missing:
+            await adapter.post_comment(pr, body)
+            return True
+        return False
+    try:
+        result = await fn(pr, body, marker=marker, create_if_missing=create_if_missing)
+        return result is not None
+    except Exception as e:
+        log.warning("upsert_marker_comment_failed", pr_id=pr.pr_id, marker=marker, error=str(e))
+        return False
+
+
 async def upsert_guidance_comment(
     adapter: Any,
     pr: PlatformPR,

@@ -494,6 +494,14 @@ def _reject_predicate(finding: Finding, config: GuardianConfig, threshold: str) 
     )
 
 
+def finding_meets_reject_threshold(finding: Finding, config: GuardianConfig) -> bool:
+    """Whether a finding meets the configured reject threshold — i.e. it's one of
+    the findings that bounces the PR back. Surfaces (e.g. inline comments) use this
+    to guarantee that whatever drove the verdict is shown to the author, regardless
+    of any display-level severity floor."""
+    return _reject_predicate(finding, config, config.escalation_policy.reject_threshold)
+
+
 def _check_reject(
     agent_results: list[AgentResult],
     config: GuardianConfig,
