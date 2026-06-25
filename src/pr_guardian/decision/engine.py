@@ -494,12 +494,23 @@ def _reject_predicate(finding: Finding, config: GuardianConfig, threshold: str) 
     )
 
 
+def effective_reject_threshold(config: GuardianConfig) -> str:
+    """The reject threshold the decision *actually* applies, given the escalation
+    mode. structural_only honors the configured threshold; standard mode only ever
+    rejects on confident_only (see ``resolve_decision``), independent of config.
+    Keeping this in one place stops ``finding_meets_reject_threshold`` from
+    disagreeing with the verdict path."""
+    if config.escalation_policy.mode == "structural_only":
+        return config.escalation_policy.reject_threshold
+    return "confident_only"
+
+
 def finding_meets_reject_threshold(finding: Finding, config: GuardianConfig) -> bool:
-    """Whether a finding meets the configured reject threshold — i.e. it's one of
-    the findings that bounces the PR back. Surfaces (e.g. inline comments) use this
-    to guarantee that whatever drove the verdict is shown to the author, regardless
-    of any display-level severity floor."""
-    return _reject_predicate(finding, config, config.escalation_policy.reject_threshold)
+    """Whether a finding meets the reject threshold actually in effect — i.e. it's
+    one of the findings that bounces the PR back. Surfaces (inline comments and the
+    severity floor) use this to guarantee that whatever drove the verdict is shown
+    to the author, regardless of any display-level severity floor."""
+    return _reject_predicate(finding, config, effective_reject_threshold(config))
 
 
 def _check_reject(

@@ -4,6 +4,10 @@ The decision engine scores ALL findings for correct risk assessment. This module
 runs *after* scoring to remove findings that are noise for the given risk tier,
 so developers only see actionable items. Suppressed findings are still reflected
 in the combined_score and decision — this is display-level filtering only.
+
+One thing the floor must never hide: a finding that drove the REJECT verdict.
+Suppressing it would leave the author staring at "Changes Requested" with nothing
+to fix. ``finding_meets_reject_threshold`` exempts those from the floor.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from dataclasses import replace
 import structlog
 
 from pr_guardian.config.schema import GuardianConfig, SeverityFloorRule
+from pr_guardian.decision.engine import finding_meets_reject_threshold
 from pr_guardian.models.context import RiskTier
 from pr_guardian.models.findings import AgentResult, Finding, Verdict
 
@@ -78,7 +83,12 @@ def filter_findings(
         suppressed = 0
 
         for finding in result.findings:
-            if _should_suppress(finding, rules):
+            # A reject-driving finding is always shown — it's what bounced the PR,
+            # so it must survive the display floor even if its severity matches a
+            # suppression rule.
+            if _should_suppress(finding, rules) and not finding_meets_reject_threshold(
+                finding, config
+            ):
                 suppressed += 1
             else:
                 kept.append(finding)

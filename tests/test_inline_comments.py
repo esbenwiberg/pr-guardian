@@ -1003,9 +1003,15 @@ def _unanchored_bodies(adapter) -> list[str]:
 
 
 def _any_reject_config() -> GuardianConfig:
-    """reject_threshold='any' → every finding bounces the PR (the 'Any finding'
-    profile from the dashboard)."""
-    return GuardianConfig(escalation_policy=EscalationPolicyConfig(reject_threshold="any"))
+    """The 'Any finding' profile from the dashboard: structural_only mode with
+    reject_threshold='any', so every finding bounces the PR. reject_threshold only
+    takes effect in structural_only — standard mode always rejects on confident_only
+    regardless of config, so mode must be set for this fixture to be faithful."""
+    return GuardianConfig(
+        escalation_policy=EscalationPolicyConfig(
+            mode="structural_only", reject_threshold="any"
+        )
+    )
 
 
 @pytest.mark.asyncio

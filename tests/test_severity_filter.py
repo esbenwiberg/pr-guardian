@@ -1,4 +1,9 @@
-from pr_guardian.config.schema import GuardianConfig, SeverityFloorConfig, SeverityFloorRule
+from pr_guardian.config.schema import (
+    EscalationPolicyConfig,
+    GuardianConfig,
+    SeverityFloorConfig,
+    SeverityFloorRule,
+)
 from pr_guardian.decision.severity_filter import filter_findings
 from pr_guardian.models.context import RiskTier
 from pr_guardian.models.findings import (
@@ -162,6 +167,44 @@ class TestSeverityFloorDisabled:
         filtered, count = filter_findings(results, RiskTier.LOW, config)
         assert count == 0
         assert len(filtered[0].findings) == 1
+
+
+class TestSeverityFloorExemptsRejectDrivers:
+    """A finding that drove the REJECT verdict must survive the display floor —
+    otherwise the author sees 'Changes Requested' with nothing to fix (the #383
+    bug: structural_only + reject_threshold=any floored the only finding)."""
+
+    def _structural_any(self) -> GuardianConfig:
+        return GuardianConfig(
+            escalation_policy=EscalationPolicyConfig(
+                mode="structural_only", reject_threshold="any"
+            ),
+        )
+
+    def test_reject_driving_low_finding_survives_floor(self):
+        # reject_threshold=any → even a LOW finding bounced the PR, so it must show.
+        results = [_agent("test", [_finding(Severity.LOW, Certainty.DETECTED)])]
+        filtered, count = filter_findings(results, RiskTier.LOW, self._structural_any())
+        assert count == 0
+        assert len(filtered[0].findings) == 1
+
+    def test_default_threshold_still_floors_low(self):
+        # confident_only default: a LOW finding is NOT a reject driver → still floored.
+        results = [_agent("test", [_finding(Severity.LOW, Certainty.DETECTED)])]
+        filtered, count = filter_findings(results, RiskTier.LOW, GuardianConfig())
+        assert count == 1
+        assert len(filtered[0].findings) == 0
+
+    def test_standard_mode_ignores_widened_threshold(self):
+        # standard mode rejects only on confident_only regardless of config, so a
+        # LOW finding is not a reject driver and the floor still suppresses it.
+        config = GuardianConfig(
+            escalation_policy=EscalationPolicyConfig(mode="standard", reject_threshold="any"),
+        )
+        results = [_agent("test", [_finding(Severity.LOW, Certainty.DETECTED)])]
+        filtered, count = filter_findings(results, RiskTier.LOW, config)
+        assert count == 1
+        assert len(filtered[0].findings) == 0
 
 
 class TestSeverityFloorCustomRules:
