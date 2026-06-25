@@ -683,7 +683,52 @@ async def _run_pipeline(
         if gate_result.error:
             _plog("error", "gate_agent", f"Gate agent error: {gate_result.error}")
 
-    # Stage 4: Decision
+    # Stage 4: Validation — adversarial critic challenges findings BEFORE the
+    # verdict is computed, so a finding the critic dismisses can no longer drive
+    # the decision. Runs on the full (un-floored) finding set: the severity floor
+    # below is display-only and must never be the thing that weakens the verdict.
+    raw_finding_count = sum(len(r.findings) for r in agent_results)
+    if raw_finding_count > 0:
+        await _update_stage("validation", "Challenging findings with validator agent")
+        validated_results, validator_meta = await validate_findings(
+            agent_results,
+            context,
+            config,
+        )
+        agent_results = validated_results
+        if validator_meta.get("validator_ran"):
+            dismissed = validator_meta["dismissed"]
+            downgraded = validator_meta["downgraded"]
+            val_in = validator_meta.get("input_tokens", 0)
+            val_out = validator_meta.get("output_tokens", 0)
+            total_input_tokens += val_in
+            total_output_tokens += val_out
+            if val_in or val_out:
+                val_cost = _estimate_cost(
+                    validator_meta.get("model") or config.validator.model_override or "",
+                    val_in,
+                    val_out,
+                )
+                total_cost += val_cost
+            merged = validator_meta.get("merged", 0)
+            clusters_found = validator_meta.get("clusters_found", 0)
+            parts = [
+                f"Validator: {dismissed} dismissed, {downgraded} downgraded",
+            ]
+            if merged:
+                parts.append(f"{merged} merged ({clusters_found} cluster(s))")
+            parts.append(f"out of {raw_finding_count} finding(s).")
+            _plog("info", "noise_reduction", ", ".join(parts))
+        if validator_meta.get("error"):
+            _plog(
+                "warn",
+                "noise_reduction",
+                f"Validator error (findings kept as-is): {validator_meta['error']}",
+            )
+
+    # Stage 5: Decision — verdict, score, and rationale are computed on the
+    # validated finding set, so they reflect the critic's dismissals. A PR can no
+    # longer read "Changes Requested" over findings the validator already killed.
     await _update_stage("decision", "Computing final verdict")
     result = decide(
         context,
@@ -727,9 +772,9 @@ async def _run_pipeline(
     for reason in result.finding_reasons:
         _plog("info", "decision", f"Finding reason: {reason}")
 
-    # Stage 5: Post-decision noise reduction
-    # Severity floor: suppress low-value findings per risk tier (display only,
-    # scoring already happened on the full set inside decide()).
+    # Stage 6: Severity floor — suppress low-value findings per risk tier. This is
+    # display-only and runs AFTER the verdict, so a suppressed finding still
+    # counted toward the score/rationale but won't clutter the surfaced list.
     filtered_results, suppressed_count = filter_findings(
         result.agent_results,
         triage_result.risk_tier,
@@ -743,49 +788,6 @@ async def _run_pipeline(
             f"Severity floor suppressed {suppressed_count} finding(s) "
             f"(risk tier: {triage_result.risk_tier.value}).",
         )
-
-    # Validator: adversarial critic challenges remaining findings.
-    remaining_finding_count = sum(len(r.findings) for r in result.agent_results)
-    if remaining_finding_count > 0:
-        await _update_stage("validation", "Challenging findings with validator agent")
-        validated_results, validator_meta = await validate_findings(
-            result.agent_results,
-            context,
-            config,
-        )
-        result.agent_results = validated_results
-        if validator_meta.get("validator_ran"):
-            dismissed = validator_meta["dismissed"]
-            downgraded = validator_meta["downgraded"]
-            val_in = validator_meta.get("input_tokens", 0)
-            val_out = validator_meta.get("output_tokens", 0)
-            total_input_tokens += val_in
-            total_output_tokens += val_out
-            if val_in or val_out:
-                val_cost = _estimate_cost(
-                    validator_meta.get("model") or config.validator.model_override or "",
-                    val_in,
-                    val_out,
-                )
-                total_cost += val_cost
-            result.total_input_tokens = total_input_tokens
-            result.total_output_tokens = total_output_tokens
-            result.cost_usd = round(total_cost, 6)
-            merged = validator_meta.get("merged", 0)
-            clusters_found = validator_meta.get("clusters_found", 0)
-            parts = [
-                f"Validator: {dismissed} dismissed, {downgraded} downgraded",
-            ]
-            if merged:
-                parts.append(f"{merged} merged ({clusters_found} cluster(s))")
-            parts.append(f"out of {remaining_finding_count} finding(s).")
-            _plog("info", "noise_reduction", ", ".join(parts))
-        if validator_meta.get("error"):
-            _plog(
-                "warn",
-                "noise_reduction",
-                f"Validator error (findings kept as-is): {validator_meta['error']}",
-            )
 
     # Post-review dismissal matching
     if dismissals and storage:
