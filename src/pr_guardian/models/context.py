@@ -57,6 +57,21 @@ def max_trust_tier(a: TrustTier, b: TrustTier) -> TrustTier:
     return a if _TRUST_TIER_ORDER[a] >= _TRUST_TIER_ORDER[b] else b
 
 
+# Human-readable tier names for UI surfaces (dashboard cards, PR comments).
+# The raw enum value stays the machine identifier; this is display-only.
+_TRUST_TIER_LABELS = {
+    TrustTier.AI_ONLY: "Auto",
+    TrustTier.SPOT_CHECK: "Spot-check",
+    TrustTier.MANDATORY_HUMAN: "Human required",
+    TrustTier.HUMAN_PRIMARY: "Security review",
+}
+
+
+def trust_tier_label(tier: TrustTier) -> str:
+    """Human-readable label for a trust tier (falls back to the raw value)."""
+    return _TRUST_TIER_LABELS.get(tier, tier.value)
+
+
 @dataclass
 class TrustTierResult:
     """Output of trust-tier classification (path-based + optional escalation)."""

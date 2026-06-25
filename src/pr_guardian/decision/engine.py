@@ -13,6 +13,7 @@ from pr_guardian.models.context import (
     RiskTier,
     TrustTier,
     TrustTierResult,
+    trust_tier_label,
 )
 from pr_guardian.models.findings import (
     AgentResult,
@@ -345,9 +346,9 @@ def resolve_decision(
         sticky_triggers.append(
             StickyTrigger(
                 kind="trust_tier",
-                label=f"Trust tier: {trust_tier.value}",
+                label=f"Trust tier: {trust_tier_label(trust_tier)}",
                 source=trust_tier.value,
-                reason=f"Trust tier {trust_tier.value} requires human review",
+                reason=f"{trust_tier_label(trust_tier)} tier requires human review",
             )
         )
         if decision == Decision.AUTO_APPROVE:
@@ -551,9 +552,9 @@ def _resolve_structural_only(
         sticky_triggers.append(
             StickyTrigger(
                 kind="trust_tier",
-                label=f"Trust tier: {trust_tier.value}",
+                label=f"Trust tier: {trust_tier_label(trust_tier)}",
                 source=trust_tier.value,
-                reason=f"Trust tier {trust_tier.value} requires human review",
+                reason=f"{trust_tier_label(trust_tier)} tier requires human review",
             )
         )
         decision = Decision.HUMAN_REVIEW

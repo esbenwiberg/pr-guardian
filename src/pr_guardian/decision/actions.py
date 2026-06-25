@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from pr_guardian.models.context import TrustTier
+from pr_guardian.models.context import TrustTier, trust_tier_label
 from pr_guardian.models.findings import Finding
 from pr_guardian.models.output import Decision, ReviewResult
 
@@ -136,7 +136,7 @@ def _trust_tier_display(result: ReviewResult) -> str:
         TrustTier.MANDATORY_HUMAN: "AI first-pass complete, human approval required",
         TrustTier.HUMAN_PRIMARY: "security team review required",
     }
-    return f"**Trust** {tier.value.upper()} \u2014 {labels.get(tier, tier.value)}"
+    return f"**Trust** {trust_tier_label(tier)} \u2014 {labels.get(tier, tier.value)}"
 
 
 def get_review_labels(result: ReviewResult) -> list[str]:

@@ -640,7 +640,7 @@ class TestCommentWithTrustTier:
             trust_tier=TrustTier.MANDATORY_HUMAN,
         )
         comment = build_summary_comment(result)
-        assert "MANDATORY_HUMAN" in comment
+        assert "Human required" in comment
         assert "human approval required" in comment
 
     def test_comment_includes_trust_tier_when_escalated(self):
@@ -657,7 +657,7 @@ class TestCommentWithTrustTier:
         )
         comment = build_summary_comment(result)
         # Escalation detail lives on the review page; PR comment shows the tier
-        assert "MANDATORY_HUMAN" in comment
+        assert "Human required" in comment
 
     def test_comment_without_trust_tier_unchanged(self):
         from pr_guardian.models.output import ReviewResult
