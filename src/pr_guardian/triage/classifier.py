@@ -39,6 +39,18 @@ ALL_AGENTS = frozenset(
 )
 
 
+# release-please opens its release PR from a bot-managed branch. v3/v4 manifest
+# mode uses the double-dash prefix (e.g. release-please--branches--main); older
+# setups use the slash form. The branch is force-pushed by the action and only
+# ever carries version-bump churn (version manifests, CHANGELOG, lockfile).
+_RELEASE_PLEASE_BRANCH_PREFIXES = ("release-please--", "release-please/")
+
+
+def is_release_please_branch(source_branch: str) -> bool:
+    """True when the PR head branch is a release-please release branch."""
+    return source_branch.startswith(_RELEASE_PLEASE_BRANCH_PREFIXES)
+
+
 def classify(context: ReviewContext, config: GuardianConfig) -> TriageResult:
     """Classify PR risk tier and select agents to run."""
     profile = context.change_profile
@@ -62,6 +74,21 @@ def classify(context: ReviewContext, config: GuardianConfig) -> TriageResult:
         high_signals.append("new dependencies added")
     if profile.adds_api_endpoints:
         high_signals.append("new API endpoints added")
+
+    # release-please's own release PR is pure version churn (version manifests,
+    # CHANGELOG, lockfile) and would otherwise escalate to human review on every
+    # release — blocking the bot's PR until a maintainer hand-approves it. When
+    # none of the HIGH-risk signals above fired, treat it as trivial so it
+    # auto-passes. The guard is deliberately the high_signals set, not the file
+    # roles: a genuine dependency add, new API surface, security-surface touch,
+    # arch-boundary crossing, or wide blast radius still escalates even on a
+    # release-please branch (defense against arbitrary code pushed to it), while
+    # release-please's manifest files — some of which classify as PRODUCTION by
+    # default — don't produce a false negative here.
+    if not high_signals and is_release_please_branch(context.pr.source_branch):
+        result.risk_tier = RiskTier.TRIVIAL
+        result.reasons.append("Trivial: release-please version bump (no high-risk signals)")
+        return _apply_amplifiers(result, context, config)
 
     # Check hotspots
     hotspot_hits = check_hotspot_hits(context.changed_files, context.hotspots)
