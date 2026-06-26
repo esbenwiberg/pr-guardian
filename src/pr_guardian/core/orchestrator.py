@@ -1826,10 +1826,9 @@ async def _post_inline_and_summary(
     # visible on the code, regardless of the floor (otherwise an author can be
     # sent "Changes Requested" over a finding they never see on the diff).
     def _should_surface(f: Finding) -> bool:
-        return (
-            SEVERITY_ORDER.get(f.severity.value, 0) >= threshold_ord
-            or finding_meets_reject_threshold(f, config)
-        )
+        return SEVERITY_ORDER.get(
+            f.severity.value, 0
+        ) >= threshold_ord or finding_meets_reject_threshold(f, config)
 
     # Collect surfaced findings from agent results. Stamp primary_agent with the
     # AgentResult's name (the value the re-review dismissal filter matches on) so
@@ -1921,8 +1920,7 @@ async def _post_inline_and_summary(
             await _upsert_marker_comment(
                 adapter,
                 pr,
-                f"{UNANCHORED_MARKER}\n"
-                "*PR Guardian — all findings are now anchored to the diff.*",
+                f"{UNANCHORED_MARKER}\n*PR Guardian — all findings are now anchored to the diff.*",
                 marker=UNANCHORED_MARKER,
                 create_if_missing=False,
             )

@@ -140,9 +140,7 @@ def test_safe_ceiling_cannot_pierce_critical_repo_floor():
     )
     # docs-only PR would normally cap at ai_only, but a CRITICAL repo class
     # re-floors at MANDATORY_HUMAN afterward.
-    result = classify_trust_tier(
-        ["docs/guide.md"], cfg, repo_risk_class=RepoRiskClass.CRITICAL
-    )
+    result = classify_trust_tier(["docs/guide.md"], cfg, repo_risk_class=RepoRiskClass.CRITICAL)
     assert result.resolved_tier == TrustTier.MANDATORY_HUMAN
 
 
@@ -151,9 +149,7 @@ def test_unmatched_path_risk_leaves_tier_untouched():
         "spot_check",
         "src/widget.py",
         PathRiskConfig(
-            critical_paths=[
-                PathRiskEntry(pattern="other/**", min_tier="human_primary")
-            ]
+            critical_paths=[PathRiskEntry(pattern="other/**", min_tier="human_primary")]
         ),
     )
     result = classify_trust_tier(["src/widget.py"], cfg)

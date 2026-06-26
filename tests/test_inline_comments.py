@@ -1008,9 +1008,7 @@ def _any_reject_config() -> GuardianConfig:
     takes effect in structural_only — standard mode always rejects on confident_only
     regardless of config, so mode must be set for this fixture to be faithful."""
     return GuardianConfig(
-        escalation_policy=EscalationPolicyConfig(
-            mode="structural_only", reject_threshold="any"
-        )
+        escalation_policy=EscalationPolicyConfig(mode="structural_only", reject_threshold="any")
     )
 
 

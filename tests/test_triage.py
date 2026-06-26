@@ -10,7 +10,7 @@ from pr_guardian.models.context import (
 )
 from pr_guardian.models.languages import LanguageMap
 from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
-from pr_guardian.triage.classifier import classify
+from pr_guardian.triage.classifier import classify, is_release_please_branch
 from pathlib import Path
 
 
@@ -120,3 +120,84 @@ class TestTriage:
         )
         result = classify(ctx, GuardianConfig())
         assert "security_privacy" in result.agent_set
+
+
+def _make_release_please_context(**profile_overrides) -> ReviewContext:
+    """A release-please release PR: bot branch + version-bump churn.
+
+    Models the realistic file set, including .release-please-manifest.json which
+    classifies as PRODUCTION by default — the shortcut must still treat this as
+    trivial, so has_production_changes is True here on purpose.
+    """
+    files = [
+        "package.json",
+        "package-lock.json",
+        "CHANGELOG.md",
+        ".release-please-manifest.json",
+    ]
+    profile_defaults = dict(
+        file_roles={
+            "package.json": {FileRole.DEPENDENCY},
+            "package-lock.json": {FileRole.GENERATED},
+            "CHANGELOG.md": {FileRole.DOCS},
+            ".release-please-manifest.json": {FileRole.PRODUCTION},
+        },
+        has_production_changes=True,
+        changes_dependency_lockfile=True,
+    )
+    profile_defaults.update(profile_overrides)
+    return _make_context(
+        pr=PlatformPR(
+            platform=Platform.GITHUB,
+            pr_id="42",
+            repo="test/repo",
+            repo_url="",
+            source_branch="release-please--branches--main",
+            target_branch="main",
+            author="github-actions[bot]",
+            title="chore(main): release 1.2.3",
+            head_commit_sha="def456",
+        ),
+        changed_files=files,
+        change_profile=ChangeProfile(**profile_defaults),
+    )
+
+
+class TestReleasePleaseShortcut:
+    def test_release_please_version_bump_is_trivial(self):
+        ctx = _make_release_please_context()
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier == RiskTier.TRIVIAL
+        assert len(result.agent_set) == 0
+        assert any("release-please" in r for r in result.reasons)
+
+    def test_release_please_with_dependency_add_still_escalates(self):
+        # A real dependency snuck onto the release branch must NOT auto-pass.
+        ctx = _make_release_please_context(adds_dependencies=True)
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier == RiskTier.HIGH
+        assert "new dependencies added" in result.reasons
+
+    def test_release_please_touching_security_surface_still_escalates(self):
+        ctx = _make_release_please_context(touches_security_surface=True)
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier == RiskTier.HIGH
+
+    def test_non_release_branch_same_profile_is_not_shortcut_trivial(self):
+        # Identical change set on a normal branch goes through normal scoring.
+        ctx = _make_release_please_context()
+        object.__setattr__(ctx.pr, "source_branch", "feature/manual-bump")
+        result = classify(ctx, GuardianConfig())
+        assert result.risk_tier != RiskTier.TRIVIAL
+
+
+class TestIsReleasePleaseBranch:
+    def test_double_dash_prefix(self):
+        assert is_release_please_branch("release-please--branches--main")
+
+    def test_slash_prefix(self):
+        assert is_release_please_branch("release-please/branches/main")
+
+    def test_unrelated_branch(self):
+        assert not is_release_please_branch("feature/release-please-notes")
+        assert not is_release_please_branch("main")
