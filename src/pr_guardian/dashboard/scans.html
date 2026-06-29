@@ -108,7 +108,7 @@
 <div id="scan-modal" class="hidden fixed inset-0 z-50">
   <div class="dialog-backdrop" onclick="closeModal()"></div>
   <div class="dialog">
-    <div class="dialog-panel max-w-md">
+    <div class="dialog-panel max-w-lg">
       <div class="dialog-header">
         <h3 class="text-base font-semibold" id="modal-title">Start New Scan</h3>
       </div>
@@ -117,8 +117,14 @@
       <div id="modal-form">
         <div class="dialog-body space-y-4">
           <div class="tabs-pills">
-            <button class="tab-pill active flex-1 text-center" id="tab-recent" onclick="switchTab('recent')">Recent Changes</button>
+            <button class="tab-pill active flex-1 text-center" id="tab-macro" onclick="switchTab('macro')">Macro</button>
+            <button class="tab-pill flex-1 text-center" id="tab-deep" onclick="switchTab('deep')">Deep per-PR</button>
+            <button class="tab-pill flex-1 text-center" id="tab-range" onclick="switchTab('range')">Commit Range</button>
             <button class="tab-pill flex-1 text-center" id="tab-maintenance" onclick="switchTab('maintenance')">Maintenance</button>
+          </div>
+          <div class="flex items-start justify-between gap-3 -mt-2">
+            <p class="text-xs text-slate-400 leading-relaxed" id="tab-desc"></p>
+            <button type="button" class="text-2xs text-slate-500 hover:text-slate-300 underline whitespace-nowrap shrink-0 mt-0.5" onclick="openScanHelp()">Compare all &rarr;</button>
           </div>
 
           <div>
@@ -135,30 +141,32 @@
             </select>
           </div>
 
-          <!-- Recent Changes options -->
-          <div id="section-recent" class="space-y-4">
-            <div id="scan-days-row">
+          <!-- Macro scan options -->
+          <div id="section-macro" class="space-y-4">
+            <div>
               <label class="form-label" for="scan-days">Time Window (days)</label>
               <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
             </div>
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input id="scan-deep-toggle" type="checkbox" class="form-checkbox" onchange="toggleScanDeep()">
-              Deep per-PR review (full PR-review depth &amp; verdict per PR &mdash; slower, costs more)
-            </label>
-            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
-              <input id="scan-range-toggle" type="checkbox" class="form-checkbox" onchange="toggleScanRange()">
-              Review a commit range instead of a time window
-            </label>
-            <div id="scan-range-fields" class="hidden space-y-4">
-              <div>
-                <label class="form-label" for="scan-base-ref">Base commit / ref</label>
-                <input id="scan-base-ref" type="text" class="form-input" placeholder="e.g. last reviewed SHA, tag, or branch" spellcheck="false">
-              </div>
-              <div>
-                <label class="form-label" for="scan-head-ref">Head commit / ref (optional)</label>
-                <input id="scan-head-ref" type="text" class="form-input" placeholder="defaults to the configured branch" spellcheck="false">
-                <p class="text-2xs text-slate-500 mt-1">ADO needs commit SHAs; GitHub also accepts branch names and tags.</p>
-              </div>
+          </div>
+
+          <!-- Deep per-PR options -->
+          <div id="section-deep" class="hidden space-y-4">
+            <div>
+              <label class="form-label" for="scan-days-deep">Time Window (days)</label>
+              <input id="scan-days-deep" type="number" class="form-input" value="7" min="1" max="90">
+            </div>
+          </div>
+
+          <!-- Commit range options -->
+          <div id="section-range" class="hidden space-y-4">
+            <div>
+              <label class="form-label" for="scan-base-ref">Base commit / ref</label>
+              <input id="scan-base-ref" type="text" class="form-input" placeholder="e.g. last reviewed SHA, tag, or branch" spellcheck="false">
+            </div>
+            <div>
+              <label class="form-label" for="scan-head-ref">Head commit / ref (optional)</label>
+              <input id="scan-head-ref" type="text" class="form-input" placeholder="defaults to the configured branch" spellcheck="false">
+              <p class="text-2xs text-slate-500 mt-1">ADO needs commit SHAs; GitHub also accepts branch names and tags.</p>
             </div>
           </div>
 
@@ -198,6 +206,72 @@
         </div>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- Scan types help modal -->
+<div id="scan-help-modal" class="hidden fixed inset-0 z-50">
+  <div class="dialog-backdrop" onclick="closeScanHelp()"></div>
+  <div class="dialog">
+    <div class="dialog-panel max-w-2xl">
+      <div class="dialog-header flex items-center justify-between">
+        <h3 class="text-base font-semibold">Scan types explained</h3>
+        <button class="text-slate-400 hover:text-slate-200 text-xl leading-none" onclick="closeScanHelp()" aria-label="Close">&times;</button>
+      </div>
+      <div class="dialog-body space-y-3 max-h-[70vh] overflow-y-auto">
+        <p class="text-xs text-slate-400">
+          Four ways to point Guardian at a repo. The first three look at <em>recent changes</em>;
+          Maintenance looks at <em>old code</em>. Pick by what question you're answering.
+        </p>
+
+        <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <h4 class="text-sm font-semibold text-slate-100">Macro</h4>
+            <span class="text-2xs px-2 py-0.5 rounded-full border border-slate-600 text-slate-400 whitespace-nowrap">Fastest &middot; cheapest</span>
+          </div>
+          <dl class="space-y-1.5 text-xs leading-relaxed">
+            <div><dt class="inline font-medium text-slate-300">What &mdash; </dt><dd class="inline text-slate-400">Aggregates every PR and commit merged in your time window and runs the lightweight scan agents over the combined diff. Returns one shared list of findings &mdash; no per-PR verdict, no approve/block decision.</dd></div>
+            <div><dt class="inline font-medium text-slate-300">When &mdash; </dt><dd class="inline text-slate-400">A quick periodic pulse check: &ldquo;did anything nasty land this week?&rdquo; One pass no matter how many PRs merged.</dd></div>
+          </dl>
+        </div>
+
+        <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <h4 class="text-sm font-semibold text-slate-100">Deep per-PR</h4>
+            <span class="text-2xs px-2 py-0.5 rounded-full border border-amber-600/50 text-amber-400/90 whitespace-nowrap">Slowest &middot; priciest</span>
+          </div>
+          <dl class="space-y-1.5 text-xs leading-relaxed">
+            <div><dt class="inline font-medium text-slate-300">What &mdash; </dt><dd class="inline text-slate-400">Re-runs the complete PR-review pipeline &mdash; all specialist agents, certainty, the decision engine &mdash; on each PR merged in the window, independently. You get a full approve / review / block verdict per PR.</dd></div>
+            <div><dt class="inline font-medium text-slate-300">When &mdash; </dt><dd class="inline text-slate-400">A thorough retroactive audit (the &ldquo;fat nightly&rdquo;): catch what slipped through review, or onboard Guardian onto a repo's recent history. Cost &asymp; one full PR review &times; number of merged PRs (capped in config).</dd></div>
+          </dl>
+        </div>
+
+        <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <h4 class="text-sm font-semibold text-slate-100">Commit Range</h4>
+            <span class="text-2xs px-2 py-0.5 rounded-full border border-slate-600 text-slate-400 whitespace-nowrap">Moderate</span>
+          </div>
+          <dl class="space-y-1.5 text-xs leading-relaxed">
+            <div><dt class="inline font-medium text-slate-300">What &mdash; </dt><dd class="inline text-slate-400">Diffs two refs (base &rarr; head) and reviews the whole range as a single change, returning one consolidated verdict. Head defaults to your configured branch.</dd></div>
+            <div><dt class="inline font-medium text-slate-300">When &mdash; </dt><dd class="inline text-slate-400">&ldquo;Everything since X&rdquo; &mdash; since the last release tag, the last reviewed SHA, or between any two commits. This is the path a nightly CI sweep uses.</dd></div>
+          </dl>
+        </div>
+
+        <div class="rounded-lg border border-slate-700 bg-slate-800/40 p-4">
+          <div class="flex items-center justify-between mb-2 gap-2">
+            <h4 class="text-sm font-semibold text-slate-100">Maintenance</h4>
+            <span class="text-2xs px-2 py-0.5 rounded-full border border-slate-600 text-slate-400 whitespace-nowrap">Scales with files</span>
+          </div>
+          <dl class="space-y-1.5 text-xs leading-relaxed">
+            <div><dt class="inline font-medium text-slate-300">What &mdash; </dt><dd class="inline text-slate-400">Ignores recent activity entirely. Samples the repo's stalest files (older than the staleness threshold, up to the file cap) and runs the tech-debt, dead-code, refactor-candidate and security-hygiene agents.</dd></div>
+            <div><dt class="inline font-medium text-slate-300">When &mdash; </dt><dd class="inline text-slate-400">Proactive cleanup: surface aging code, rot and debt that no recent PR would ever touch.</dd></div>
+          </dl>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-secondary btn-sm" onclick="closeScanHelp()">Close</button>
+      </div>
     </div>
   </div>
 </div>
@@ -726,7 +800,7 @@ function buildExportText() {
 }
 
 // --- Modal ---
-let currentTab = 'recent';
+let currentTab = 'macro';
 let activeScanId = null;  // scan_id of in-progress scan triggered from dialog
 
 const STAGE_DEFS = {
@@ -760,6 +834,14 @@ function closeModal() {
   activeScanId = null;
 }
 
+function openScanHelp() {
+  document.getElementById('scan-help-modal').classList.remove('hidden');
+}
+
+function closeScanHelp() {
+  document.getElementById('scan-help-modal').classList.add('hidden');
+}
+
 function updateRepoHint() {
   const platform = document.getElementById('scan-platform').value;
   const hint = document.getElementById('repo-hint');
@@ -769,38 +851,38 @@ function updateRepoHint() {
   document.getElementById('scan-repo').placeholder = platform === 'ado' ? 'project/repo' : 'owner/repo';
 }
 
-function toggleScanRange() {
-  const on = document.getElementById('scan-range-toggle').checked;
-  document.getElementById('scan-range-fields').classList.toggle('hidden', !on);
-  document.getElementById('scan-days-row').classList.toggle('hidden', on);
-  // Deep mode is time-window only — range and deep are mutually exclusive.
-  if (on) document.getElementById('scan-deep-toggle').checked = false;
-  if (on) document.getElementById('scan-base-ref').focus();
-}
-
-function toggleScanDeep() {
-  const on = document.getElementById('scan-deep-toggle').checked;
-  if (on) {
-    document.getElementById('scan-range-toggle').checked = false;
-    toggleScanRange();
-  }
-}
+// Each tab is one distinct scan deliverable. The three "recent" modes were
+// previously two mutually-exclusive checkboxes; they're now first-class tabs.
+const SCAN_TABS = {
+  macro: {
+    desc: 'Fast findings sweep across every PR & commit merged in the window — one shared list of issues, no per-PR verdict. Best for a quick periodic health check.',
+    btn: 'Start Macro Scan',
+  },
+  deep: {
+    desc: 'Re-runs the full PR review on each merged PR, producing an approve / review / block verdict per PR. Thorough but slower and pricier — the “fat nightly” audit.',
+    btn: 'Start Deep Per-PR Scan',
+  },
+  range: {
+    desc: 'Reviews everything between two refs (base → head) as a single diff, one consolidated verdict. Best for “what changed since the last release or reviewed SHA”.',
+    btn: 'Start Commit Range Scan',
+  },
+  maintenance: {
+    desc: 'Ignores recent activity — samples the repo’s stalest files and hunts tech debt, dead code, refactor candidates & security hygiene. Best for aging-code cleanups.',
+    btn: 'Start Maintenance Scan',
+  },
+};
 
 function switchTab(tab) {
   currentTab = tab;
-  document.getElementById('tab-recent').classList.toggle('active', tab === 'recent');
-  document.getElementById('tab-maintenance').classList.toggle('active', tab === 'maintenance');
-  document.getElementById('section-recent').classList.toggle('hidden', tab !== 'recent');
-  document.getElementById('section-maintenance').classList.toggle('hidden', tab !== 'maintenance');
-  const btn = document.getElementById('btn-start');
-  if (tab === 'recent') {
-    btn.textContent = 'Start Recent Changes Scan';
-  } else {
-    btn.textContent = 'Start Maintenance Scan';
+  for (const name of Object.keys(SCAN_TABS)) {
+    document.getElementById(`tab-${name}`).classList.toggle('active', name === tab);
+    document.getElementById(`section-${name}`).classList.toggle('hidden', name !== tab);
   }
+  document.getElementById('tab-desc').textContent = SCAN_TABS[tab].desc;
+  document.getElementById('btn-start').textContent = SCAN_TABS[tab].btn;
 }
-// init button label
-switchTab('recent');
+// init label + description
+switchTab('macro');
 
 function showProgressView(repo, scanType) {
   document.getElementById('modal-form').classList.add('hidden');
@@ -911,23 +993,31 @@ async function startScan() {
 
   try {
     let url, body;
-    if (currentTab === 'recent') {
+    if (currentTab === 'macro') {
       url = '/api/scan/recent';
-      const rangeOn = document.getElementById('scan-range-toggle').checked;
+      body = {
+        repo,
+        platform,
+        time_window_days: parseInt(document.getElementById('scan-days').value) || 7,
+      };
+    } else if (currentTab === 'deep') {
+      url = '/api/scan/recent';
+      body = {
+        repo,
+        platform,
+        time_window_days: parseInt(document.getElementById('scan-days-deep').value) || 7,
+        deep: true,
+      };
+    } else if (currentTab === 'range') {
+      url = '/api/scan/recent';
       const baseRef = document.getElementById('scan-base-ref').value.trim();
-      if (rangeOn && !baseRef) {
+      if (!baseRef) {
         document.getElementById('scan-base-ref').focus();
         throw new Error('Base commit / ref is required for a commit-range scan');
       }
-      body = { repo, platform };
-      if (rangeOn) {
-        body.base_ref = baseRef;
-        const headRef = document.getElementById('scan-head-ref').value.trim();
-        if (headRef) body.head_ref = headRef;
-      } else {
-        body.time_window_days = parseInt(document.getElementById('scan-days').value) || 7;
-        if (document.getElementById('scan-deep-toggle').checked) body.deep = true;
-      }
+      body = { repo, platform, base_ref: baseRef };
+      const headRef = document.getElementById('scan-head-ref').value.trim();
+      if (headRef) body.head_ref = headRef;
     } else {
       url = '/api/scan/maintenance';
       body = {
