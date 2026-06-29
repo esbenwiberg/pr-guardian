@@ -250,7 +250,12 @@ class ScanAgentResultRow(Base):
     scan_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("scans.id", ondelete="CASCADE")
     )
-    agent_name: Mapped[str] = mapped_column(String(64), index=True)
+    # Free text, not a capped varchar: PR-review agents use a fixed short name,
+    # but the deep ("fat nightly") scan repurposes this field as a per-PR
+    # identity — ``PR #<n>: <title>`` — which routinely exceeds 64 chars. A long
+    # title once truncate-crashed the whole deep-scan save (mirrors the
+    # scan_findings.category fix in migration 005). See migration 006.
+    agent_name: Mapped[str] = mapped_column(Text, index=True)
     verdict: Mapped[str] = mapped_column(String(16))
     summary: Mapped[str] = mapped_column(Text, default="")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

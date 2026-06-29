@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete
 
 from pr_guardian import dev_diff_store
+from pr_guardian.core.pr_like_synthesis import SYNTHESIS_DISPLAY_NAME
 from pr_guardian.persistence.database import async_session, close_db, init_db
 from pr_guardian.persistence.models import (
     AdminRow,
@@ -32,6 +33,8 @@ from pr_guardian.persistence.models import (
     PostedInlineCommentRow,
     PromptOverrideRow,
     ReviewRow,
+    ScanAgentResultRow,
+    ScanFindingRow,
     ScanRow,
     SyncedPRRow,
     SyncSourceRow,
@@ -52,6 +55,8 @@ async def _wipe() -> None:
         # Order matters only for non-cascading tables — cascades handle the rest.
         for model in (
             FindingDismissalRow,
+            ScanFindingRow,
+            ScanAgentResultRow,
             ScanRow,
             PostedInlineCommentRow,
             ReviewRow,
@@ -547,6 +552,235 @@ async def _seed_reviews() -> None:
     print(f"[dev_seed] wrote {len(diffs)} stored diffs to {store_path}")
 
 
+def _scan_finding(
+    *,
+    severity: str,
+    certainty: str,
+    category: str,
+    file: str,
+    line: int | None,
+    description: str,
+    suggestion: str = "",
+) -> ScanFindingRow:
+    return ScanFindingRow(
+        id=uuid.uuid4(),
+        severity=severity,
+        certainty=certainty,
+        category=category,
+        file=file,
+        line=line,
+        description=description,
+        suggestion=suggestion,
+    )
+
+
+def _scan_agent(
+    *,
+    agent_name: str,
+    verdict: str,
+    summary: str,
+    findings: list[ScanFindingRow] | None = None,
+    error: str | None = None,
+) -> ScanAgentResultRow:
+    return ScanAgentResultRow(
+        id=uuid.uuid4(),
+        agent_name=agent_name,
+        verdict=verdict,
+        summary=summary,
+        error=error,
+        findings=findings or [],
+    )
+
+
+async def _seed_scans() -> None:
+    """Seed a couple of scans so the /scans dashboard renders non-empty.
+
+    Includes a Deep PR Review (recent_changes_deep) whose per-PR cards use the
+    ``PR #<n>: <title>`` identity in ``agent_name`` — deliberately with a long
+    title to exercise the widened (TEXT) column. A capped varchar(64) here would
+    truncate-crash the save and strand the scan at ``scan_report`` with 0 findings
+    (the exact bug this seed lets you verify locally — see migration 006)."""
+    started = _ago(hours=2)
+    finished = _ago(hours=2, minutes=-3)
+
+    # --- Deep PR Review: one card per re-reviewed merged PR ---
+    deep_prs = [
+        _scan_agent(
+            agent_name=(
+                'PR #94: feat(scans): deep per-PR review scan ("fat nightly") '
+                "+ readable summary cards"
+            ),
+            verdict="warn",
+            summary=(
+                "**Human review** · score 4.20 · "
+                "[PR #94](https://github.com/esbenwiberg/pr-guardian/pull/94)\n\n"
+                "Re-review surfaced a reliability gap in the scan save path."
+            ),
+            findings=[
+                _scan_finding(
+                    severity="medium",
+                    certainty="detected",
+                    category="Code Quality",
+                    file="src/pr_guardian/persistence/storage.py",
+                    line=2642,
+                    description="Per-agent flush inside the save loop means a single "
+                    "oversized column rolls back the whole scan.",
+                    suggestion="Validate/cap field widths before insert, or save per-PR.",
+                ),
+                _scan_finding(
+                    severity="low",
+                    certainty="suspected",
+                    category="Test Quality",
+                    file="tests/core/test_pr_like_scan.py",
+                    line=1,
+                    description="No test covers a PR title longer than the agent_name column.",
+                    suggestion="Add a Postgres-backed regression for long PR titles.",
+                ),
+            ],
+        ),
+        _scan_agent(
+            agent_name="PR #92: fix(scans): authenticate GitHub scans via App installation",
+            verdict="pass",
+            summary=(
+                "**Auto-approve** · score 1.10 · "
+                "[PR #92](https://github.com/esbenwiberg/pr-guardian/pull/92)\n\n"
+                "Clean at full depth."
+            ),
+            findings=[],
+        ),
+        _scan_agent(
+            agent_name="PR #88: chore: bump dependencies",
+            verdict="flag_human",
+            summary=(
+                "**Reject** · score 8.40 · "
+                "[PR #88](https://github.com/esbenwiberg/pr-guardian/pull/88)\n\n"
+                "Transitive dep with a known advisory pulled in."
+            ),
+            findings=[
+                _scan_finding(
+                    severity="high",
+                    certainty="detected",
+                    category="Security/Privacy",
+                    file="requirements.txt",
+                    line=12,
+                    description="Bumped transitive dependency has a published CVE.",
+                    suggestion="Pin to a patched version.",
+                ),
+            ],
+        ),
+    ]
+    deep_findings = sum(len(a.findings) for a in deep_prs)
+
+    # Cross-PR synthesis card: the narrative the real deep scan prepends over the
+    # per-PR outcomes (see core/pr_like_synthesis.py). Findings=[] so it doesn't
+    # inflate counts; the dashboard hoists it above the per-PR grid.
+    synthesis = _scan_agent(
+        agent_name=SYNTHESIS_DISPLAY_NAME,
+        verdict="pass",
+        summary=(
+            "**Gate effectiveness**\n"
+            f"- {1} of {len(deep_prs)} PRs would need human attention at full depth "
+            "(#88 — reject) that the thin daytime gate let merge.\n\n"
+            "**Recurring issues**\n"
+            "- Scan-save robustness flagged in #94 (oversized column rolls back the save) — "
+            "same class as the earlier `category` truncation; worth a width-validation guard, "
+            "not another one-off fix.\n\n"
+            "**Hotspots**\n"
+            "- `src/pr_guardian/persistence/storage.py` is where the recurring save-path risk "
+            "concentrates (#94)."
+        ),
+        findings=[],
+    )
+
+    deep_scan = ScanRow(
+        id=uuid.uuid4(),
+        scan_type="recent_changes_deep",
+        repo="esbenwiberg/pr-guardian",
+        platform="github",
+        time_window_days=7,
+        total_findings=deep_findings,
+        summary=(
+            f"Deep re-review of {len(deep_prs)} merged PR(s): 1 would need human "
+            f"attention (reject/block at full depth), {deep_findings} finding(s) total."
+        ),
+        stage="complete",
+        pipeline_log=[
+            {
+                "ts": started.isoformat(),
+                "level": "info",
+                "stage": "discovery",
+                "msg": f"Found {len(deep_prs)} merged PR(s) in 7 days.",
+            },
+            {
+                "ts": finished.isoformat(),
+                "level": "info",
+                "stage": "report",
+                "msg": "Deep re-review complete.",
+            },
+        ],
+        total_input_tokens=48000,
+        total_output_tokens=9200,
+        cost_usd=0.3764,
+        scan_source="scan",
+        started_at=started,
+        finished_at=finished,
+        duration_ms=int((finished - started).total_seconds() * 1000),
+        agent_results=[synthesis, *deep_prs],
+    )
+
+    # --- Regular Recent Changes scan (macro, findings-only) ---
+    rc_agent = _scan_agent(
+        agent_name="recent_changes",
+        verdict="findings",
+        summary="2 findings across the last 7 days of changes.",
+        findings=[
+            _scan_finding(
+                severity="medium",
+                certainty="detected",
+                category="reliability",
+                file="src/pr_guardian/core/orchestrator.py",
+                line=210,
+                description="Unawaited task could swallow exceptions on shutdown.",
+                suggestion="Await the gather or attach a done-callback.",
+            ),
+            _scan_finding(
+                severity="low",
+                certainty="suspected",
+                category="performance",
+                file="src/pr_guardian/discovery/diff.py",
+                line=88,
+                description="Repeated regex compilation in a hot loop.",
+                suggestion="Hoist the compiled pattern to module scope.",
+            ),
+        ],
+    )
+    rc_started = _ago(hours=5)
+    rc_finished = _ago(hours=5, minutes=-1)
+    rc_scan = ScanRow(
+        id=uuid.uuid4(),
+        scan_type="recent_changes",
+        repo="esbenwiberg/pr-guardian",
+        platform="github",
+        time_window_days=7,
+        total_findings=len(rc_agent.findings),
+        summary="Recent-changes scan: 2 finding(s) across 7 days.",
+        stage="complete",
+        pipeline_log=[],
+        total_input_tokens=12000,
+        total_output_tokens=2400,
+        cost_usd=0.0912,
+        scan_source="scan",
+        started_at=rc_started,
+        finished_at=rc_finished,
+        duration_ms=int((rc_finished - rc_started).total_seconds() * 1000),
+        agent_results=[rc_agent],
+    )
+
+    async with async_session() as s:
+        s.add_all([deep_scan, rc_scan])
+        await s.commit()
+
+
 async def _seed_dismissals() -> None:
     # One dismissal on the rejected PR — validator can see an already-dismissed finding
     from pr_guardian.persistence.storage import finding_signature
@@ -899,6 +1133,7 @@ async def main() -> None:
 
     await _wipe()
     await _seed_reviews()
+    await _seed_scans()
     await _seed_dismissals()
     await _seed_admin()
     await _seed_pr_dashboard()
@@ -912,7 +1147,8 @@ async def main() -> None:
     _db._session_factory = None
 
     print(
-        "[dev_seed] seeded 7 reviews, 1 dismissal, 1 admin, 10 synced PRs, 3 sync sources, 1 identity"
+        "[dev_seed] seeded 7 reviews, 2 scans (1 deep PR review), 1 dismissal, 1 admin, "
+        "10 synced PRs, 3 sync sources, 1 identity"
     )
 
 

@@ -418,6 +418,10 @@ function renderDetail(d) {
 
   if (agents.length) {
     document.getElementById('detail-agents').innerHTML = agents.map((agent, ai) => {
+      // The synthesis card is a narrative (no findings) shown in the summary
+      // zone above — skip it here, but keep `ai` aligned to agent_results so
+      // finding selection keys ("ai-fi") stay correct.
+      if (agent.agent_name === SYNTHESIS_NAME) return '';
       const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
       const findings = agent.findings || [];
       const agentHasFindings = findings.length > 0;
@@ -448,14 +452,32 @@ function renderDetail(d) {
 // Render the scan summary as one card per analytical lens (Trend, Consistency, …)
 // rather than a single wall of text. Each scan agent contributes one summary
 // paragraph, so we build straight from agent_results instead of splitting d.summary.
+// Deep scans prepend a "Cross-PR Synthesis" card — a narrative over all the
+// per-PR review outcomes. Hoist it full-width above the per-PR grid (kept in
+// sync with SYNTHESIS_DISPLAY_NAME in core/pr_like_synthesis.py).
+const SYNTHESIS_NAME = 'Cross-PR Synthesis';
+
 function renderSummaryCards(d) {
   const wrap = document.getElementById('detail-summary');
   const content = document.getElementById('detail-summary-content');
   const agents = (d.agent_results || []).filter(a => a.summary && a.summary.trim());
 
   if (agents.length) {
+    const synth = agents.find(a => a.agent_name === SYNTHESIS_NAME);
+    const prAgents = agents.filter(a => a !== synth);
     content.className = 'grid grid-cols-1 lg:grid-cols-2 gap-4';
-    content.innerHTML = agents.map(agent => {
+
+    const synthHtml = synth ? `
+      <div class="card overflow-hidden flex flex-col ring-1 ring-emerald-500/40" style="grid-column:1/-1">
+        <div class="flex items-center gap-2.5 px-5 py-3 border-b border-slate-700/50 bg-emerald-500/5">
+          <span class="text-emerald-400 text-base leading-none">◆</span>
+          <span class="font-semibold text-sm text-emerald-300">${esc(SYNTHESIS_NAME)}</span>
+          <span class="text-2xs text-slate-500 ml-auto">patterns across ${prAgents.length} PR${prAgents.length !== 1 ? 's' : ''}</span>
+        </div>
+        <div class="px-5 py-4 prose text-sm leading-relaxed text-slate-300">${renderMarkdown(synth.summary)}</div>
+      </div>` : '';
+
+    content.innerHTML = synthHtml + prAgents.map(agent => {
       const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
       const n = (agent.findings || []).length;
       return `

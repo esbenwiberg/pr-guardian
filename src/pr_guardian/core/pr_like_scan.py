@@ -26,6 +26,7 @@ import structlog
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
 from pr_guardian.core.orchestrator import run_review
+from pr_guardian.core.pr_like_synthesis import synthesize_cross_pr
 from pr_guardian.core.range_review import build_range_diff
 from pr_guardian.models.findings import AgentResult, Finding, Verdict
 from pr_guardian.models.output import Decision, ReviewResult
@@ -168,11 +169,12 @@ async def run_pr_like_scan(
 ) -> ScanResult:
     """Re-review each PR merged in the window at full PR-review depth.
 
-    Discovery enumerates merged PRs (newest first), capped to
-    ``config.recent_changes.deep_max_prs``; each is re-reviewed concurrently
-    (capped to ``deep_concurrency``) via the real PR pipeline with no
-    persistence and no platform side effects. Returns a ``ScanResult`` whose
-    ``agent_results`` are one-per-PR.
+    Discovery enumerates merged PRs (newest first). By default every merged PR
+    in the window is re-reviewed; ``config.recent_changes.deep_max_prs`` is a
+    safety ceiling (newest first, rest logged as skipped), and ``0`` disables it
+    entirely. Each PR is re-reviewed concurrently (capped to ``deep_concurrency``)
+    via the real PR pipeline with no persistence and no platform side effects.
+    Returns a ``ScanResult`` whose ``agent_results`` are one-per-PR.
     """
     log.info("pr_like_scan_started", repo=repo)
 
@@ -294,7 +296,8 @@ async def _run_deep_pipeline(
         else:
             _plog("warn", "discovery", f"Skipping PR (could not resolve base/head SHAs): {pr.get('title', '?')}")
 
-    if len(resolvable) > max_prs:
+    # max_prs <= 0 means "no cap — review every merged PR in the window".
+    if max_prs > 0 and len(resolvable) > max_prs:
         _plog(
             "warn",
             "discovery",
@@ -373,20 +376,34 @@ async def _run_deep_pipeline(
 
     agent_results = await asyncio.gather(*[_review_one(r) for r in resolvable])
 
-    # Stage 3: Report
+    # Stage 3: Report. Stats are computed over the per-PR cards only (the synthesis
+    # card carries no findings and is not itself a reviewed PR).
     await _update_stage("scan_report", "Building scan report")
-    total_findings = sum(len(ar.findings) for ar in agent_results)
-    total_cost = sum((ar.extras or {}).get("cost_usd", 0.0) for ar in agent_results)
-    total_in = sum((ar.extras or {}).get("input_tokens", 0) for ar in agent_results)
-    total_out = sum((ar.extras or {}).get("output_tokens", 0) for ar in agent_results)
-    blocked = sum(1 for ar in agent_results if ar.verdict == Verdict.FLAG_HUMAN)
-    review_count = len(agent_results)
+    pr_cards = list(agent_results)
+    total_findings = sum(len(ar.findings) for ar in pr_cards)
+    total_cost = sum((ar.extras or {}).get("cost_usd", 0.0) for ar in pr_cards)
+    total_in = sum((ar.extras or {}).get("input_tokens", 0) for ar in pr_cards)
+    total_out = sum((ar.extras or {}).get("output_tokens", 0) for ar in pr_cards)
+    blocked = sum(1 for ar in pr_cards if ar.verdict == Verdict.FLAG_HUMAN)
+    review_count = len(pr_cards)
     summary = (
         f"Deep re-review of {review_count} merged PR(s): "
         f"{blocked} would need human attention (reject/block at full depth), "
         f"{total_findings} finding(s) total."
     )
     _plog("info", "report", summary)
+
+    # Cross-PR synthesis: one narrative over the per-PR outcomes. Additive — a
+    # failure returns None and the deep scan still saves every per-PR result. The
+    # card is prepended so it renders first; its token cost rolls into the totals.
+    final_results = pr_cards
+    synth = await synthesize_cross_pr(pr_cards, repo, config)
+    if synth is not None:
+        total_cost += (synth.extras or {}).get("cost_usd", 0.0)
+        total_in += (synth.extras or {}).get("input_tokens", 0)
+        total_out += (synth.extras or {}).get("output_tokens", 0)
+        final_results = [synth, *pr_cards]
+        _plog("info", "report", "Added cross-PR synthesis.")
 
     result = ScanResult(
         scan_id=scan_id,
@@ -396,7 +413,7 @@ async def _run_deep_pipeline(
         started_at=started_at.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
         time_window_days=days,
-        agent_results=list(agent_results),
+        agent_results=final_results,
         total_findings=total_findings,
         summary=summary,
         pipeline_log=pipeline_log,
@@ -424,8 +441,10 @@ def _empty_result(scan_id, repo, platform, days, started_at, pipeline_log) -> Sc
 
 
 async def _save(storage, scan_db_id, result: ScanResult) -> None:
+    # Let a save failure propagate: the outer handler marks the scan failed and
+    # emits scan_error. Swallowing it here emitted scan_complete anyway, so the UI
+    # showed "complete" while the DB kept stage=scan_report with nothing persisted
+    # (a PR title once overflowed scan_agent_results.agent_name and rolled back the
+    # whole save — see migration 006, mirroring the recent_changes #94 fix).
     if storage and scan_db_id:
-        try:
-            await storage.save_scan_result(scan_db_id, result)
-        except Exception as e:
-            log.warning("db_scan_save_failed", error=str(e))
+        await storage.save_scan_result(scan_db_id, result)

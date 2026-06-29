@@ -147,6 +147,27 @@ async def test_deep_scan_caps_pr_count():
     assert any("Capped at 3" in e["msg"] for e in result.pipeline_log)
 
 
+async def test_deep_scan_no_cap_reviews_every_pr():
+    # deep_max_prs = 0 means "review everything in the window" — the fat scan's
+    # whole point is to leave no merged PR unreviewed.
+    prs = [_gh_pr(i) for i in range(1, 13)]
+    adapter = _DeepAdapter(prs)
+    config = GuardianConfig()
+    config.recent_changes.deep_max_prs = 0
+
+    with patch.object(
+        pr_like_scan, "run_review", AsyncMock(return_value=_review_result(Decision.AUTO_APPROVE))
+    ) as rr:
+        result = await run_pr_like_scan(
+            repo="o/r", platform="github", adapter=adapter, config=config
+        )
+
+    assert rr.await_count == 12
+    assert len(result.agent_results) == 12
+    # Nothing was capped, so no cap warning is logged.
+    assert not any("Capped at" in e["msg"] for e in result.pipeline_log)
+
+
 async def test_deep_scan_skips_unresolvable_pr():
     bad = {"number": 9, "title": "no shas", "user": {"login": "x"}}  # missing base/head
     adapter = _DeepAdapter([_gh_pr(1), bad])
