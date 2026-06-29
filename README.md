@@ -191,6 +191,13 @@ auto_approve:
     - "feature/*"
   blocked_target_branches:
     - "release/*"
+  exempt_authors:                  # blanket auto-approve, skips the whole
+    - "dependabot[bot]"            # pipeline — set to [] to make it opt-in
+
+escalation_policy:
+  mode: standard                   # standard | structural_only
+  gate_threshold: medium_plus      # low | medium_plus | high  (structural_only)
+  reject_threshold: confident_only # confident_only | medium_plus | any
 
 weights:                           # tune agent influence on final score
   security_privacy: 3.0
@@ -214,6 +221,27 @@ thresholds:
 | `elevated` | Auto-approve only for trivial changes |
 | `critical` | Never auto-approve — always requires human review |
 
+### Escalation Policy
+
+`escalation_policy.mode` chooses how findings become a verdict:
+
+| Mode | Behavior |
+|---|---|
+| `standard` | Weighted scoring maps findings straight to `APR` / `REV` / `BLK` |
+| `structural_only` | A gate agent decides whether a human must look, bounded by `gate_threshold` and `reject_threshold` — findings don't auto-reject on their own |
+
+### Trust Tiers
+
+Each PR (and file) resolves to a trust tier shown in the dashboard and PR
+comment. Path-risk floors/ceilings raise the tier on sensitive paths:
+
+| Tier | Label |
+|---|---|
+| `ai_only` | Auto |
+| `spot_check` | Spot-check |
+| `mandatory_human` | Human required |
+| `human_primary` | Security review |
+
 ## Decision Flow
 
 ```
@@ -232,10 +260,12 @@ thresholds:
 
 ```
 src/pr_guardian/
-├── agents/          # 6 AI review agents + prompt composition
+├── agents/          # 6 AI review agents + gate agent + prompt composition
 ├── api/             # FastAPI webhooks + health endpoint
+├── auth/            # Admin session + API key handling
 ├── config/          # YAML config loading + schema
 ├── core/            # Orchestrator + async queue
+├── dashboard/       # Jinja templates + Tailwind-built static assets
 ├── decision/        # Scoring engine + action dispatch
 ├── discovery/       # Diff parsing, blast radius, file roles
 ├── languages/       # Language detection + per-language tooling
@@ -244,7 +274,8 @@ src/pr_guardian/
 ├── models/          # Pydantic domain models
 ├── persistence/     # PostgreSQL via SQLAlchemy async
 ├── platform/        # GitHub + Azure DevOps adapters
-└── triage/          # Risk classification + hotspot detection
+├── triage/          # Risk classification + hotspot detection
+└── wizard/          # Capability clustering for human review
 ```
 
 ## Contributing

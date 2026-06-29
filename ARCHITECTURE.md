@@ -31,8 +31,9 @@ single place that knows the pipeline order.
 
 ## The agents
 
-There are six PR-review specialist agents in the live pipeline. Two additional
-validator prompt families exist for secondary checks.
+There are six PR-review specialist agents in the live pipeline. Two validator
+prompt families exist for secondary checks, plus a gate agent used only in
+`structural_only` escalation mode.
 
 | Agent | What it owns |
 |---|---|
@@ -44,8 +45,29 @@ validator prompt families exist for secondary checks.
 | `test_quality` | Coverage gaps, flaky patterns, missing edges |
 | `scan_validator` | Validates mechanical scan findings (separate from review agents) |
 | `validator` | Cross-checks other agents' certainty claims |
+| `human_gate` | Gate agent for `structural_only` escalation — decides whether a human must look (see Escalation below) |
 
 Prompts live in `prompts/<agent>/`. Code stubs live in `src/pr_guardian/agents/`.
+
+## Escalation & trust tiers
+
+Two governance axes sit alongside the scoring axis:
+
+- **Escalation policy** (`escalation_policy` in config; ADR-011). `mode:
+  standard` scores findings into `APR` / `REV` / `BLK` directly. `mode:
+  structural_only` instead runs the `HumanGateAgent`, which decides whether a
+  human must review — bounded by `gate_threshold` (`low` / `medium_plus` /
+  `high`) and `reject_threshold` (`confident_only` / `medium_plus` / `any`).
+  The gate agent fails closed on exception.
+- **Trust tiers** (`models/context.py`). A PR (and each file) resolves to a
+  `TrustTier`: `ai_only` → `spot_check` → `mandatory_human` → `human_primary`,
+  ordered most-trusting to least. Path-risk floors/ceilings are applied here in
+  `triage/trust_escalation.py`, on the trust-tier axis — *not* on the `RiskTier`
+  scoring axis. UI surfaces show human-readable labels (Auto / Spot-check /
+  Human required / Security review).
+
+Auto-approve itself is configuration-gated (ADR-012) and can be short-circuited
+by author exemption (`auto_approve.exempt_authors`) for trusted automation.
 
 ## Invariants (do not break)
 
@@ -133,6 +155,12 @@ Decisions with binding rationale live in `docs/decisions/`:
 - ADR-004 — fix-by-inference
 - ADR-005 — final auto-approval gate
 - ADR-006 — split verifier agent identity
+- ADR-007 — Guardian-owned profiles and connections
+- ADR-008 — readiness candidates are durable state-machine records
+- ADR-009 — Guardian clearance is separate from platform approval
+- ADR-010 — squashed migration baseline
+- ADR-011 — structural-only escalation
+- ADR-012 — configuration-gated auto-approve
 
 Read the ADR before changing the area it covers. New decisions get a new ADR.
 
