@@ -334,7 +334,7 @@ async function loadScans() {
         <td>${s.total_findings}</td>
         <td>
           <span class="scan-stage-badge scan-stage-${s.stage}">${s.stage}</span>
-          ${s.stage === 'error' && s.stage_detail ? `<div class="text-2xs text-red-400 mt-1 truncate max-w-[250px]" title="${esc(s.stage_detail)}">${esc(s.stage_detail.substring(0, 100))}${s.stage_detail.length > 100 ? '...' : ''}</div>` : ''}
+          ${s.stage === 'error' && s.stage_detail ? `<div class="cell-tip text-2xs text-red-400 mt-1" tabindex="0"><span class="block truncate max-w-[250px]">${esc(s.stage_detail.substring(0, 100))}${s.stage_detail.length > 100 ? '…' : ''}</span><span class="cell-tip__full">${esc(s.stage_detail)}</span></div>` : ''}
         </td>
         <td>${s.cost_usd ? '$' + s.cost_usd.toFixed(4) : '-'}</td>
         <td>${s.started_at ? new Date(s.started_at).toLocaleDateString() : '-'}</td>

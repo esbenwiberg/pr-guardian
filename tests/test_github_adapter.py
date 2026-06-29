@@ -225,6 +225,28 @@ async def test_network_error_is_handled():
     assert commits == []
 
 
+@pytest.mark.asyncio
+async def test_fetch_merged_prs_404_raises_actionable_message():
+    """A 404 on the scan PR-list call (App installation can't see a private
+    repo) must surface an actionable message naming the repo and App access —
+    not the raw httpx 'Client error 404 Not Found for url ...' string."""
+    adapter = _adapter(_resp([], 404))
+    with pytest.raises(RuntimeError) as exc_info:
+        await adapter.fetch_merged_prs("context-and/portfolio-simulation", since="2026-01-01")
+    msg = str(exc_info.value)
+    assert "context-and/portfolio-simulation" in msg
+    assert "GitHub App" in msg
+    assert "url" not in msg.lower()  # the raw httpx string must not leak through
+
+
+@pytest.mark.asyncio
+async def test_fetch_recent_commits_404_raises_actionable_message():
+    adapter = _adapter(_resp([], 404))
+    with pytest.raises(RuntimeError) as exc_info:
+        await adapter.fetch_recent_commits("context-and/portfolio-simulation", "main", "2026-01-01")
+    assert "context-and/portfolio-simulation" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # Body-already-cached path — pre-populated pr.body skips the PR GET
 # ---------------------------------------------------------------------------

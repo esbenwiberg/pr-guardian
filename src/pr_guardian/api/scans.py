@@ -23,7 +23,7 @@ from pr_guardian.core.maintenance import run_maintenance_scan
 from pr_guardian.core.recent_changes import run_recent_changes_scan
 from pr_guardian.models.scan import ScanType
 from pr_guardian.persistence import storage
-from pr_guardian.platform.factory import create_adapter
+from pr_guardian.platform.factory import create_adapter, create_github_adapter
 
 log = structlog.get_logger()
 router = APIRouter(prefix="/api", tags=["scans"])
@@ -118,6 +118,19 @@ async def _create_adapter_for_resolution(
     platform: str,
     resolved_profile: ResolvedProfileConfig,
 ):
+    snapshot = resolved_profile.connection_snapshot or {}
+    # GitHub App connections mint an installation token per-request from the
+    # connection's private key — they store NO static token, so
+    # get_connection_token() returns "" and the generic path below would build an
+    # UNauthenticated client that 404s on private repos. Route them through the
+    # App-auth path, mirroring create_adapter_for_review. Legacy token-style
+    # GitHub connections (auth_kind != "github_app") still use the static token.
+    if (
+        platform == "github"
+        and snapshot.get("auth_kind") == "github_app"
+        and resolved_profile.connection_id
+    ):
+        return await create_github_adapter(str(resolved_profile.connection_id))
     if resolved_profile.connection_id:
         token = await storage.get_connection_token(resolved_profile.connection_id)
         org_url = ""

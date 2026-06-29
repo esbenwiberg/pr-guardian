@@ -84,6 +84,62 @@ async def test_linked_and_unlinked_scans_store_profile_and_connection_snapshots(
         await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_github_app_connection_scan_uses_app_auth_not_static_token():
+    """A GitHub App connection must authenticate via create_github_adapter (App
+    auth), NOT the static get_connection_token path — App connections store no
+    static token, so the static path builds an unauthenticated client that 404s
+    on private repos. Regression for the scan/review auth-path divergence."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await ensure_default_profile()
+            profile = await create_profile("App Scan Profile", settings={})
+            connection = await create_connection(
+                "GitHub App",
+                platform="github",
+                auth_kind="github_app",
+                app_id="123",
+                installation_id="456",
+                private_key="-----BEGIN PRIVATE KEY-----\nfake\n-----END PRIVATE KEY-----",
+                health_status="healthy",
+            )
+            await create_repo_link(
+                platform="github",
+                repo_owner="context-and",
+                repo_name="portfolio-simulation",
+                profile_id=uuid.UUID(profile["id"]),
+                connection_id=uuid.UUID(connection["id"]),
+            )
+            adapter = MagicMock()
+            adapter.close = AsyncMock()
+
+            app_auth_mock = AsyncMock(return_value=adapter)
+            with (
+                patch("pr_guardian.api.scans.create_github_adapter", app_auth_mock),
+                patch(
+                    "pr_guardian.api.scans.create_adapter",
+                    side_effect=AssertionError("must not use static-token adapter for App conn"),
+                ),
+                patch(
+                    "pr_guardian.api.scans.storage.get_connection_token",
+                    new_callable=AsyncMock,
+                    side_effect=AssertionError("must not fetch a static token for App conn"),
+                ),
+                patch("pr_guardian.api.scans.run_recent_changes_scan", new_callable=AsyncMock),
+            ):
+                await trigger_recent_scan(
+                    RecentChangesScanRequest(
+                        repo="context-and/portfolio-simulation", platform="github"
+                    )
+                )
+                await asyncio.sleep(0)
+
+            app_auth_mock.assert_awaited_once_with(connection["id"])
+    finally:
+        await engine.dispose()
+
+
 def test_scan_issue_creation_respects_profile_side_effect_switch(client):
     disabled_scan = {
         **_MOCK_SCAN,
