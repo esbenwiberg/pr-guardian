@@ -132,9 +132,7 @@ async def test_on_notify_ignores_own_echo(monkeypatch):
 
 
 def test_asyncpg_connect_args_prod_ssl_url():
-    dsn, ssl = _asyncpg_connect_args(
-        "postgresql+asyncpg://u:p@host:5432/db?ssl=require"
-    )
+    dsn, ssl = _asyncpg_connect_args("postgresql+asyncpg://u:p@host:5432/db?ssl=require")
     assert dsn == "postgresql://u:p@host:5432/db"
     assert ssl is True
 
@@ -148,9 +146,7 @@ def test_asyncpg_connect_args_local_no_ssl():
 async def test_bridge_start_is_noop_on_non_postgres(monkeypatch):
     # sqlite/no-DB: single process, bridge must do nothing and register no
     # remote publisher (local bus already reaches every subscriber).
-    monkeypatch.setattr(
-        "pr_guardian.persistence.leader_lock._is_postgres", lambda: False
-    )
+    monkeypatch.setattr("pr_guardian.persistence.leader_lock._is_postgres", lambda: False)
     b = PgEventBridge()
     await b.start()
     assert b._started is False

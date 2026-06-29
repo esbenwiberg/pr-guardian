@@ -74,16 +74,12 @@ async def resolve_range(
     repo's history — we fail loud rather than silently review the wrong slice.
     """
     if bool(since_commit) == bool(since_time):
-        raise RangeResolutionError(
-            "Provide exactly one of since_commit or since_time."
-        )
+        raise RangeResolutionError("Provide exactly one of since_commit or since_time.")
 
     if since_commit:
         head_ref = head or branch
         if since_commit == head_ref:
-            raise RangeResolutionError(
-                f"Empty range: base and head are both '{head_ref}'."
-            )
+            raise RangeResolutionError(f"Empty range: base and head are both '{head_ref}'.")
         return since_commit, head_ref
 
     # Time-based: find the commits on branch newer than the timestamp. The

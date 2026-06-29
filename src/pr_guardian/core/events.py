@@ -40,9 +40,7 @@ class EventBus:
 
     def __init__(self) -> None:
         self._subscribers: list[asyncio.Queue[ReviewEvent]] = []
-        self._remote_publisher: (
-            Callable[[ReviewEvent], Coroutine[Any, Any, None]] | None
-        ) = None
+        self._remote_publisher: Callable[[ReviewEvent], Coroutine[Any, Any, None]] | None = None
         self._remote_tasks: set[asyncio.Task[None]] = set()
 
     def fanout_local(self, event: ReviewEvent) -> None:

@@ -164,7 +164,9 @@ def dry_run(repo_path: str, diff_target: str, files: tuple[str, ...]):
 @click.option("--days", default=7, type=int, help="Time window in days")
 @click.option("--since", default=None, help="ISO date override for start of window")
 @click.option("--base", "base_ref", default=None, help="Base commit/ref (range mode)")
-@click.option("--head", "head_ref", default=None, help="Head commit/ref (range mode; default branch)")
+@click.option(
+    "--head", "head_ref", default=None, help="Head commit/ref (range mode; default branch)"
+)
 @click.option(
     "--deep",
     is_flag=True,
@@ -395,7 +397,9 @@ def _local_git_diff(repo_path: str, base: str | None, head: str):
 
 @main.command("review-local")
 @click.option("--repo-path", default=".", help="Local git repo to review")
-@click.option("--base", default=None, help="Base ref (diff base...head); omit to review working tree")
+@click.option(
+    "--base", default=None, help="Base ref (diff base...head); omit to review working tree"
+)
 @click.option("--head", default="HEAD", help="Head ref (default HEAD)")
 @click.option("--branch", default="main", help="Target branch for policy purposes")
 def review_local(repo_path, base, head, branch):
@@ -435,14 +439,18 @@ def review_local(repo_path, base, head, branch):
         )
         click.echo(f"\nDecision: {result.decision.value.upper()}")
         click.echo(f"  Risk tier: {result.risk_tier.value}   Score: {result.combined_score:.2f}")
-        click.echo(f"  Cost: ${result.cost_usd:.4f}   Tokens: "
-                   f"{result.total_input_tokens}+{result.total_output_tokens}")
+        click.echo(
+            f"  Cost: ${result.cost_usd:.4f}   Tokens: "
+            f"{result.total_input_tokens}+{result.total_output_tokens}"
+        )
         n = 0
         for ar in result.agent_results:
             for f in ar.findings:
                 n += 1
-                click.echo(f"  [{f.severity.value}/{f.certainty.value}] {f.category} "
-                           f"({ar.agent_name}) {f.file}:{f.line or '?'}")
+                click.echo(
+                    f"  [{f.severity.value}/{f.certainty.value}] {f.category} "
+                    f"({ar.agent_name}) {f.file}:{f.line or '?'}"
+                )
                 click.echo(f"      {f.description[:140]}")
         if n == 0:
             click.echo("  No findings surfaced.")

@@ -67,7 +67,9 @@ class ClaudeCLIClient:
         # Only forward a model when it looks like a real Claude model/alias —
         # config defaults (e.g. fake model names) would otherwise break the CLI.
         chosen = model or self._default_model
-        if chosen and ("claude" in chosen.lower() or chosen.lower() in ("opus", "sonnet", "haiku")):
+        if chosen and (
+            "claude" in chosen.lower() or chosen.lower() in ("opus", "sonnet", "haiku")
+        ):
             cmd += ["--model", chosen]
 
         # Throwaway cwd: even a stray single-turn tool call can't reach the repo.

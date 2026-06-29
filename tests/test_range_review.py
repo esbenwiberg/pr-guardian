@@ -40,9 +40,7 @@ class FakeRangeAdapter:
 
 async def test_resolve_range_commit_mode_defaults_head_to_branch():
     adapter = FakeRangeAdapter()
-    base, head = await resolve_range(
-        adapter, "o/r", branch="main", since_commit="abc123"
-    )
+    base, head = await resolve_range(adapter, "o/r", branch="main", since_commit="abc123")
     assert base == "abc123"
     assert head == "main"
     # Commit mode never needs to walk history.
@@ -51,9 +49,7 @@ async def test_resolve_range_commit_mode_defaults_head_to_branch():
 
 async def test_resolve_range_commit_mode_explicit_head():
     adapter = FakeRangeAdapter()
-    base, head = await resolve_range(
-        adapter, "o/r", branch="main", since_commit="abc", head="def"
-    )
+    base, head = await resolve_range(adapter, "o/r", branch="main", since_commit="abc", head="def")
     assert (base, head) == ("abc", "def")
 
 
@@ -77,9 +73,7 @@ async def test_resolve_range_requires_exactly_one_input():
     with pytest.raises(RangeResolutionError):
         await resolve_range(adapter, "o/r", branch="main")
     with pytest.raises(RangeResolutionError):
-        await resolve_range(
-            adapter, "o/r", branch="main", since_commit="a", since_time="t"
-        )
+        await resolve_range(adapter, "o/r", branch="main", since_commit="a", since_time="t")
 
 
 async def test_resolve_range_time_mode_no_commits_raises():
@@ -99,9 +93,7 @@ async def test_resolve_range_time_mode_root_commit_raises():
 async def test_resolve_range_commit_equals_head_raises():
     adapter = FakeRangeAdapter()
     with pytest.raises(RangeResolutionError):
-        await resolve_range(
-            adapter, "o/r", branch="main", since_commit="x", head="x"
-        )
+        await resolve_range(adapter, "o/r", branch="main", since_commit="x", head="x")
 
 
 # ---------------------------------------------------------------------------

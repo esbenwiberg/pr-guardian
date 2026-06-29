@@ -259,11 +259,15 @@ class RecentChangesConfig(BaseModel):
     branch: str = "main"
     max_commits: int = 200
     group_by: str = "module"  # module, author, area
-    # Deep ("fat nightly") scan guardrails: re-reviewing every merged PR at full
-    # PR-review depth is expensive, so cap how many PRs we fan out over and how
-    # many run concurrently. Newest PRs are reviewed first; the rest are noted
-    # in the pipeline log as skipped (no silent truncation).
-    deep_max_prs: int = 25
+    # Deep ("fat nightly") scan guardrails. The deep scan is the fat counterpart
+    # to the thin daytime PR gate: its job is to re-review *everything* merged in
+    # the window at full depth, on a schedule or on demand. So the cap is a safety
+    # ceiling, not a target — set ``deep_max_prs = 0`` to review every merged PR
+    # with no cap. With a positive cap, the newest PRs are reviewed first and the
+    # rest are noted in the pipeline log as skipped (never silently truncated).
+    # Each PR is a full 6-agent review, so an uncapped run over a busy window can
+    # be expensive (cost + wall-clock + API/DB pressure) — raise deliberately.
+    deep_max_prs: int = 50
     deep_concurrency: int = 4
 
 
