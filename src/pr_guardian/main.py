@@ -51,6 +51,11 @@ async def lifespan(app: FastAPI):
             await storage.add_admin("ewi@projectum.com", added_by="system")
         except Exception as e:
             log.debug("admin_seed_skipped", error=str(e))
+        # Bridge the SSE event bus across replicas (Postgres NOTIFY). No-op on
+        # sqlite/single-process; never blocks startup if it can't connect.
+        from pr_guardian.core.event_bridge import bridge as event_bridge
+
+        await event_bridge.start()
         # Start PR sync background loop
         import asyncio
         from pr_guardian.core.pr_sync import pr_sync_loop
@@ -59,6 +64,7 @@ async def lifespan(app: FastAPI):
         sync_task = asyncio.create_task(pr_sync_loop())
         readiness_task = asyncio.create_task(readiness_reconciler_loop())
         yield
+        await event_bridge.stop()
         for task in (sync_task, readiness_task):
             task.cancel()
             try:
