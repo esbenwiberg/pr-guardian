@@ -32,6 +32,27 @@ _ARCHMAP_ARTIFACT_FILE = "archmap.json"
 _GUARDIAN_REVIEW_CONTEXT = "guardian/review"
 
 
+def _explain_repo_http_error(exc: httpx.HTTPStatusError, repo: str) -> str:
+    """Turn a raw httpx status error on a repo-scoped call into an actionable
+    message. GitHub returns 404 (not 403) for private repos an installation
+    can't see, so the bare httpx string ("Client error '404 Not Found' for
+    url ...") sends people chasing the wrong cause."""
+    status = exc.response.status_code
+    if status == 404:
+        return (
+            f"GitHub returned 404 for '{repo}'. The connected GitHub App "
+            "installation can't see this repository (it's not in the App's "
+            "repository-access list), or the repo or base branch does not exist. "
+            "Add the repo under the GitHub App's Repository access, then retry."
+        )
+    if status in (401, 403):
+        return (
+            f"GitHub denied access to '{repo}' (HTTP {status}). The connection's "
+            "credentials are invalid or lack the required permissions."
+        )
+    return str(exc)
+
+
 def _compute_ci_status(
     runs: list[dict],
     statuses: list[dict] | None = None,
@@ -588,7 +609,10 @@ class GitHubAdapter:
         while True:
             params["page"] = page
             resp = await client.get(f"/repos/{repo}/commits", params=params)
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(_explain_repo_http_error(exc, repo)) from exc
             batch = resp.json()
             if not batch:
                 break
@@ -614,7 +638,10 @@ class GitHubAdapter:
             "per_page": 100,
         }
         resp = await client.get(f"/repos/{repo}/pulls", params=params)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(_explain_repo_http_error(exc, repo)) from exc
         all_prs = resp.json()
 
         # Filter to actually merged PRs with merged_at >= since
