@@ -270,14 +270,17 @@ class ScanFindingRow(Base):
     )
     severity: Mapped[str] = mapped_column(String(16))
     certainty: Mapped[str] = mapped_column(String(16))
-    category: Mapped[str] = mapped_column(String(64))
+    # category and effort_estimate are LLM-generated free text — Text, not a
+    # capped varchar. A finding whose category exceeded varchar(64) once rolled
+    # back the entire scan save (see migration 005).
+    category: Mapped[str] = mapped_column(Text)
     file: Mapped[str] = mapped_column(Text)
     line: Mapped[int | None] = mapped_column(Integer, nullable=True)
     description: Mapped[str] = mapped_column(Text)
     suggestion: Mapped[str] = mapped_column(Text, default="")
     priority: Mapped[float] = mapped_column(Float, default=0.0)
     last_modified: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    effort_estimate: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    effort_estimate: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     agent_result: Mapped[ScanAgentResultRow] = relationship(back_populates="findings")
 

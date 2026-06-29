@@ -581,10 +581,11 @@ async def _analyze_changes(
     )
 
     if storage and scan_db_id:
-        try:
-            await storage.save_scan_result(scan_db_id, result)
-        except Exception as e:
-            log.error("db_scan_save_failed", error=str(e))
+        # Let a save failure propagate: the outer handler marks the scan failed
+        # and emits scan_error. Swallowing it here emitted scan_complete anyway,
+        # so the UI showed "complete" while the DB kept stage=scan_report with no
+        # findings persisted (a truncated category once rolled back all 11).
+        await storage.save_scan_result(scan_db_id, result)
 
     _emit("scan_complete", f"{total_findings} findings", cost=total_cost)
 
