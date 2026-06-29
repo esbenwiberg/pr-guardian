@@ -20,6 +20,7 @@ from pr_guardian.config.profile_resolver import (
     resolve_profile_config,
 )
 from pr_guardian.core.maintenance import run_maintenance_scan
+from pr_guardian.core.pr_like_scan import run_pr_like_scan
 from pr_guardian.core.recent_changes import run_recent_changes_scan
 from pr_guardian.models.scan import ScanType
 from pr_guardian.persistence import storage
@@ -98,6 +99,9 @@ class RecentChangesScanRequest(BaseModel):
     # instead of enumerating merged PRs over a time window.
     base_ref: str | None = None
     head_ref: str | None = None  # defaults to the configured branch
+    # Deep ("fat nightly") mode: re-review each merged PR at full PR-review
+    # depth (verdict per PR) instead of the macro scan. Time-window only.
+    deep: bool = False
 
 
 class MaintenanceScanRequest(BaseModel):
@@ -174,11 +178,16 @@ async def trigger_recent_scan(
 
     config = resolved_profile.config
 
+    # Deep mode re-reviews each merged PR at full depth; it's a distinct scan
+    # type with its own orchestrator and doesn't support commit-range scoping.
+    deep = req.deep and not req.base_ref
+    scan_type = ScanType.RECENT_CHANGES_DEEP if deep else ScanType.RECENT_CHANGES
+
     # Create DB record upfront so we can return scan_id for progress tracking
     scan_db_id: uuid.UUID | None = None
     try:
         scan_db_id = await storage.create_scan_record(
-            scan_type=ScanType.RECENT_CHANGES.value,
+            scan_type=scan_type.value,
             repo=repo,
             platform=req.platform,
             time_window_days=req.time_window_days,
@@ -194,17 +203,28 @@ async def trigger_recent_scan(
 
     async def _run():
         try:
-            await run_recent_changes_scan(
-                repo=repo,
-                platform=req.platform,
-                adapter=adapter,
-                config=config,
-                time_window_days=req.time_window_days,
-                since=req.since,
-                base_ref=req.base_ref,
-                head_ref=req.head_ref,
-                scan_db_id=scan_db_id,
-            )
+            if deep:
+                await run_pr_like_scan(
+                    repo=repo,
+                    platform=req.platform,
+                    adapter=adapter,
+                    config=config,
+                    time_window_days=req.time_window_days,
+                    since=req.since,
+                    scan_db_id=scan_db_id,
+                )
+            else:
+                await run_recent_changes_scan(
+                    repo=repo,
+                    platform=req.platform,
+                    adapter=adapter,
+                    config=config,
+                    time_window_days=req.time_window_days,
+                    since=req.since,
+                    base_ref=req.base_ref,
+                    head_ref=req.head_ref,
+                    scan_db_id=scan_db_id,
+                )
         except Exception as e:
             log.error("recent_scan_background_error", repo=repo, error=str(e), exc_info=True)
         finally:
@@ -215,7 +235,7 @@ async def trigger_recent_scan(
     return ScanResponse(
         status="started",
         scan_id=str(scan_db_id) if scan_db_id else "",
-        scan_type="recent_changes",
+        scan_type=scan_type.value,
         repo=repo,
     )
 

@@ -259,6 +259,12 @@ class RecentChangesConfig(BaseModel):
     branch: str = "main"
     max_commits: int = 200
     group_by: str = "module"  # module, author, area
+    # Deep ("fat nightly") scan guardrails: re-reviewing every merged PR at full
+    # PR-review depth is expensive, so cap how many PRs we fan out over and how
+    # many run concurrently. Newest PRs are reviewed first; the rest are noted
+    # in the pipeline log as skipped (no silent truncation).
+    deep_max_prs: int = 25
+    deep_concurrency: int = 4
 
 
 class MaintenanceConfig(BaseModel):

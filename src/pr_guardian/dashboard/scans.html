@@ -42,6 +42,7 @@
       <select id="filter-type" onchange="loadScans()" class="form-select w-auto">
         <option value="">All Types</option>
         <option value="recent_changes">Recent Changes</option>
+        <option value="recent_changes_deep">Deep PR Review</option>
         <option value="maintenance">Maintenance</option>
       </select>
       <button class="btn btn-primary btn-sm" onclick="openModal()">+ New Scan</button>
@@ -77,8 +78,9 @@
     </div>
 
     <div class="grid grid-cols-4 gap-3 mb-6" id="detail-stats"></div>
-    <div id="detail-summary" class="card card-body mb-6" style="display:none">
-      <div id="detail-summary-content" class="prose"></div>
+    <div id="detail-summary" class="mb-6" style="display:none">
+      <h3 class="text-2xs font-semibold text-slate-500 uppercase tracking-wide mb-3">Analysis</h3>
+      <div id="detail-summary-content" class="grid grid-cols-1 lg:grid-cols-2 gap-4"></div>
     </div>
 
     <!-- Toolbar -->
@@ -139,6 +141,10 @@
               <label class="form-label" for="scan-days">Time Window (days)</label>
               <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
             </div>
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input id="scan-deep-toggle" type="checkbox" class="form-checkbox" onchange="toggleScanDeep()">
+              Deep per-PR review (full PR-review depth &amp; verdict per PR &mdash; slower, costs more)
+            </label>
             <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
               <input id="scan-range-toggle" type="checkbox" class="form-checkbox" onchange="toggleScanRange()">
               Review a commit range instead of a time window
@@ -278,7 +284,7 @@ const AGENT_LABELS = {
   refactor_candidate: 'Refactor Candidates',
   dead_code: 'Dead Code',
 };
-const TYPE_LABELS = { recent_changes: 'Recent Changes', maintenance: 'Maintenance' };
+const TYPE_LABELS = { recent_changes: 'Recent Changes', recent_changes_deep: 'Deep PR Review', maintenance: 'Maintenance' };
 
 let scanData = null;
 let selectedFindings = new Set(); // "agentIdx-findingIdx"
@@ -401,15 +407,10 @@ function renderDetail(d) {
     <div class="stat-card"><div class="stat-card-label">Findings</div><div class="stat-card-value">${totalFindings}</div></div>
     <div class="stat-card"><div class="stat-card-label">Duration</div><div class="stat-card-value">${PRG.formatDuration(d.duration_ms)}</div></div>
     <div class="stat-card"><div class="stat-card-label">Cost</div><div class="stat-card-value">${d.cost_usd ? '$' + d.cost_usd.toFixed(4) : '-'}</div></div>
-    <div class="stat-card"><div class="stat-card-label">${d.scan_type === 'recent_changes' ? 'Window' : 'Staleness'}</div><div class="stat-card-value">${d.scan_type === 'recent_changes' ? d.time_window_days + 'd' : d.staleness_months + 'mo'}</div></div>
+    <div class="stat-card"><div class="stat-card-label">${d.scan_type === 'maintenance' ? 'Staleness' : 'Window'}</div><div class="stat-card-value">${d.scan_type === 'maintenance' ? d.staleness_months + 'mo' : d.time_window_days + 'd'}</div></div>
   `;
 
-  if (d.summary) {
-    document.getElementById('detail-summary').style.display = '';
-    document.getElementById('detail-summary-content').innerHTML = renderMarkdown(d.summary);
-  } else {
-    document.getElementById('detail-summary').style.display = 'none';
-  }
+  renderSummaryCards(d);
 
   const agents = d.agent_results || [];
   const hasFindings = agents.some(a => (a.findings || []).length > 0);
@@ -431,7 +432,6 @@ function renderDetail(d) {
           </div>
           <div class="findings-collapse border-t border-slate-700/50" id="findings-${ai}">
             <div class="overflow-hidden">
-              ${agent.summary ? `<div class="px-5 py-2.5 text-xs text-slate-400 border-b border-slate-700/50">${esc(agent.summary)}</div>` : ''}
               ${findings.map((f, fi) => renderFinding(ai, fi, f)).join('')}
             </div>
           </div>
@@ -443,6 +443,40 @@ function renderDetail(d) {
 
   updateSelectionCount();
   applyCertaintyFilter();
+}
+
+// Render the scan summary as one card per analytical lens (Trend, Consistency, …)
+// rather than a single wall of text. Each scan agent contributes one summary
+// paragraph, so we build straight from agent_results instead of splitting d.summary.
+function renderSummaryCards(d) {
+  const wrap = document.getElementById('detail-summary');
+  const content = document.getElementById('detail-summary-content');
+  const agents = (d.agent_results || []).filter(a => a.summary && a.summary.trim());
+
+  if (agents.length) {
+    content.className = 'grid grid-cols-1 lg:grid-cols-2 gap-4';
+    content.innerHTML = agents.map(agent => {
+      const label = AGENT_LABELS[agent.agent_name] || agent.agent_name;
+      const n = (agent.findings || []).length;
+      return `
+        <div class="card overflow-hidden flex flex-col">
+          <div class="flex items-center gap-2.5 px-5 py-3 border-b border-slate-700/50">
+            <span class="font-semibold text-sm">${esc(label)}</span>
+            ${agent.verdict ? `<span class="verdict-${agent.verdict} text-2xs font-semibold uppercase px-2 py-0.5 rounded">${esc(agent.verdict)}</span>` : ''}
+            <span class="text-2xs text-slate-500 ml-auto">${n} finding${n !== 1 ? 's' : ''}</span>
+          </div>
+          <div class="px-5 py-4 prose text-sm leading-relaxed text-slate-300">${renderMarkdown(agent.summary)}</div>
+        </div>`;
+    }).join('');
+    wrap.style.display = '';
+  } else if (d.summary) {
+    // Fallback: no per-agent summaries (e.g. "Scan complete.") — show a single card.
+    content.className = '';
+    content.innerHTML = `<div class="card card-body prose">${renderMarkdown(d.summary)}</div>`;
+    wrap.style.display = '';
+  } else {
+    wrap.style.display = 'none';
+  }
 }
 
 function renderFinding(ai, fi, f) {
@@ -632,7 +666,7 @@ function buildExportText() {
   lines.push(`# PR Guardian Scan Findings — ${d.repo}`);
   lines.push('');
   lines.push(`Scan Type: ${typeLabel}`);
-  if (d.scan_type === 'recent_changes') {
+  if (d.scan_type !== 'maintenance') {
     lines.push(`Time Window: ${d.time_window_days} days`);
   } else {
     lines.push(`Staleness Threshold: ${d.staleness_months} months`);
@@ -717,7 +751,17 @@ function toggleScanRange() {
   const on = document.getElementById('scan-range-toggle').checked;
   document.getElementById('scan-range-fields').classList.toggle('hidden', !on);
   document.getElementById('scan-days-row').classList.toggle('hidden', on);
+  // Deep mode is time-window only — range and deep are mutually exclusive.
+  if (on) document.getElementById('scan-deep-toggle').checked = false;
   if (on) document.getElementById('scan-base-ref').focus();
+}
+
+function toggleScanDeep() {
+  const on = document.getElementById('scan-deep-toggle').checked;
+  if (on) {
+    document.getElementById('scan-range-toggle').checked = false;
+    toggleScanRange();
+  }
 }
 
 function switchTab(tab) {
@@ -860,6 +904,7 @@ async function startScan() {
         if (headRef) body.head_ref = headRef;
       } else {
         body.time_window_days = parseInt(document.getElementById('scan-days').value) || 7;
+        if (document.getElementById('scan-deep-toggle').checked) body.deep = true;
       }
     } else {
       url = '/api/scan/maintenance';

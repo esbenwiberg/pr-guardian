@@ -2695,7 +2695,7 @@ async def get_scan_stats() -> dict[str, Any]:
         total = await session.scalar(select(func.count(ScanRow.id))) or 0
 
         type_counts: dict[str, int] = {}
-        for st in ("recent_changes", "maintenance"):
+        for st in ("recent_changes", "recent_changes_deep", "maintenance"):
             c = await session.scalar(select(func.count(ScanRow.id)).where(ScanRow.scan_type == st))
             type_counts[st] = c or 0
 

@@ -165,6 +165,13 @@ def dry_run(repo_path: str, diff_target: str, files: tuple[str, ...]):
 @click.option("--since", default=None, help="ISO date override for start of window")
 @click.option("--base", "base_ref", default=None, help="Base commit/ref (range mode)")
 @click.option("--head", "head_ref", default=None, help="Head commit/ref (range mode; default branch)")
+@click.option(
+    "--deep",
+    is_flag=True,
+    default=False,
+    help="Re-review each merged PR at full PR-review depth (verdict per PR). "
+    "The 'fat nightly scan'. Time-window only; ignores --base/--head.",
+)
 def scan_recent(
     repo: str,
     platform: str,
@@ -172,27 +179,45 @@ def scan_recent(
     since: str | None,
     base_ref: str | None,
     head_ref: str | None,
+    deep: bool,
 ):
-    """Run a recent changes scan on merged code (time window or base..head range)."""
+    """Run a recent changes scan on merged code (time window or base..head range).
+
+    With --deep, runs the full PR-review pipeline against every PR merged in the
+    window (one verdict per PR) instead of the macro scan agents.
+    """
     from pr_guardian.config.schema import GuardianConfig
+    from pr_guardian.core.pr_like_scan import run_pr_like_scan
     from pr_guardian.core.recent_changes import run_recent_changes_scan
     from pr_guardian.platform.factory import create_adapter
 
     adapter = create_adapter(platform)
     config = GuardianConfig()
+    # Deep mode is time-window only; it re-reviews merged PRs, not a raw range.
+    run_deep = deep and not base_ref
 
     async def _run():
         try:
-            result = await run_recent_changes_scan(
-                repo=repo,
-                platform=platform,
-                adapter=adapter,
-                config=config,
-                time_window_days=days,
-                since=since,
-                base_ref=base_ref,
-                head_ref=head_ref,
-            )
+            if run_deep:
+                result = await run_pr_like_scan(
+                    repo=repo,
+                    platform=platform,
+                    adapter=adapter,
+                    config=config,
+                    time_window_days=days,
+                    since=since,
+                )
+            else:
+                result = await run_recent_changes_scan(
+                    repo=repo,
+                    platform=platform,
+                    adapter=adapter,
+                    config=config,
+                    time_window_days=days,
+                    since=since,
+                    base_ref=base_ref,
+                    head_ref=head_ref,
+                )
             click.echo(f"\nScan complete: {result.scan_type.value}")
             click.echo(f"  Findings: {result.total_findings}")
             click.echo(f"  Cost: ${result.cost_usd:.4f}")

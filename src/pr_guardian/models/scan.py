@@ -11,6 +11,11 @@ from pr_guardian.models.findings import Certainty, Severity, Verdict
 class ScanType(str, Enum):
     RECENT_CHANGES = "recent_changes"
     MAINTENANCE = "maintenance"
+    # Deep variant of recent_changes: re-runs the full PR-review pipeline
+    # (6 agents → decision engine → verdict) per merged PR, off-platform.
+    # The "fat nightly scan" to the thin PR gate. Findings + per-PR verdicts,
+    # no platform side effects.
+    RECENT_CHANGES_DEEP = "recent_changes_deep"
 
 
 @dataclass

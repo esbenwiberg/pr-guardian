@@ -70,8 +70,37 @@ curl -X POST "$GUARDIAN_BASE_URL/api/scan/recent" \
 Without `base_ref` it behaves as before — a time-window scan over the last
 `time_window_days`.
 
-**Rule of thumb:** want a gate? Use `/api/review/range`. Want a triage list of
-themes across many merges? Use the scan.
+### 3. Deep per-PR scan — `POST /api/scan/recent` with `deep: true`
+
+The purest "fat nightly": enumerate every PR merged in the window and re-run the
+**full PR-review pipeline against each one individually**, producing a verdict
+*per PR* (not one blended verdict for the whole range). This is the audit net for
+the thin gate — *"which merged PRs would have been `reject`/`hard_block` at full
+review depth?"*
+
+```bash
+curl -X POST "$GUARDIAN_BASE_URL/api/scan/recent" \
+  -H "Authorization: Bearer $GUARDIAN_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"repo":"owner/repo","platform":"github","time_window_days":1,"deep":true}'
+# → {"status":"started","scan_type":"recent_changes_deep","scan_id":"…"}
+```
+
+Results are **self-contained in the scan** — no review rows are created (the
+nightly fan-out never pollutes the Active Reviews queue), and each PR shows up as
+its own card in the scan detail view with its decision, score, findings, and a
+link to the real PR. Verdicts are informational (the PRs are already merged);
+nothing is written back to the repo.
+
+Cost scales with PR count, so it's guarded by config:
+`recent_changes.deep_max_prs` (default 25, newest PRs first — the rest are logged
+as skipped) and `recent_changes.deep_concurrency` (default 4). Deep mode is
+time-window only; it ignores `base_ref`/`head_ref`.
+
+**Rule of thumb:** want one gate over a slice of history? Use
+`/api/review/range`. Want a triage list of cross-cutting themes? Use the macro
+scan. Want a per-PR audit of everything that merged today at full depth? Use the
+deep scan.
 
 ## CLI equivalents (local / self-hosted runners)
 
@@ -79,6 +108,7 @@ themes across many merges? Use the scan.
 pr-guardian review-range --repo owner/repo --since-commit <base> --head <head>
 pr-guardian review-range --repo owner/repo --since 2026-06-28T03:00:00Z
 pr-guardian scan-recent  --repo owner/repo --base <base> --head <head>
+pr-guardian scan-recent  --repo owner/repo --days 1 --deep   # per-PR audit
 ```
 
 ## Baseline tracking

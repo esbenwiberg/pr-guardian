@@ -200,12 +200,25 @@ async def run_review(
     comment_mode: str = "summary",
     pat_name: str | None = None,
     manual_comment_override: bool = False,
+    persist: bool = True,
 ) -> ReviewResult:
-    """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision."""
+    """Main review pipeline: Discovery → Mechanical → Triage → Agents → Decision.
+
+    Set ``persist=False`` to run the pipeline purely in-memory and return the
+    ``ReviewResult`` without creating or updating any review DB row. The deep
+    ("fat nightly") scan uses this to re-review merged PRs at full depth without
+    polluting the reviews queue — ``review_db_id`` stays ``None`` so every
+    storage write in the pipeline no-ops. Implies no platform side effects.
+    """
     log.info("review_started", pr_id=pr.pr_id, repo=pr.repo)
 
     storage = _try_import_storage()
     review_db_id: uuid.UUID | None = existing_review_db_id
+
+    if not persist:
+        # In-memory mode: never touch the DB and never post to the platform.
+        storage = None
+        skip_platform_side_effects = True
 
     # Create DB record only if one wasn't provided by the caller
     if storage and review_db_id is None:

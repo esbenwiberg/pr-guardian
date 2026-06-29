@@ -12,7 +12,7 @@ module.exports = {
     'badge-trivial', 'badge-low', 'badge-medium', 'badge-high',
     'log-badge-info', 'log-badge-warn', 'log-badge-error', 'log-badge-debug',
     'stage-discovery', 'stage-mechanical', 'stage-triage', 'stage-agents', 'stage-decision', 'stage-complete', 'stage-queued', 'stage-error',
-    'type-recent_changes', 'type-maintenance',
+    'type-recent_changes', 'type-recent_changes_deep', 'type-maintenance',
     'scan-stage-complete', 'scan-stage-error', 'scan-stage-discovery', 'scan-stage-scan_discovery', 'scan-stage-scan_analysis', 'scan-stage-scan_sampling', 'scan-stage-scan_report',
     'effort-small', 'effort-medium', 'effort-large',
     // Area card left-border accents
