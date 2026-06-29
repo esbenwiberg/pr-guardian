@@ -60,7 +60,9 @@ def _review_result(decision: Decision, *, findings=None, score=0.5, cost=0.01) -
 class _DeepAdapter:
     def __init__(self, prs: list[dict], compare: Diff | None = None):
         self._prs = prs
-        self._compare = compare or Diff(files=[DiffFile(path="a.py", status="modified", patch="+x")])
+        self._compare = compare or Diff(
+            files=[DiffFile(path="a.py", status="modified", patch="+x")]
+        )
         self.merged_calls: list[dict] = []
         self.compare_calls: list[tuple] = []
 
@@ -243,9 +245,7 @@ async def test_run_review_persist_false_creates_no_row():
         patch.object(orchestrator, "_try_import_storage", return_value=storage),
         patch.object(orchestrator, "_run_pipeline", AsyncMock(return_value=sentinel)) as pipe,
     ):
-        result = await orchestrator.run_review(
-            pr, AsyncMock(), diff_override=diff, persist=False
-        )
+        result = await orchestrator.run_review(pr, AsyncMock(), diff_override=diff, persist=False)
 
     assert result is sentinel
     storage.create_review_record.assert_not_called()
@@ -274,7 +274,9 @@ async def test_run_review_persist_true_creates_row():
     with (
         patch.object(orchestrator, "_try_import_storage", return_value=storage),
         patch.object(
-            orchestrator, "_run_pipeline", AsyncMock(return_value=_review_result(Decision.AUTO_APPROVE))
+            orchestrator,
+            "_run_pipeline",
+            AsyncMock(return_value=_review_result(Decision.AUTO_APPROVE)),
         ),
     ):
         await orchestrator.run_review(

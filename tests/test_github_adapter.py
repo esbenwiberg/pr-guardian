@@ -243,7 +243,9 @@ async def test_fetch_merged_prs_404_raises_actionable_message():
 async def test_fetch_recent_commits_404_raises_actionable_message():
     adapter = _adapter(_resp([], 404))
     with pytest.raises(RuntimeError) as exc_info:
-        await adapter.fetch_recent_commits("context-and/portfolio-simulation", "main", "2026-01-01")
+        await adapter.fetch_recent_commits(
+            "context-and/portfolio-simulation", "main", "2026-01-01"
+        )
     assert "context-and/portfolio-simulation" in str(exc_info.value)
 
 

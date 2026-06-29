@@ -294,7 +294,11 @@ async def _run_deep_pipeline(
         if refs:
             resolvable.append(refs)
         else:
-            _plog("warn", "discovery", f"Skipping PR (could not resolve base/head SHAs): {pr.get('title', '?')}")
+            _plog(
+                "warn",
+                "discovery",
+                f"Skipping PR (could not resolve base/head SHAs): {pr.get('title', '?')}",
+            )
 
     # max_prs <= 0 means "no cap — review every merged PR in the window".
     if max_prs > 0 and len(resolvable) > max_prs:
