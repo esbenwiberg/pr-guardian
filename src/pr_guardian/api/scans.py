@@ -8,9 +8,11 @@ import uuid
 from urllib.parse import unquote
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from pr_guardian.auth.dependencies import require_write
+from pr_guardian.auth.identity import Identity
 from pr_guardian.config.profile_resolver import (
     ProfileResolutionError,
     ResolvedProfileConfig,
@@ -92,6 +94,10 @@ class RecentChangesScanRequest(BaseModel):
     platform: str = "github"
     time_window_days: int = 7
     since: str | None = None  # ISO date override
+    # Commit-range mode: when base_ref is set, analyze base..head directly
+    # instead of enumerating merged PRs over a time window.
+    base_ref: str | None = None
+    head_ref: str | None = None  # defaults to the configured branch
 
 
 class MaintenanceScanRequest(BaseModel):
@@ -131,7 +137,10 @@ async def _create_adapter_for_resolution(
 
 
 @router.post("/scan/recent", response_model=ScanResponse)
-async def trigger_recent_scan(req: RecentChangesScanRequest):
+async def trigger_recent_scan(
+    req: RecentChangesScanRequest,
+    identity: Identity = Depends(require_write),
+):
     """Trigger a recent changes scan. Runs asynchronously."""
     try:
         repo = normalize_repo(req.repo, req.platform)
@@ -160,6 +169,8 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
             repo=repo,
             platform=req.platform,
             time_window_days=req.time_window_days,
+            base_sha=req.base_ref or "",
+            head_sha=req.head_ref or "",
         )
         await storage.set_scan_provenance(
             scan_db_id,
@@ -177,6 +188,8 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
                 config=config,
                 time_window_days=req.time_window_days,
                 since=req.since,
+                base_ref=req.base_ref,
+                head_ref=req.head_ref,
                 scan_db_id=scan_db_id,
             )
         except Exception as e:
@@ -195,7 +208,10 @@ async def trigger_recent_scan(req: RecentChangesScanRequest):
 
 
 @router.post("/scan/maintenance", response_model=ScanResponse)
-async def trigger_maintenance_scan(req: MaintenanceScanRequest):
+async def trigger_maintenance_scan(
+    req: MaintenanceScanRequest,
+    identity: Identity = Depends(require_write),
+):
     """Trigger a maintenance scan. Runs asynchronously."""
     try:
         repo = normalize_repo(req.repo, req.platform)

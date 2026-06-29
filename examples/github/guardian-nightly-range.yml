@@ -1,0 +1,147 @@
+# PR Guardian — nightly "fat" range review.
+#
+# The heavy half of a thin/fat split: fast checks run on every PR (see
+# guardian-pr-thin.yml + Guardian's own webhook auto-review), and ONCE A NIGHT
+# this job asks the hosted Guardian service to review *everything merged since
+# last night* with the full PR pipeline (mechanical gates → triage → agents →
+# decision).
+#
+# It is baseline-tracked with a git tag (`guardian/last-reviewed`) so each run
+# only reviews the new commits — never re-reviews unchanged code.
+#
+# Guardian is a hosted service that already holds the GitHub App connection, so
+# the runner needs NO model keys and NO repo credentials — just the service URL
+# and a write-scoped API key.
+#
+# Required configuration:
+#   vars.GUARDIAN_BASE_URL   e.g. https://guardian.example.com   (no trailing slash)
+#   secrets.GUARDIAN_API_KEY a write-scoped Guardian API key (prg_…)
+
+name: Guardian nightly range review
+
+on:
+  schedule:
+    - cron: '0 3 * * *' # 03:00 UTC — after the workday, before the morning
+  workflow_dispatch:
+
+permissions:
+  contents: write # only to move the baseline tag
+
+concurrency:
+  group: guardian-nightly
+  cancel-in-progress: false
+
+jobs:
+  range-review:
+    runs-on: ubuntu-latest
+    env:
+      GUARDIAN_BASE_URL: ${{ vars.GUARDIAN_BASE_URL }}
+      GUARDIAN_API_KEY: ${{ secrets.GUARDIAN_API_KEY }}
+      REPO: ${{ github.repository }}
+      BRANCH: ${{ github.event.repository.default_branch }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need full history + tags to resolve the baseline
+
+      - name: Resolve review baseline
+        id: baseline
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if git rev-parse -q --verify refs/tags/guardian/last-reviewed >/dev/null; then
+            base="$(git rev-parse refs/tags/guardian/last-reviewed)"
+          else
+            base="$(git rev-parse HEAD~1)" # first run: just the latest commit
+          fi
+          echo "base=$base"  >> "$GITHUB_OUTPUT"
+          echo "head=$head"  >> "$GITHUB_OUTPUT"
+          if [ "$base" = "$head" ]; then
+            echo "No new commits since last review — nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Reviewing ${base}..${head}"
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Trigger range review
+        id: trigger
+        if: steps.baseline.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          resp="$(curl -fsS -X POST "${GUARDIAN_BASE_URL}/api/review/range" \
+            -H "Authorization: Bearer ${GUARDIAN_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n \
+                  --arg repo "$REPO" \
+                  --arg base "${{ steps.baseline.outputs.base }}" \
+                  --arg head "${{ steps.baseline.outputs.head }}" \
+                  --arg branch "$BRANCH" \
+                  '{repo:$repo, platform:"github", since_commit:$base, head:$head, branch:$branch}')")"
+          review_id="$(echo "$resp" | jq -r '.review_id')"
+          if [ -z "$review_id" ] || [ "$review_id" = "null" ]; then
+            echo "::error::Guardian did not return a review_id. Response: $resp"
+            exit 1
+          fi
+          echo "review_id=$review_id" >> "$GITHUB_OUTPUT"
+          echo "Queued review $review_id"
+
+      - name: Poll for the verdict
+        id: verdict
+        if: steps.baseline.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          id="${{ steps.trigger.outputs.review_id }}"
+          url="${GUARDIAN_BASE_URL}/api/dashboard/reviews/${id}"
+          decision=""
+          # Poll up to ~20 min (agents + validator can take a few minutes).
+          for i in $(seq 1 80); do
+            row="$(curl -fsS -H "Authorization: Bearer ${GUARDIAN_API_KEY}" "$url" || true)"
+            stage="$(echo "$row" | jq -r '.stage // ""')"
+            finished="$(echo "$row" | jq -r '.finished_at // ""')"
+            decision="$(echo "$row" | jq -r '.decision // ""')"
+            if [ "$stage" = "error" ]; then
+              echo "::error::Guardian review errored: $(echo "$row" | jq -r '.stage_detail // ""')"
+              exit 1
+            fi
+            if [ -n "$finished" ] && [ "$finished" != "null" ]; then
+              break
+            fi
+            sleep 15
+          done
+          if [ -z "$decision" ] || [ "$decision" = "null" ]; then
+            echo "::error::Review $id did not finish in time."
+            exit 1
+          fi
+          echo "decision=$decision" >> "$GITHUB_OUTPUT"
+          echo "Decision: $decision  (details: ${GUARDIAN_BASE_URL}/dashboard/reviews/${id})"
+          echo "## Guardian nightly review" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Range: \`${{ steps.baseline.outputs.base }}..${{ steps.baseline.outputs.head }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Decision: **${decision}**" >> "$GITHUB_STEP_SUMMARY"
+          echo "- [Open in Guardian](${GUARDIAN_BASE_URL}/dashboard/reviews/${id})" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce verdict
+        if: steps.baseline.outputs.skip != 'true'
+        run: |
+          set -euo pipefail
+          case "${{ steps.verdict.outputs.decision }}" in
+            auto_approve)
+              echo "✅ Clean — no blocking findings." ;;
+            human_review)
+              echo "::warning::Guardian flagged findings for human review (advisory, not failing the build)." ;;
+            reject|hard_block)
+              echo "::error::Guardian rejected the range — blocking findings present."
+              exit 1 ;;
+            *)
+              echo "::error::Unexpected decision: ${{ steps.verdict.outputs.decision }}"
+              exit 1 ;;
+          esac
+
+      - name: Advance the reviewed baseline
+        # Only after a non-failing verdict, so a failed nightly re-reviews the
+        # same range tomorrow instead of skipping past unreviewed commits.
+        if: steps.baseline.outputs.skip != 'true' && success()
+        run: |
+          set -euo pipefail
+          git tag -f guardian/last-reviewed "${{ steps.baseline.outputs.head }}"
+          git push -f origin guardian/last-reviewed

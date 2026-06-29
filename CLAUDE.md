@@ -112,6 +112,15 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
 - `GUARDIAN_DEV_ADMIN=1` bypasses admin auth — dev only.
 - At least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` must be set for agent
   calls. Mechanical gates work without either.
+- **Self-validation without keys/GitHub:** set `GUARDIAN_LLM_PROVIDER=fake`
+  (deterministic; diff containing `GUARDIAN_E2E_FINDING` yields a finding) or
+  `GUARDIAN_LLM_PROVIDER=claude-cli` (real LLM via the local `claude` CLI, no API
+  key). Review a local checkout end-to-end with
+  `pr-guardian review-local --repo-path . [--base <ref>]`. The `claude-cli`
+  provider is **dev-only** — the factory refuses it when a real DB is configured
+  (see `llm/claude_cli.py`). For reviewing real PRs/ranges/commits without keys,
+  use `pr-guardian review-range` / `scan-recent --base` (still need platform
+  auth for the diff). See `docs/ci-nightly-range-review.md`.
 - **GitHub integration** uses a GitHub App Connection stored via the `/profiles`
   Connections UI. `GITHUB_WEBHOOK_SECRET` is required for webhook signature
   verification. Do **not** set `GITHUB_TOKEN` — Guardian no longer reads it for

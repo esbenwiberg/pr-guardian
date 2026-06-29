@@ -7,11 +7,25 @@ import structlog
 from pr_guardian.config.schema import GuardianConfig, LLMProviderConfig
 from pr_guardian.llm.anthropic import AnthropicClient
 from pr_guardian.llm.azure_foundry import AzureFoundryClient
+from pr_guardian.llm.claude_cli import ClaudeCLIClient
 from pr_guardian.llm.fake import FakeLLMClient
 from pr_guardian.llm.openai_compat import OpenAICompatClient
 from pr_guardian.llm.protocol import LLMClient
 
 log = structlog.get_logger()
+
+
+def _claude_cli_allowed() -> bool:
+    """The claude-cli provider is dev-only. Allowed only when a dev signal is
+    present: no database configured, or GUARDIAN_DEV_ADMIN=1. Never in a
+    deployment with a real DB and no dev flag — see llm/claude_cli.py."""
+    if os.environ.get("GUARDIAN_DEV_ADMIN", "").lower() in ("1", "true", "yes"):
+        return True
+    db_configured = bool(
+        os.environ.get("DATABASE_URL")
+        or os.environ.get("GUARDIAN_DB_ENABLED", "").lower() in ("1", "true", "yes")
+    )
+    return not db_configured
 
 
 def create_llm_client(
@@ -77,6 +91,18 @@ def _build_client(cfg: LLMProviderConfig, timeout_seconds: int = 120) -> LLMClie
 
     if cfg.type == "fake":
         return FakeLLMClient()
+
+    if cfg.type == "claude-cli":
+        if not _claude_cli_allowed():
+            raise ValueError(
+                "claude-cli provider is dev-only and refuses to run in a deployed "
+                "environment. It shells out to the local `claude` binary — unsafe for "
+                "production. Use it only locally (no DATABASE_URL or GUARDIAN_DEV_ADMIN=1)."
+            )
+        return ClaudeCLIClient(
+            default_model=cfg.default_model,
+            timeout_seconds=timeout_seconds,
+        )
 
     raise ValueError(f"Unknown LLM provider type: {cfg.type}")
 

@@ -1,0 +1,40 @@
+# PR Guardian — thin PR gate.
+#
+# The fast half of a thin/fat split. This runs on every PR and stays cheap:
+# lint + typecheck + unit tests, nothing that needs network, secrets, or a
+# deploy. The heavy review happens two ways OFF this critical path:
+#
+#   1. PR Guardian's own GitHub App auto-reviews the PR via webhook — you do NOT
+#      call Guardian from here. Its verdict lands as the `guardian/review`
+#      status check (configure branch protection to require it if you want it
+#      blocking). This workflow is just your own fast correctness gate.
+#   2. guardian-nightly-range.yml sweeps everything merged since last night with
+#      the full pipeline.
+#
+# Tune the steps to your stack — this is a Python example.
+
+name: PR thin checks
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  thin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Typecheck
+        run: mypy src
+      - name: Unit tests
+        run: python -m pytest -q

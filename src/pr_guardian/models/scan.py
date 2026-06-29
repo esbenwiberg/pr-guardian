@@ -55,6 +55,10 @@ class ScanResult:
     # Scan parameters
     time_window_days: int = 7
     staleness_months: int = 6
+    # Commit-range scope (set when the scan ran over an explicit base..head
+    # range instead of a time window). Empty otherwise.
+    base_sha: str = ""
+    head_sha: str = ""
     # Results
     agent_results: list[ScanAgentResult] = field(default_factory=list)
     total_findings: int = 0

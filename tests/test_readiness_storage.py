@@ -214,6 +214,8 @@ sa.Table(
     sa.Column("platform", sa.String(16)),
     sa.Column("time_window_days", sa.Integer, server_default="7"),
     sa.Column("staleness_months", sa.Integer, server_default="6"),
+    sa.Column("base_sha", sa.String(64), server_default=""),
+    sa.Column("head_sha", sa.String(64), server_default=""),
     sa.Column("total_findings", sa.Integer, server_default="0"),
     sa.Column("summary", sa.Text, server_default=""),
     sa.Column("stage", sa.String(32), server_default="queued"),

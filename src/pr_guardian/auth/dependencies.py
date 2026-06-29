@@ -60,3 +60,22 @@ async def require_write_scope(request: Request) -> Identity:
     if identity.kind == "api_key" and "write" not in identity.scopes:
         raise HTTPException(403, "API key missing required scope: write")
     return identity
+
+
+async def require_write(request: Request) -> Identity:
+    """Require an authenticated principal that can write.
+
+    Unlike ``require_write_scope`` (which only rejects under-scoped API keys and
+    silently lets anonymous through), this also blocks anonymous callers — so
+    it's safe on endpoints exposed to CI: a signed-in user passes, a write-scoped
+    API key passes, everything else is rejected.
+
+    Anonymous-but-admin is allowed: that's only ever the local dev / no-DB
+    fallback (GUARDIAN_DEV_ADMIN or no DATABASE_URL), never a production caller.
+    """
+    identity = _get_identity(request)
+    if identity.kind == "anonymous" and not identity.is_admin:
+        raise HTTPException(401, "Signed-in or API-key access required")
+    if identity.kind == "api_key" and "write" not in identity.scopes:
+        raise HTTPException(403, "API key missing required scope: write")
+    return identity

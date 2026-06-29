@@ -2552,6 +2552,8 @@ async def create_scan_record(
     platform: str,
     time_window_days: int = 7,
     staleness_months: int = 6,
+    base_sha: str = "",
+    head_sha: str = "",
 ) -> uuid.UUID:
     """Insert a pending scan row when a scan starts."""
     row = ScanRow(
@@ -2560,6 +2562,8 @@ async def create_scan_record(
         platform=platform,
         time_window_days=time_window_days,
         staleness_months=staleness_months,
+        base_sha=base_sha,
+        head_sha=head_sha,
         stage="discovery",
     )
     async with async_session() as session:
@@ -2613,6 +2617,10 @@ async def save_scan_result(scan_id: uuid.UUID, result) -> None:
         now = datetime.now(timezone.utc)
         row.total_findings = result.total_findings
         row.summary = result.summary
+        if getattr(result, "base_sha", ""):
+            row.base_sha = result.base_sha
+        if getattr(result, "head_sha", ""):
+            row.head_sha = result.head_sha
         row.pipeline_log = result.pipeline_log
         row.total_input_tokens = result.total_input_tokens
         row.total_output_tokens = result.total_output_tokens
@@ -2768,6 +2776,8 @@ def _scan_to_dict(row: ScanRow) -> dict[str, Any]:
         "platform": row.platform,
         "time_window_days": row.time_window_days,
         "staleness_months": row.staleness_months,
+        "base_sha": row.base_sha,
+        "head_sha": row.head_sha,
         "total_findings": row.total_findings,
         "summary": row.summary,
         "stage": row.stage,

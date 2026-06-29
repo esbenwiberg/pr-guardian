@@ -27,6 +27,12 @@ def _ensure_env_provider_dict(base: dict) -> dict:
             "default_model": "fake-deterministic-v1",
             "models": ["fake-deterministic-v1"],
         }
+    if provider == "claude-cli" and "claude-cli" not in providers:
+        providers["claude-cli"] = {
+            "type": "claude-cli",
+            "default_model": "",
+            "models": [],
+        }
     return base
 
 
@@ -40,6 +46,12 @@ def _ensure_env_provider_config(config: GuardianConfig) -> GuardianConfig:
             type="fake",
             default_model="fake-deterministic-v1",
             models=["fake-deterministic-v1"],
+        )
+    if provider == "claude-cli" and "claude-cli" not in config.llm.providers:
+        config.llm.providers["claude-cli"] = LLMProviderConfig(
+            type="claude-cli",
+            default_model="",
+            models=[],
         )
     return config
 

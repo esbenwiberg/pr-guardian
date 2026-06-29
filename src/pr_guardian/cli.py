@@ -163,8 +163,17 @@ def dry_run(repo_path: str, diff_target: str, files: tuple[str, ...]):
 @click.option("--platform", default="github", help="Platform (github, ado)")
 @click.option("--days", default=7, type=int, help="Time window in days")
 @click.option("--since", default=None, help="ISO date override for start of window")
-def scan_recent(repo: str, platform: str, days: int, since: str | None):
-    """Run a recent changes scan on merged code."""
+@click.option("--base", "base_ref", default=None, help="Base commit/ref (range mode)")
+@click.option("--head", "head_ref", default=None, help="Head commit/ref (range mode; default branch)")
+def scan_recent(
+    repo: str,
+    platform: str,
+    days: int,
+    since: str | None,
+    base_ref: str | None,
+    head_ref: str | None,
+):
+    """Run a recent changes scan on merged code (time window or base..head range)."""
     from pr_guardian.config.schema import GuardianConfig
     from pr_guardian.core.recent_changes import run_recent_changes_scan
     from pr_guardian.platform.factory import create_adapter
@@ -181,6 +190,8 @@ def scan_recent(repo: str, platform: str, days: int, since: str | None):
                 config=config,
                 time_window_days=days,
                 since=since,
+                base_ref=base_ref,
+                head_ref=head_ref,
             )
             click.echo(f"\nScan complete: {result.scan_type.value}")
             click.echo(f"  Findings: {result.total_findings}")
@@ -236,6 +247,193 @@ def scan_maintenance(repo: str, platform: str, staleness: int, max_files: int):
                 await adapter.close()
 
     asyncio.run(_run())
+
+
+@main.command("review-range")
+@click.option("--repo", required=True, help="Repository (owner/repo)")
+@click.option("--platform", default="github", help="Platform (github, ado)")
+@click.option("--branch", default="main", help="Branch being reviewed")
+@click.option("--since-commit", default=None, help="Base commit/ref (head defaults to branch)")
+@click.option("--since", default=None, help="ISO-8601 timestamp; resolves base/head from history")
+@click.option("--head", default=None, help="Explicit head ref/SHA (default: branch HEAD)")
+def review_range(repo, platform, branch, since_commit, since, head):
+    """Review a commit range (since commit / since time) with the full PR pipeline."""
+    from pr_guardian.config.schema import GuardianConfig
+    from pr_guardian.core.orchestrator import run_review
+    from pr_guardian.core.range_review import (
+        RangeResolutionError,
+        build_range_diff,
+        build_range_pr,
+        resolve_range,
+    )
+    from pr_guardian.platform.factory import create_adapter
+
+    if bool(since_commit) == bool(since):
+        click.echo("Provide exactly one of --since-commit or --since.", err=True)
+        sys.exit(1)
+
+    adapter = create_adapter(platform)
+    config = GuardianConfig()
+
+    async def _run():
+        try:
+            base_ref, head_ref = await resolve_range(
+                adapter,
+                repo,
+                branch=branch,
+                since_commit=since_commit,
+                since_time=since,
+                head=head,
+            )
+            click.echo(f"Range: {base_ref[:12]}..{head_ref[:12]} on {branch}")
+            diff, meta = await build_range_diff(adapter, repo, base_ref, head_ref)
+            click.echo(f"Diff: {meta['files_changed']} file(s) changed.")
+            pr = build_range_pr(repo, platform, base_ref, head_ref, branch, "cli")
+            result = await run_review(
+                pr,
+                adapter,
+                service_config=config,
+                post_comment=False,
+                diff_override=diff,
+                skip_platform_side_effects=True,
+            )
+            click.echo(f"\nDecision: {result.decision.value.upper()}")
+            click.echo(f"  Risk tier: {result.risk_tier.value}")
+            click.echo(f"  Score: {result.combined_score:.2f}")
+            click.echo(f"  Cost: ${result.cost_usd:.4f}")
+            for ar in result.agent_results:
+                if ar.findings:
+                    click.echo(f"  {ar.agent_name}: {len(ar.findings)} finding(s)")
+        except RangeResolutionError as e:
+            click.echo(f"Could not resolve range: {e}", err=True)
+            sys.exit(1)
+        finally:
+            if hasattr(adapter, "close"):
+                await adapter.close()
+
+    asyncio.run(_run())
+
+
+def _local_git_diff(repo_path: str, base: str | None, head: str):
+    """Build a Diff from a local git checkout. Dev/self-validation only.
+
+    With ``base`` set, diffs ``base...head``; otherwise diffs the working tree
+    against ``head`` (default HEAD). Shells git directly — never used by the
+    hosted pipeline, only the local CLI.
+    """
+    import subprocess
+    from typing import cast
+
+    from pr_guardian.models.pr import Diff, DiffFile, FileStatus
+
+    rng = [f"{base}...{head}"] if base else [head]
+
+    def _git(*args: str) -> str:
+        return subprocess.run(
+            ["git", "-C", repo_path, *args],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+
+    status_map = {"A": "added", "M": "modified", "D": "deleted", "R": "renamed"}
+    name_status = _git("diff", "--name-status", *rng).splitlines()
+    numstat = {}
+    for line in _git("diff", "--numstat", *rng).splitlines():
+        parts = line.split("\t")
+        if len(parts) >= 3:
+            add = 0 if parts[0] == "-" else int(parts[0])
+            dele = 0 if parts[1] == "-" else int(parts[1])
+            numstat[parts[-1]] = (add, dele)
+
+    files: list = []
+    for line in name_status:
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        code = parts[0][0]
+        path = parts[-1]
+        patch = _git("diff", *rng, "--", path)
+        add, dele = numstat.get(path, (0, 0))
+        files.append(
+            DiffFile(
+                path=path,
+                status=cast(FileStatus, status_map.get(code, "modified")),
+                old_path=parts[1] if code == "R" and len(parts) >= 3 else None,
+                additions=add,
+                deletions=dele,
+                patch=patch,
+            )
+        )
+    return Diff(files=files)
+
+
+@main.command("review-local")
+@click.option("--repo-path", default=".", help="Local git repo to review")
+@click.option("--base", default=None, help="Base ref (diff base...head); omit to review working tree")
+@click.option("--head", default="HEAD", help="Head ref (default HEAD)")
+@click.option("--branch", default="main", help="Target branch for policy purposes")
+def review_local(repo_path, base, head, branch):
+    """Review a LOCAL git checkout with the full pipeline. Dev/self-validation only.
+
+    Pair with GUARDIAN_LLM_PROVIDER=claude-cli (real, offline LLM) or =fake
+    (deterministic) — no GitHub, no API key, no DB.
+    """
+    import os
+
+    from pr_guardian.config.loader import apply_global_settings
+    from pr_guardian.config.schema import GuardianConfig
+    from pr_guardian.core.orchestrator import run_review
+    from pr_guardian.core.range_review import build_range_pr
+
+    provider = os.environ.get("GUARDIAN_LLM_PROVIDER", "(config default)")
+    diff = _local_git_diff(repo_path, base, head)
+    if not diff.files:
+        click.echo("No changes to review in the given range.")
+        return
+    repo_name = Path(repo_path).resolve().name
+
+    async def _run():
+        config = await apply_global_settings(GuardianConfig())
+        pr = build_range_pr(repo_name, "github", base or "WORKTREE", head, branch, "local")
+        click.echo(
+            f"Reviewing {len(diff.files)} file(s) from {repo_name} "
+            f"({base + '...' if base else 'working tree vs '}{head}) via provider={provider}"
+        )
+        result = await run_review(
+            pr,
+            _NullAdapter(),
+            service_config=config,
+            post_comment=False,
+            diff_override=diff,
+            skip_platform_side_effects=True,
+        )
+        click.echo(f"\nDecision: {result.decision.value.upper()}")
+        click.echo(f"  Risk tier: {result.risk_tier.value}   Score: {result.combined_score:.2f}")
+        click.echo(f"  Cost: ${result.cost_usd:.4f}   Tokens: "
+                   f"{result.total_input_tokens}+{result.total_output_tokens}")
+        n = 0
+        for ar in result.agent_results:
+            for f in ar.findings:
+                n += 1
+                click.echo(f"  [{f.severity.value}/{f.certainty.value}] {f.category} "
+                           f"({ar.agent_name}) {f.file}:{f.line or '?'}")
+                click.echo(f"      {f.description[:140]}")
+        if n == 0:
+            click.echo("  No findings surfaced.")
+
+    asyncio.run(_run())
+
+
+class _NullAdapter:
+    """No-op adapter for local reviews — the diff is provided directly and all
+    platform side effects are skipped, so only archmap lookup is exercised."""
+
+    async def fetch_archmap_artifact(self, pr):
+        return None
+
+    async def close(self):
+        pass
 
 
 @main.command("reviews")

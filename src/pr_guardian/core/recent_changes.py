@@ -113,9 +113,20 @@ async def run_recent_changes_scan(
     *,
     time_window_days: int | None = None,
     since: str | None = None,
+    base_ref: str | None = None,
+    head_ref: str | None = None,
     scan_db_id: uuid.UUID | None = None,
 ) -> ScanResult:
-    """Run a recent changes scan: Discovery → Analysis → Report."""
+    """Run a recent changes scan: Discovery → Analysis → Report.
+
+    Two discovery modes:
+
+    - **Time window** (default) — aggregate merged PRs + commits since ``since``
+      (or the last ``time_window_days``).
+    - **Commit range** — when ``base_ref`` is given, analyze the ``base..head``
+      compare diff directly (head defaults to the configured branch). This is
+      the "everything since commit X" path a nightly CI sweep uses.
+    """
     log.info("recent_changes_scan_started", repo=repo)
 
     storage = _try_import_storage()
@@ -184,6 +195,8 @@ async def run_recent_changes_scan(
             _plog,
             _emit,
             _update_stage,
+            base_ref=base_ref,
+            head_ref=head_ref,
         )
     except Exception as exc:
         if storage and scan_db_id:
@@ -210,15 +223,91 @@ async def _run_recent_pipeline(
     _plog,
     _emit,
     _update_stage,
+    *,
+    base_ref: str | None = None,
+    head_ref: str | None = None,
 ) -> ScanResult:
-    # Stage 1: Discovery
+    branch = config.recent_changes.branch
+    range_base_sha = ""
+    range_head_sha = ""
+
+    # --- Commit-range discovery: analyze base..head directly, no PR enumeration.
+    if base_ref:
+        range_head = head_ref or branch
+        await _update_stage(
+            "scan_discovery", f"Fetching compare diff {base_ref[:8]}..{range_head[:8]}"
+        )
+        compare_diff = await adapter.fetch_compare_diff(repo, base_ref, range_head)
+        range_base_sha = base_ref
+        range_head_sha = range_head
+        merged_prs: list[dict] = []
+        commits: list[dict] = []
+        all_changed_files: list[dict] = [
+            {
+                "filename": df.path,
+                "status": df.status,
+                "additions": df.additions,
+                "deletions": df.deletions,
+                "patch": df.patch,
+                "_pr_number": None,
+                "_pr_title": f"(commit range {base_ref[:8]}..{range_head[:8]})",
+            }
+            for df in compare_diff.files
+        ]
+        _plog(
+            "info",
+            "discovery",
+            f"Compare diff {base_ref[:8]}..{range_head[:8]}: "
+            f"{len(all_changed_files)} file(s) changed.",
+        )
+        if not all_changed_files:
+            result = ScanResult(
+                scan_id=scan_id,
+                scan_type=ScanType.RECENT_CHANGES,
+                repo=repo,
+                platform=platform,
+                started_at=started_at.isoformat(),
+                finished_at=datetime.now(timezone.utc).isoformat(),
+                time_window_days=days,
+                base_sha=range_base_sha,
+                head_sha=range_head_sha,
+                summary="No changes in the specified commit range.",
+                pipeline_log=pipeline_log,
+            )
+            if storage and scan_db_id:
+                try:
+                    await storage.save_scan_result(scan_db_id, result)
+                except Exception as e:
+                    log.warning("db_scan_save_failed", error=str(e))
+            _emit("scan_complete", "No changes to analyze")
+            return result
+        return await _analyze_changes(
+            repo,
+            platform,
+            adapter,
+            config,
+            days,
+            scan_id,
+            storage,
+            scan_db_id,
+            pipeline_log,
+            started_at,
+            _plog,
+            _emit,
+            _update_stage,
+            merged_prs,
+            commits,
+            all_changed_files,
+            base_sha=range_base_sha,
+            head_sha=range_head_sha,
+        )
+
+    # Stage 1: Discovery (time-window mode)
     await _update_stage("scan_discovery", "Fetching recent merged PRs and commits")
 
     if since is None:
         since_dt = datetime.now(timezone.utc) - timedelta(days=days)
         since = since_dt.isoformat()
-
-    branch = config.recent_changes.branch
 
     merged_prs, commits = await asyncio.gather(
         adapter.fetch_merged_prs(repo, since=since, base=branch),
@@ -253,7 +342,7 @@ async def _run_recent_pipeline(
         return result
 
     # Collect changed files from merged PRs (patches included for GitHub)
-    all_changed_files: list[dict] = []
+    all_changed_files = []
     for pr in merged_prs:
         pr_number = pr.get("number")
         if pr_number:
@@ -318,6 +407,54 @@ async def _run_recent_pipeline(
         except Exception as e:
             _plog("warn", "discovery", f"Compare-diff fallback failed: {e}")
 
+    return await _analyze_changes(
+        repo,
+        platform,
+        adapter,
+        config,
+        days,
+        scan_id,
+        storage,
+        scan_db_id,
+        pipeline_log,
+        started_at,
+        _plog,
+        _emit,
+        _update_stage,
+        merged_prs,
+        commits,
+        all_changed_files,
+        base_sha="",
+        head_sha="",
+    )
+
+
+async def _analyze_changes(
+    repo,
+    platform,
+    adapter,
+    config,
+    days,
+    scan_id,
+    storage,
+    scan_db_id,
+    pipeline_log,
+    started_at,
+    _plog,
+    _emit,
+    _update_stage,
+    merged_prs: list[dict],
+    commits: list[dict],
+    all_changed_files: list[dict],
+    *,
+    base_sha: str = "",
+    head_sha: str = "",
+) -> ScanResult:
+    """Shared analysis tail: group → agents → noise reduction → report.
+
+    Both discovery modes (time window and commit range) converge here with an
+    aggregated ``all_changed_files`` list.
+    """
     changes_by_module = _group_changes_by_module(all_changed_files)
     change_summary = _build_change_summary(merged_prs, commits, changes_by_module)
 
@@ -432,6 +569,8 @@ async def _run_recent_pipeline(
         started_at=started_at.isoformat(),
         finished_at=datetime.now(timezone.utc).isoformat(),
         time_window_days=days,
+        base_sha=base_sha,
+        head_sha=head_sha,
         agent_results=agent_results_list,
         total_findings=total_findings,
         summary=overall_summary,

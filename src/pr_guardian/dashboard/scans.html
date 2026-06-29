@@ -134,9 +134,26 @@
           </div>
 
           <!-- Recent Changes options -->
-          <div id="section-recent">
-            <label class="form-label" for="scan-days">Time Window (days)</label>
-            <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
+          <div id="section-recent" class="space-y-4">
+            <div id="scan-days-row">
+              <label class="form-label" for="scan-days">Time Window (days)</label>
+              <input id="scan-days" type="number" class="form-input" value="7" min="1" max="90">
+            </div>
+            <label class="flex items-center gap-2 text-sm text-slate-300 cursor-pointer">
+              <input id="scan-range-toggle" type="checkbox" class="form-checkbox" onchange="toggleScanRange()">
+              Review a commit range instead of a time window
+            </label>
+            <div id="scan-range-fields" class="hidden space-y-4">
+              <div>
+                <label class="form-label" for="scan-base-ref">Base commit / ref</label>
+                <input id="scan-base-ref" type="text" class="form-input" placeholder="e.g. last reviewed SHA, tag, or branch" spellcheck="false">
+              </div>
+              <div>
+                <label class="form-label" for="scan-head-ref">Head commit / ref (optional)</label>
+                <input id="scan-head-ref" type="text" class="form-input" placeholder="defaults to the configured branch" spellcheck="false">
+                <p class="text-2xs text-slate-500 mt-1">ADO needs commit SHAs; GitHub also accepts branch names and tags.</p>
+              </div>
+            </div>
           </div>
 
           <!-- Maintenance options -->
@@ -696,6 +713,13 @@ function updateRepoHint() {
   document.getElementById('scan-repo').placeholder = platform === 'ado' ? 'project/repo' : 'owner/repo';
 }
 
+function toggleScanRange() {
+  const on = document.getElementById('scan-range-toggle').checked;
+  document.getElementById('scan-range-fields').classList.toggle('hidden', !on);
+  document.getElementById('scan-days-row').classList.toggle('hidden', on);
+  if (on) document.getElementById('scan-base-ref').focus();
+}
+
 function switchTab(tab) {
   currentTab = tab;
   document.getElementById('tab-recent').classList.toggle('active', tab === 'recent');
@@ -823,11 +847,20 @@ async function startScan() {
     let url, body;
     if (currentTab === 'recent') {
       url = '/api/scan/recent';
-      body = {
-        repo,
-        platform,
-        time_window_days: parseInt(document.getElementById('scan-days').value) || 7,
-      };
+      const rangeOn = document.getElementById('scan-range-toggle').checked;
+      const baseRef = document.getElementById('scan-base-ref').value.trim();
+      if (rangeOn && !baseRef) {
+        document.getElementById('scan-base-ref').focus();
+        throw new Error('Base commit / ref is required for a commit-range scan');
+      }
+      body = { repo, platform };
+      if (rangeOn) {
+        body.base_ref = baseRef;
+        const headRef = document.getElementById('scan-head-ref').value.trim();
+        if (headRef) body.head_ref = headRef;
+      } else {
+        body.time_window_days = parseInt(document.getElementById('scan-days').value) || 7;
+      }
     } else {
       url = '/api/scan/maintenance';
       body = {

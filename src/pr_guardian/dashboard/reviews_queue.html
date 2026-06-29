@@ -39,6 +39,7 @@
             <span id="trigger-error" class="hidden text-xs text-red-400"></span>
           </div>
           <button type="submit" id="trigger-btn" class="btn btn-primary text-sm">Review</button>
+          <button type="button" id="range-btn" class="btn btn-secondary text-sm" title="Review a commit range (since a commit or time) like a PR">Range…</button>
         </div>
         <div id="conn-opts" class="hidden flex flex-wrap items-center gap-3 text-xs text-slate-400 pl-1">
           <span class="text-amber-400">No linked connection — pick one:</span>
@@ -791,6 +792,131 @@
   document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.style.display === 'flex') close(); });
 
   prefill();
+})();
+</script>
+
+<!-- Range review modal -->
+<div id="range-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60" style="display:none">
+  <div class="bg-slate-900 border border-slate-700 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+    <h3 class="text-base font-semibold mb-1">Review a commit range</h3>
+    <p class="text-xs text-slate-400 mb-5">Runs the full PR review pipeline over the <code>base..head</code> diff and produces a verdict. Informational only — nothing is written back to the repo.</p>
+
+    <label class="block mb-3">
+      <span class="text-xs font-medium text-slate-300 block mb-1">Repository</span>
+      <input id="rng-repo" type="text" placeholder="owner/repo"
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
+    </label>
+    <div class="grid grid-cols-2 gap-3 mb-3">
+      <label class="block">
+        <span class="text-xs font-medium text-slate-300 block mb-1">Platform</span>
+        <select id="rng-platform" class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
+          <option value="github">GitHub</option>
+          <option value="ado">Azure DevOps</option>
+        </select>
+      </label>
+      <label class="block">
+        <span class="text-xs font-medium text-slate-300 block mb-1">Branch</span>
+        <input id="rng-branch" type="text" value="main"
+               class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
+      </label>
+    </div>
+
+    <div class="mb-3">
+      <span class="text-xs font-medium text-slate-300 block mb-1">Range start</span>
+      <div class="flex gap-3 mb-2 text-xs text-slate-300">
+        <label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="rng-mode" value="commit" checked onchange="rngUpdateMode()"> Since commit</label>
+        <label class="flex items-center gap-1.5 cursor-pointer"><input type="radio" name="rng-mode" value="time" onchange="rngUpdateMode()"> Since time</label>
+      </div>
+      <input id="rng-since-commit" type="text" placeholder="base commit / ref (SHA, tag, or branch)"
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
+      <input id="rng-since-time" type="datetime-local" style="display:none"
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
+    </div>
+
+    <label class="block mb-2">
+      <span class="text-xs font-medium text-slate-300 block mb-1">Head commit / ref <span class="text-slate-500">(optional)</span></span>
+      <input id="rng-head" type="text" placeholder="defaults to branch HEAD"
+             class="w-full px-3 py-2 text-sm bg-slate-800 border border-slate-700 rounded-lg text-slate-50 focus:outline-none focus:border-accent-500">
+    </label>
+    <p class="text-2xs text-slate-500 mb-4">ADO needs commit SHAs; GitHub also accepts branch names and tags.</p>
+
+    <p id="rng-error" class="hidden text-xs text-red-400 mb-3"></p>
+    <div class="flex gap-3 justify-end">
+      <button id="btn-rng-cancel" class="chip">Cancel</button>
+      <button id="btn-rng-start" class="px-4 py-2 text-xs font-semibold bg-accent-600 hover:bg-accent-500 text-white rounded-lg transition-colors">Start range review</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const modal = document.getElementById('range-modal');
+  const errEl = document.getElementById('rng-error');
+
+  window.openRangeReviewModal = function () {
+    errEl.classList.add('hidden');
+    modal.style.display = 'flex';
+    document.getElementById('rng-repo').focus();
+  };
+  function close() { modal.style.display = 'none'; }
+  window.rngUpdateMode = function () {
+    const mode = document.querySelector('input[name="rng-mode"]:checked').value;
+    document.getElementById('rng-since-commit').style.display = mode === 'commit' ? '' : 'none';
+    document.getElementById('rng-since-time').style.display = mode === 'time' ? '' : 'none';
+  };
+
+  async function start() {
+    errEl.classList.add('hidden');
+    const repo = document.getElementById('rng-repo').value.trim();
+    if (!repo) { document.getElementById('rng-repo').focus(); return; }
+    const platform = document.getElementById('rng-platform').value;
+    const branch = document.getElementById('rng-branch').value.trim() || 'main';
+    const head = document.getElementById('rng-head').value.trim();
+    const mode = document.querySelector('input[name="rng-mode"]:checked').value;
+
+    const body = { repo, platform, branch };
+    if (mode === 'commit') {
+      const c = document.getElementById('rng-since-commit').value.trim();
+      if (!c) { document.getElementById('rng-since-commit').focus(); return; }
+      body.since_commit = c;
+    } else {
+      const t = document.getElementById('rng-since-time').value;
+      if (!t) { document.getElementById('rng-since-time').focus(); return; }
+      body.since = new Date(t).toISOString();
+    }
+    if (head) body.head = head;
+
+    const btn = document.getElementById('btn-rng-start');
+    btn.disabled = true; btn.textContent = 'Starting...';
+    try {
+      const r = await fetch('/api/review/range', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await r.json();
+      if (!r.ok) {
+        errEl.textContent = data.detail || 'Failed to start range review.';
+        errEl.classList.remove('hidden');
+        return;
+      }
+      close();
+      window.location.href = data.review_id
+        ? `/reviews/${encodeURIComponent(data.review_id)}/live`
+        : '/reviews';
+    } catch (e) {
+      errEl.textContent = String(e);
+      errEl.classList.remove('hidden');
+    } finally {
+      btn.disabled = false; btn.textContent = 'Start range review';
+    }
+  }
+
+  document.getElementById('range-btn').addEventListener('click', window.openRangeReviewModal);
+  document.getElementById('btn-rng-cancel').addEventListener('click', close);
+  document.getElementById('btn-rng-start').addEventListener('click', start);
+  modal.addEventListener('click', e => { if (e.target === modal) close(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && modal.style.display === 'flex') close(); });
 })();
 </script>
 

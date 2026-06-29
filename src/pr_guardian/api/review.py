@@ -6,15 +6,22 @@ import uuid
 from typing import Literal
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
+from pr_guardian.auth.dependencies import require_write
+from pr_guardian.auth.identity import Identity
 from pr_guardian.config.profile_resolver import (
     ProfileResolutionError,
     ResolvedProfileConfig,
     resolve_profile_config,
 )
-from pr_guardian.core.orchestrator import run_review
+from pr_guardian.core.orchestrator import get_storage, run_review
+from pr_guardian.core.range_review import (
+    build_range_diff,
+    build_range_pr,
+    resolve_range,
+)
 from pr_guardian.core.repo_review import (
     DEFAULT_MAX_FILES as REPO_REVIEW_MAX_FILES,
     SelectionMode,
@@ -567,6 +574,228 @@ async def manual_repo_review(req: RepoReviewRequest):
         ref=req.ref,
         selection=req.selection,
         max_files=max_files,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Range review — review a commit range (since commit / since time) like a PR.
+# ---------------------------------------------------------------------------
+
+
+class RangeReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    repo: str
+    platform: str = "github"
+    # Exactly one of since_commit / since must be set.
+    since_commit: str | None = None  # base commit/ref; head is `head` or `branch`
+    since: str | None = None  # ISO-8601 timestamp; resolves base/head from history
+    head: str | None = None  # explicit head ref/SHA (default: branch HEAD)
+    branch: str = "main"
+    pat_name: str | None = None
+
+
+class RangeReviewResponse(BaseModel):
+    status: str
+    repo: str
+    platform: str
+    review_id: str
+    note: str = (
+        "Range review runs the full PR-review pipeline over the base..head diff. "
+        "The verdict is informational — no PR is approved or blocked. Poll "
+        "/api/dashboard/reviews/{review_id} for the decision."
+    )
+
+
+async def _run_range_review_background(
+    repo: str,
+    platform: str,
+    adapter,
+    *,
+    branch: str,
+    since_commit: str | None,
+    since: str | None,
+    head: str | None,
+    review_db_id: uuid.UUID | None,
+    pat_name: str | None = None,
+    resolved_profile: ResolvedProfileConfig | None = None,
+) -> None:
+    """Resolve the range, build the compare diff, and run the review pipeline.
+
+    The DB record is created by the endpoint so the review appears immediately;
+    here we resolve + build + run, marking the record failed on any error so it
+    never hangs in "queued".
+    """
+    import traceback
+    from pr_guardian.core.events import ReviewEvent, event_bus
+    from pr_guardian.core.orchestrator import get_storage
+
+    storage = get_storage()
+    synthetic_id = (str(review_db_id) if review_db_id else uuid.uuid4().hex)[:12]
+
+    try:
+        base_ref, head_ref = await resolve_range(
+            adapter,
+            repo,
+            branch=branch,
+            since_commit=since_commit,
+            since_time=since,
+            head=head,
+        )
+        diff, meta = await build_range_diff(adapter, repo, base_ref, head_ref)
+        log.info("range_review_diff_built", repo=repo, **meta)
+
+        pr = build_range_pr(repo, platform, base_ref, head_ref, branch, synthetic_id)
+
+        if storage and review_db_id:
+            detail = f"{meta['files_changed']} files, {base_ref[:8]}..{head_ref[:8]}"
+            try:
+                await storage.update_review_stage(review_db_id, "range_diff_built", detail)
+            except Exception:
+                pass
+            event_bus.publish(
+                ReviewEvent(
+                    review_id=str(review_db_id),
+                    pr_id=pr.pr_id,
+                    repo=repo,
+                    stage="range_diff_built",
+                    detail=detail,
+                    extra=meta,
+                )
+            )
+
+        await run_review(
+            pr,
+            adapter,
+            service_config=resolved_profile.config if resolved_profile else None,
+            existing_review_db_id=review_db_id,
+            post_comment=False,
+            dismissals=None,
+            diff_override=diff,
+            skip_platform_side_effects=True,
+        )
+    except Exception as e:
+        log.error(
+            "range_review_background_failed",
+            repo=repo,
+            error=str(e),
+            traceback=traceback.format_exc(),
+        )
+        if storage and review_db_id:
+            try:
+                await storage.mark_review_failed(review_db_id, str(e))
+            except Exception:
+                pass
+    finally:
+        if hasattr(adapter, "close"):
+            try:
+                await adapter.close()
+            except Exception:
+                pass
+
+
+@router.post("/review/range", response_model=RangeReviewResponse)
+async def manual_range_review(
+    req: RangeReviewRequest,
+    identity: Identity = Depends(require_write),
+):
+    """Review a commit range (``since_commit`` or ``since`` time) like a PR.
+
+    Builds the ``base..head`` compare diff and runs the full PR-review pipeline
+    (mechanical gates → triage → agents → decision). Returns immediately with a
+    ``review_id``; the verdict lands in the dashboard. Intended for nightly CI
+    sweeps of merged changes — authenticate with a write-scoped API key.
+    """
+    if req.platform not in ("github", "ado"):
+        raise HTTPException(status_code=400, detail="Unsupported platform")
+    if bool(req.since_commit) == bool(req.since):
+        raise HTTPException(
+            status_code=400,
+            detail="Provide exactly one of since_commit or since.",
+        )
+
+    repo = req.repo.strip()
+    if not repo or "/" not in repo:
+        raise HTTPException(
+            status_code=400,
+            detail="Repo must be in owner/repo (GitHub) or project/repo (ADO) format.",
+        )
+
+    adapter: PlatformAdapter
+    try:
+        resolved_profile = await resolve_profile_config(
+            platform=req.platform,
+            repo=repo,
+            connection_name=req.pat_name,
+            require_connection=True,
+        )
+        adapter = await _create_adapter_for_resolution(
+            req.platform,
+            resolved_profile,
+            fallback_pat_name=req.pat_name,
+        )
+    except ProfileResolutionError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    synthetic_id = uuid.uuid4().hex[:12]
+    pr = build_range_pr(
+        repo,
+        req.platform,
+        req.since_commit or req.since or "",
+        req.head or req.branch,
+        req.branch,
+        synthetic_id,
+    )
+
+    storage = get_storage()
+    review_db_id: uuid.UUID | None = None
+    if storage:
+        try:
+            review_db_id = await storage.create_review_record(
+                pr, comment_mode="none", pat_name=req.pat_name
+            )
+            await storage.set_review_provenance(
+                review_db_id,
+                **resolved_profile.review_provenance(review_source="range_review"),
+            )
+            await storage.update_review_stage(review_db_id, "queued", "Resolving commit range")
+        except Exception as e:
+            log.warning("range_review_db_create_failed", error=str(e))
+
+    log.info(
+        "manual_range_review_started",
+        platform=req.platform,
+        repo=repo,
+        branch=req.branch,
+        since_commit=req.since_commit,
+        since=req.since,
+        actor=identity.display_name,
+    )
+
+    asyncio.create_task(
+        _run_range_review_background(
+            repo,
+            req.platform,
+            adapter,
+            branch=req.branch,
+            since_commit=req.since_commit,
+            since=req.since,
+            head=req.head,
+            review_db_id=review_db_id,
+            pat_name=req.pat_name,
+            resolved_profile=resolved_profile,
+        )
+    )
+
+    return RangeReviewResponse(
+        status="queued",
+        repo=repo,
+        platform=req.platform,
+        review_id=str(review_db_id) if review_db_id else "",
     )
 
 

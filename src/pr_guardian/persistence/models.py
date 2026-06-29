@@ -199,6 +199,10 @@ class ScanRow(Base):
 
     time_window_days: Mapped[int] = mapped_column(Integer, default=7)
     staleness_months: Mapped[int] = mapped_column(Integer, default=6)
+    # Commit-range scope for recent_changes scans run over an explicit base..head
+    # range (empty for time-window scans).
+    base_sha: Mapped[str] = mapped_column(String(64), default="")
+    head_sha: Mapped[str] = mapped_column(String(64), default="")
 
     total_findings: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str] = mapped_column(Text, default="")
