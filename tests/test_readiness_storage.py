@@ -165,6 +165,7 @@ sa.Table(
     sa.Column("target_branch", sa.String(256), server_default=""),
     sa.Column("head_commit_sha", sa.String(64), server_default=""),
     sa.Column("pr_url", sa.Text, server_default=""),
+    sa.Column("diff_identity_hash", sa.String(64), server_default=""),
     sa.Column("risk_tier", sa.String(16), server_default=""),
     sa.Column("repo_risk_class", sa.String(16), server_default="standard"),
     sa.Column("trust_tier", sa.String(32), server_default=""),

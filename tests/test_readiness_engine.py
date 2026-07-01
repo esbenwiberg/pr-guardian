@@ -14,8 +14,10 @@ from pr_guardian.core.readiness import (
 )
 from pr_guardian.api.reviews_queue import _candidate_visible
 from pr_guardian.core.readiness_reconciler import reconcile_readiness_once
-from pr_guardian.models.pr import Platform, PlatformPR
+from pr_guardian.models.output import Decision
+from pr_guardian.models.pr import Diff, DiffFile, Platform, PlatformPR
 from pr_guardian.persistence import storage
+from pr_guardian.persistence.models import ReviewRow
 from pr_guardian.platform.ado import ADOAdapter
 from pr_guardian.platform.protocol import PlatformPRMetadata, PlatformReadinessSignal
 from tests.test_readiness_storage import _make_session_factory
@@ -40,13 +42,22 @@ class FakeReadinessAdapter:
         metadata_error: Exception | None = None,
         archmap_found: bool = True,
         archmap_error: Exception | None = None,
+        diff: "Diff | None" = None,
     ):
         self.metadata = metadata or PlatformPRMetadata(head_sha="sha1")
         self.signals = signals or []
         self.metadata_error = metadata_error
         self.archmap_found = archmap_found
         self.archmap_error = archmap_error
+        self.diff = diff
+        self.diff_fetches = 0
         self.statuses: list[tuple[str, str, str]] = []
+
+    async def fetch_diff(self, pr: PlatformPR) -> "Diff":
+        self.diff_fetches += 1
+        if self.diff is None:
+            raise AssertionError("fetch_diff called without a seeded diff")
+        return self.diff
 
     async def fetch_pr_metadata(self, pr: PlatformPR) -> PlatformPRMetadata:
         if self.metadata_error:
@@ -867,5 +878,165 @@ async def test_archmap_transient_error_keeps_waiting_then_soft_times_out():
             assert candidate is not None
             assert candidate["state"] == "reviewing"
             assert candidate["readiness_snapshot"]["archmap"]["warning"] == "archmap_timeout"
+    finally:
+        await engine.dispose()
+
+
+# --- Base-merge carry-forward (issue #97) ------------------------------------
+
+
+def _seed_diff(marker: str = "x") -> Diff:
+    """A small deterministic diff whose identity_hash is stable across head SHAs."""
+    return Diff(
+        files=[
+            DiffFile(path="src/app.py", status="modified", additions=1, deletions=0, patch=marker),
+        ]
+    )
+
+
+async def _seed_completed_review(
+    factory, pr: PlatformPR, *, decision: str, diff_identity_hash: str, head_sha: str = "sha1"
+) -> None:
+    async with factory() as session:
+        session.add(
+            ReviewRow(
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                platform=pr.platform.value,
+                head_commit_sha=head_sha,
+                decision=decision,
+                diff_identity_hash=diff_identity_hash,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+        await session.commit()
+
+
+def test_diff_identity_hash_is_order_independent_and_content_sensitive():
+    a = Diff(
+        files=[
+            DiffFile(path="b.py", status="modified", patch="1"),
+            DiffFile(path="a.py", status="modified", patch="2"),
+        ]
+    )
+    b = Diff(
+        files=[
+            DiffFile(path="a.py", status="modified", patch="2"),
+            DiffFile(path="b.py", status="modified", patch="1"),
+        ]
+    )
+    # File ordering from the platform must not perturb the fingerprint.
+    assert a.identity_hash == b.identity_hash
+    # A changed hunk must change the fingerprint.
+    c = Diff(
+        files=[
+            DiffFile(path="a.py", status="modified", patch="2"),
+            DiffFile(path="b.py", status="modified", patch="CHANGED"),
+        ]
+    )
+    assert c.identity_hash != a.identity_hash
+
+
+async def test_base_merge_carries_prior_auto_approve_forward():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo()
+            diff = _seed_diff()
+            # An earlier SHA (sha1) was already auto-approved with this exact net diff.
+            await _seed_completed_review(
+                factory,
+                _pr(),
+                decision=Decision.AUTO_APPROVE.value,
+                diff_identity_hash=diff.identity_hash,
+            )
+
+            run_review = AsyncMock()
+            with patch("pr_guardian.core.orchestrator.run_review", run_review):
+                # The base-merge produced a new head (sha2) with byte-identical content.
+                adapter = FakeReadinessAdapter(
+                    metadata=PlatformPRMetadata(head_sha="sha2"),
+                    signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+                    diff=diff,
+                )
+                candidate = await create_or_update_candidate_from_pr(
+                    _pr(head_sha="sha2"), adapter=adapter, source="webhook"
+                )
+
+            assert candidate is not None
+            assert candidate["state"] == "reviewed"
+            assert candidate["reason"] == "carried_forward_base_merge"
+            # The green check was posted for the live head, and no agents ran.
+            assert (
+                "guardian/review",
+                "success",
+                "Guardian cleared (unchanged diff carried forward)",
+            ) in adapter.statuses
+            run_review.assert_not_called()
+            carried = candidate["readiness_snapshot"]["carried_forward"]
+            assert carried["prior_head_sha"] == "sha1"
+            assert carried["diff_identity_hash"] == diff.identity_hash
+    finally:
+        await engine.dispose()
+
+
+async def test_base_merge_with_changed_diff_still_reviews():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo()
+            approved = _seed_diff("original")
+            await _seed_completed_review(
+                factory,
+                _pr(),
+                decision=Decision.AUTO_APPROVE.value,
+                diff_identity_hash=approved.identity_hash,
+            )
+
+            # New head introduces genuinely different content — must NOT carry forward.
+            changed = _seed_diff("new-content")
+            adapter = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="sha2"),
+                signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+                diff=changed,
+            )
+            candidate = await create_or_update_candidate_from_pr(
+                _pr(head_sha="sha2"), adapter=adapter, source="webhook"
+            )
+
+            assert candidate is not None
+            assert candidate["state"] == "reviewing"
+            assert adapter.diff_fetches == 1  # diff was checked, hash didn't match
+    finally:
+        await engine.dispose()
+
+
+async def test_prior_human_review_does_not_carry_forward():
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            await _linked_repo()
+            diff = _seed_diff()
+            # Identical diff, but the prior verdict was human_review — scope is
+            # auto-approve only, so it must re-review (and never fetch the diff).
+            await _seed_completed_review(
+                factory,
+                _pr(),
+                decision=Decision.HUMAN_REVIEW.value,
+                diff_identity_hash=diff.identity_hash,
+            )
+
+            adapter = FakeReadinessAdapter(
+                metadata=PlatformPRMetadata(head_sha="sha2"),
+                signals=[PlatformReadinessSignal("ci", "success", "check_run")],
+                diff=diff,
+            )
+            candidate = await create_or_update_candidate_from_pr(
+                _pr(head_sha="sha2"), adapter=adapter, source="webhook"
+            )
+
+            assert candidate is not None
+            assert candidate["state"] == "reviewing"
+            assert adapter.diff_fetches == 0  # short-circuited before the diff fetch
     finally:
         await engine.dispose()

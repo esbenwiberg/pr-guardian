@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Literal
@@ -79,3 +81,23 @@ class Diff:
     @property
     def lines_changed(self) -> int:
         return self.lines_added + self.lines_removed
+
+    @property
+    def identity_hash(self) -> str:
+        """Stable content hash of the PR's *net* changes (three-dot diff vs base).
+
+        GitHub's ``/pulls/{id}/files`` — the source of this ``Diff`` — returns the
+        merge-base→head comparison, so this fingerprints exactly what the PR adds
+        on top of its base, independent of the head SHA. A pure "Update branch"
+        base-merge that introduces no new head-side content and shifts no hunks
+        yields the same hash as the pre-merge head; if the base changed a file the
+        PR also touches (so hunks move), the hash changes and the PR is re-reviewed.
+        Files are sorted so ordering from the platform can't perturb the hash.
+        Used by readiness carry-forward (issue #97).
+        """
+        payload = [
+            [f.path, f.old_path or "", f.status, f.additions, f.deletions, f.patch]
+            for f in sorted(self.files, key=lambda f: (f.path, f.old_path or ""))
+        ]
+        blob = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+        return hashlib.sha256(blob.encode("utf-8")).hexdigest()

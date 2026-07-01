@@ -8,6 +8,8 @@ from typing import Any
 
 import structlog
 
+from pr_guardian.decision.actions import build_review_detail_url
+from pr_guardian.models.output import Decision
 from pr_guardian.models.pr import Platform, PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.platform.factory import create_adapter
@@ -198,14 +200,27 @@ async def _post_review_pending(adapter: PlatformAdapter, pr: PlatformPR) -> None
 
 
 async def _post_review_status(
-    adapter: PlatformAdapter, pr: PlatformPR, state: str, description: str
-) -> None:
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    state: str,
+    description: str,
+    target_url: str = "",
+) -> bool:
     try:
         method = getattr(adapter, "set_review_status", None)
         if method is not None:
-            await method(pr, state, description)
+            try:
+                await method(pr, state, description, target_url=target_url)
+            except TypeError:
+                await method(pr, state, description)
         else:
-            await adapter.set_status(pr, state, description, context="guardian/review")
+            try:
+                await adapter.set_status(
+                    pr, state, description, context="guardian/review", target_url=target_url
+                )
+            except TypeError:
+                await adapter.set_status(pr, state, description, context="guardian/review")
+        return True
     except Exception as exc:
         log.warning(
             "review_status_write_failed",
@@ -214,6 +229,7 @@ async def _post_review_status(
             description=description,
             error=str(exc),
         )
+        return False
 
 
 def _candidate_reviewing_stale(candidate: dict[str, Any], now: datetime) -> bool:
@@ -480,6 +496,11 @@ async def evaluate_candidate(
         else:
             decision = ReadinessDecision("error", "status_write_failed", augmented)
     if decision.ready and start_review:
+        carried = await _try_carry_forward_auto_approve(
+            candidate_id, pr, adapter, source, decision, base_url=base_url
+        )
+        if carried is not None:
+            return carried
         started = await _start_automatic_review(
             candidate_id, pr, adapter, source, decision, base_url=base_url
         )
@@ -543,6 +564,97 @@ async def _remint_for_live_head(
             error=repr(exc),
             error_type=type(exc).__name__,
         )
+
+
+async def _try_carry_forward_auto_approve(
+    candidate_id: uuid.UUID,
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    source: str,
+    decision: ReadinessDecision,
+    *,
+    base_url: str = "",
+) -> dict[str, Any] | None:
+    """Carry a prior auto-approve forward when the live head's net diff is unchanged.
+
+    A pure "Update branch" base-merge produces a new head SHA whose three-dot diff
+    vs base is byte-identical to a SHA Guardian already auto-approved — no new
+    reviewable content. Re-gating from scratch defaults to needs-human-review and,
+    under ``strict`` branch protection, creates an update-branch → re-review
+    treadmill (issue #97). When the live diff's identity hash matches the most
+    recent completed review *and that review auto-approved*, post
+    ``guardian/review=success`` to the live head and mark the candidate reviewed,
+    skipping the agents. Returns the updated candidate on carry-forward, else
+    ``None`` (caller then runs the normal review).
+
+    Scope is deliberately auto-approve only: a prior human/security clearance or a
+    block still re-reviews. The diff is fetched only when a matching auto-approved
+    review exists, so first-time reviews pay no extra platform call.
+    """
+    try:
+        prior = await storage.find_latest_review_for_pr(pr.platform.value, pr.repo, pr.pr_id)
+    except Exception as exc:  # noqa: BLE001
+        log.warning("carry_forward_lookup_failed", pr_id=pr.pr_id, error=repr(exc))
+        return None
+    if prior is None or prior.get("decision") != Decision.AUTO_APPROVE.value:
+        return None
+    prior_hash = prior.get("diff_identity_hash") or ""
+    if not prior_hash:
+        return None
+
+    try:
+        diff = await adapter.fetch_diff(pr)
+    except Exception as exc:  # noqa: BLE001
+        # Can't confirm identity — fall back to a full review rather than
+        # carrying a verdict forward on unverified content.
+        log.warning("carry_forward_diff_fetch_failed", pr_id=pr.pr_id, error=repr(exc))
+        return None
+    if diff.identity_hash != prior_hash:
+        return None
+
+    target_url = build_review_detail_url(prior["id"], base_url) or ""
+    posted = await _post_review_status(
+        adapter,
+        pr,
+        "success",
+        "Guardian cleared (unchanged diff carried forward)",
+        target_url,
+    )
+    if not posted:
+        # The green check is the whole point — if it didn't land, don't mark the
+        # candidate reviewed. Let the reconciler retry (or a full review run).
+        return None
+
+    # Advance the sticky guidance comment to cleared so it doesn't strand at the
+    # "pending" note this candidate just posted while guardian/review is green.
+    await upsert_guidance_comment(adapter, pr, "success", review_url=target_url, storage=storage)
+
+    snapshot = {
+        **decision.snapshot,
+        "carried_forward": {
+            "prior_review_id": prior["id"],
+            "prior_head_sha": prior.get("head_commit_sha"),
+            "diff_identity_hash": prior_hash,
+            "reason": "base_merge_unchanged_diff",
+        },
+    }
+    await storage.record_candidate_transition(
+        candidate_id,
+        to_state="reviewed",
+        source=source,
+        actor="guardian",
+        reason="carried_forward_base_merge",
+        readiness_snapshot=snapshot,
+    )
+    log.info(
+        "review_carried_forward",
+        pr_id=pr.pr_id,
+        repo=pr.repo,
+        head_sha=pr.head_commit_sha,
+        prior_review_id=prior["id"],
+        prior_head_sha=prior.get("head_commit_sha"),
+    )
+    return await storage.get_readiness_candidate_by_id(candidate_id)
 
 
 async def _start_automatic_review(
