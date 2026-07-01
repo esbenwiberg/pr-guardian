@@ -1710,6 +1710,21 @@ async def update_review_pr_metadata(review_id: uuid.UUID, pr: PlatformPR) -> Non
         await session.commit()
 
 
+async def set_review_diff_identity(review_id: uuid.UUID, diff_identity_hash: str) -> None:
+    """Persist the fingerprint of the diff this review actually saw.
+
+    Recorded as soon as the diff is fetched (independent of the eventual verdict)
+    so readiness carry-forward can later match a base-merge's unchanged net diff
+    against an already-cleared SHA (issue #97).
+    """
+    async with async_session() as session:
+        row = await session.get(ReviewRow, review_id)
+        if not row:
+            return
+        row.diff_identity_hash = diff_identity_hash
+        await session.commit()
+
+
 async def append_review_log_entry(review_id: uuid.UUID, entry: dict[str, Any]) -> bool:
     """Append a structured event onto a review's pipeline_log. Returns True on success."""
     async with async_session() as session:
@@ -2870,6 +2885,7 @@ def _review_to_dict(row: ReviewRow) -> dict[str, Any]:
         "target_branch": row.target_branch,
         "head_commit_sha": row.head_commit_sha,
         "pr_url": row.pr_url,
+        "diff_identity_hash": row.diff_identity_hash,
         "risk_tier": row.risk_tier,
         "repo_risk_class": row.repo_risk_class,
         "trust_tier": row.trust_tier,

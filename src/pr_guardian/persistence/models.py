@@ -47,6 +47,10 @@ class ReviewRow(Base):
     target_branch: Mapped[str] = mapped_column(String(256), default="")
     head_commit_sha: Mapped[str] = mapped_column(String(64), default="")
     pr_url: Mapped[str] = mapped_column(Text, default="")
+    # SHA-256 of the PR's net three-dot diff (see Diff.identity_hash). Lets
+    # readiness carry a prior auto-approve forward when a base-merge produces a
+    # new head SHA but byte-identical reviewable content (issue #97).
+    diff_identity_hash: Mapped[str] = mapped_column(String(64), default="", index=True)
 
     risk_tier: Mapped[str] = mapped_column(String(16), default="")
     repo_risk_class: Mapped[str] = mapped_column(String(16), default="standard")

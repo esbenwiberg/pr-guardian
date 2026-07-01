@@ -430,6 +430,16 @@ async def _run_pipeline(
             "warn", "discovery", "No patch content retrieved — agents will have no code to review."
         )
 
+    # Fingerprint the net diff so readiness can carry this verdict forward if a
+    # later base-merge reproduces byte-identical content (issue #97). Synthetic
+    # (diff_override) runs — repo scans, review-local — aren't candidate-driven,
+    # so skip them. ``storage`` is None in non-persist (in-memory) mode.
+    if storage and review_db_id and diff_override is None:
+        try:
+            await storage.set_review_diff_identity(review_db_id, diff.identity_hash)
+        except Exception as e:
+            log.warning("diff_identity_persist_failed", error=str(e))
+
     # Use temp dir as repo_path (in production, would be a shallow clone)
     repo_path = Path(tempfile.mkdtemp(prefix=f"review-{pr.pr_id}-"))
 
