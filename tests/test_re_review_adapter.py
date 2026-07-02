@@ -72,9 +72,24 @@ async def test_ado_re_review_falls_back_to_snapshot_org_url(monkeypatch):
     )
 
 
-async def test_ado_re_review_without_connection_uses_env_fallback(monkeypatch):
-    """Legacy reviews with no recorded connection still fall back to env."""
+async def test_ado_no_connection_no_org_match_uses_env_fallback(monkeypatch):
+    """Legacy reviews with no connection AND no org-matching Connection fall
+    back to env (env-only deployments keep working)."""
     review = _ado_review(None)
+    # An ADO connection exists, but for a different org — must not match.
+    monkeypatch.setattr(
+        storage,
+        "list_connections",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": str(uuid.uuid4()),
+                    "platform": "ado",
+                    "org_url": "https://dev.azure.com/other",
+                }
+            ]
+        ),
+    )
     sentinel = object()
     create_adapter = MagicMock(return_value=sentinel)
     monkeypatch.setattr(factory, "create_adapter", create_adapter)
@@ -85,17 +100,93 @@ async def test_ado_re_review_without_connection_uses_env_fallback(monkeypatch):
     create_adapter.assert_called_once_with("ado")
 
 
-async def test_ado_connection_without_token_falls_back_to_env(monkeypatch):
-    """A connection that yields no token must not silently emit a blank-PAT
-    adapter via the override path — fall through to the env-keyed adapter."""
+async def test_ado_no_connection_resolves_live_connection_by_org_url(monkeypatch):
+    """The fix: a manual/legacy ADO review with connection_id=None resolves a
+    healthy Connection covering its org — NOT the stale ADO_PAT env var."""
+    review = _ado_review(None)  # pr_url org = "org" → https://dev.azure.com/org
+    matching_id = uuid.uuid4()
+    monkeypatch.setattr(
+        storage,
+        "list_connections",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": str(matching_id),
+                    "platform": "ado",
+                    "org_url": "https://dev.azure.com/org",
+                    "health_status": "healthy",
+                    "sync_enabled": True,
+                    "is_default": False,
+                    "updated_at": "2026-07-02T18:23:07+00:00",
+                }
+            ]
+        ),
+    )
+    monkeypatch.setattr(storage, "get_connection_token", AsyncMock(return_value="live-pat"))
+    sentinel = object()
+    create_adapter = MagicMock(return_value=sentinel)
+    monkeypatch.setattr(factory, "create_adapter", create_adapter)
+
+    adapter = await factory.create_adapter_for_review(review, "ado")
+
+    assert adapter is sentinel
+    create_adapter.assert_called_once_with(
+        "ado",
+        token_override="live-pat",
+        org_url_override="https://dev.azure.com/org",
+    )
+
+
+async def test_ado_connection_without_token_resolves_by_org_url(monkeypatch):
+    """A stamped connection that yields no token must not emit a blank-PAT
+    adapter; it now tries org-URL resolution before the env fallback."""
     cid = uuid.uuid4()
     review = _ado_review(str(cid))
-    monkeypatch.setattr(storage, "get_connection_token", AsyncMock(return_value=""))
+    matching_id = uuid.uuid4()
+
+    async def _token(resolved_id):
+        # The stamped (dead) connection has no token; the org-matched one does.
+        return "" if resolved_id == cid else "live-pat"
+
+    monkeypatch.setattr(storage, "get_connection_token", AsyncMock(side_effect=_token))
+    monkeypatch.setattr(
+        storage,
+        "list_connections",
+        AsyncMock(
+            return_value=[
+                {
+                    "id": str(matching_id),
+                    "platform": "ado",
+                    "org_url": "https://dev.azure.com/org",
+                    "health_status": "healthy",
+                }
+            ]
+        ),
+    )
     create_adapter = MagicMock(return_value=object())
     monkeypatch.setattr(factory, "create_adapter", create_adapter)
 
     await factory.create_adapter_for_review(review, "ado")
 
+    create_adapter.assert_called_once_with(
+        "ado", token_override="live-pat", org_url_override="https://dev.azure.com/org"
+    )
+
+
+async def test_ado_storage_failure_during_resolution_falls_back_to_env(monkeypatch):
+    """A storage error while resolving a Connection must degrade to the env
+    fallback, never break adapter creation for the verdict post."""
+    review = _ado_review(None)
+    monkeypatch.setattr(
+        storage, "list_connections", AsyncMock(side_effect=RuntimeError("db down"))
+    )
+    sentinel = object()
+    create_adapter = MagicMock(return_value=sentinel)
+    monkeypatch.setattr(factory, "create_adapter", create_adapter)
+
+    adapter = await factory.create_adapter_for_review(review, "ado")
+
+    assert adapter is sentinel
     create_adapter.assert_called_once_with("ado")
 
 
