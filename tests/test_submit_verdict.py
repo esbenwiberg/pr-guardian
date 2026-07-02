@@ -562,3 +562,38 @@ def test_httpx_status_error_surfaces_platform_body_and_returns_502(
     assert appended[0]["posted"] is False
     assert "VS403072" in appended[0]["error"]
     assert "HTTP 400" in appended[0]["error"]
+
+
+def test_httpx_401_surfaces_clean_message_not_html_body(client, fake_review, monkeypatch):
+    """An expired/unauthorized PAT (401) returns a concise, actionable error —
+    NOT the provider's raw HTML 'Access Denied' page dumped into the UI."""
+    import httpx
+
+    request = httpx.Request(
+        "POST",
+        "https://dev.azure.com/365projectum/Proj/_apis/git/repositories/Repo/pullRequests/42/threads",
+    )
+    html_body = (
+        "﻿<!DOCTYPE html><html><head><title>Access Denied: "
+        "The Personal Access Token used has expired.</title></head></html>"
+    )
+    response = httpx.Response(status_code=401, request=request, text=html_body)
+    err = httpx.HTTPStatusError("401 Unauthorized", request=request, response=response)
+
+    adapter = _make_mock_adapter()
+    adapter.approve_pr = AsyncMock(side_effect=err)
+    appended = _patch_endpoint_deps(monkeypatch, fake_review, adapter)
+
+    resp = client.post(
+        f"/api/dashboard/reviews/{fake_review['id']}/submit-verdict",
+        json={"verdict": "approve", "comment": ""},
+    )
+    assert resp.status_code == 502, resp.text
+    assert len(appended) == 1
+    assert appended[0]["posted"] is False
+    recorded = appended[0]["error"]
+    assert "HTTP 401" in recorded
+    assert "expired or lacks permission" in recorded
+    # The raw HTML page must not leak into the surfaced error.
+    assert "<!DOCTYPE html>" not in recorded
+    assert "<title>" not in recorded

@@ -1191,11 +1191,23 @@ async def submit_verdict(
         # If we got an httpx error, the default str() drops the response body —
         # pull it out so the operator sees the actual platform error code.
         if isinstance(exc, httpx.HTTPStatusError):
-            resp_body = (exc.response.text or "")[:500]
-            error = (
-                f"{type(exc).__name__}: HTTP {exc.response.status_code} "
-                f"on {exc.request.url} — body={resp_body!r}"
-            )
+            status_code = exc.response.status_code
+            if status_code in (401, 403):
+                # Auth/permission failure. The response body is often a provider
+                # HTML error page (e.g. ADO's "Access Denied: PAT expired"), which
+                # is noise in the reviewer UI. Surface a concise, actionable line
+                # instead of dumping the raw page.
+                error = (
+                    f"Platform rejected the credential (HTTP {status_code}): the token is "
+                    f"expired or lacks permission to post to this PR. Refresh the connection's "
+                    f"token in Profiles → Connections and retry."
+                )
+            else:
+                resp_body = (exc.response.text or "")[:500]
+                error = (
+                    f"{type(exc).__name__}: HTTP {status_code} "
+                    f"on {exc.request.url} — body={resp_body!r}"
+                )
         log.error("submit_verdict_failed", review_id=str(review_id), error=error)
 
     # Always record the attempt on the review (even on platform failure) so the
