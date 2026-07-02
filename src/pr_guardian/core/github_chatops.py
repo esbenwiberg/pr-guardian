@@ -7,6 +7,8 @@ from typing import Any
 
 import structlog
 
+from pr_guardian.core.orchestrator import re_decide_after_dismissal
+from pr_guardian.models.output import Decision, ReviewResult
 from pr_guardian.models.pr import PlatformPR
 from pr_guardian.persistence import storage
 from pr_guardian.platform.github import GitHubAdapter
@@ -432,6 +434,7 @@ async def handle_github_review_comment_reply(
 
     # Build an adapter from the originating review's connection for the ack reply.
     adapter: GitHubAdapter | None = None
+    review: dict | None = None
     try:
         review = await storage.get_review(uuid.UUID(parent["review_id"]))
         if review is not None:
@@ -485,16 +488,44 @@ async def handle_github_review_comment_reply(
             except Exception as exc:  # noqa: BLE001
                 log.warning("github_dismiss_upsert_failed", repo=repo, error=str(exc))
 
+        # Re-score immediately: apply the dismissal filter and recompute the verdict
+        # without running LLM agents. A human dismissal is an override.
+        re_result: ReviewResult | None = None
+        if dismissed > 0 and adapter is not None and review is not None:
+            try:
+                live_pr = await adapter.fetch_pr(repo, pr_id)
+                re_result = await re_decide_after_dismissal(
+                    live_pr,
+                    adapter,
+                    review=review,
+                    storage=storage,
+                    base_url=base_url,
+                )
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "github_dismiss_re_decide_failed",
+                    repo=repo,
+                    pr_id=str(pr_id),
+                    error=str(exc),
+                )
+
         note = ""
         if blocked:
             note = (
                 f" {len(blocked)} finding(s) in this comment can't be self-dismissed "
                 "(high/critical or security)."
             )
-        await _reply(
-            f"Guardian: recorded {dismissed} dismissal(s) as `{status}`. They'll be "
-            f"excluded on the next `@guardian re-review`.{note}"
-        )
+        if re_result is not None:
+            verdict_msg = _dismiss_verdict_message(re_result)
+            await _reply(
+                f"Guardian: recorded {dismissed} dismissal(s) as `{status}`."
+                f" Re-scored: {verdict_msg}.{note}"
+            )
+        else:
+            await _reply(
+                f"Guardian: recorded {dismissed} dismissal(s) as `{status}`. They'll be "
+                f"excluded on the next `@guardian re-review`.{note}"
+            )
         await _mark_command(
             command_id,
             "completed",
@@ -512,6 +543,14 @@ async def handle_github_review_comment_reply(
     finally:
         if adapter is not None:
             await adapter.close()
+
+
+def _dismiss_verdict_message(result: ReviewResult) -> str:
+    """Short verdict string for the dismiss ack comment."""
+    if result.decision == Decision.AUTO_APPROVE:
+        return "now ✅ auto-approve"
+    remaining = sum(len(ar.findings) for ar in result.agent_results)
+    return f"still needs review — {remaining} finding(s) remain"
 
 
 async def poll_github_pr_comments(

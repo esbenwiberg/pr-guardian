@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import tempfile
 import uuid
+from collections.abc import Callable
 from fnmatch import fnmatch
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1343,11 +1344,71 @@ async def _run_re_review_pipeline(
             )
         )
 
+    result = await _finalize_from_findings(
+        kept_findings,
+        original_review,
+        review_db_id,
+        total_original=total_original,
+        total_dismissed=total_dismissed,
+        active_findings=active_findings,
+        post_comment=post_comment,
+        adapter=adapter,
+        pr=pr,
+        config=config,
+        base_url=base_url,
+        comment_mode=comment_mode,
+        original_review_id=original_review_id,
+        storage=storage,
+        pipeline_log=pipeline_log,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        total_cost=total_cost,
+        emit=_emit,
+    )
+    all_kept = sum(len(ar.findings) for ar in result.agent_results)
+    log.info(
+        "re_review_complete",
+        pr_id=pr.pr_id,
+        decision=result.decision.value,
+        kept=all_kept,
+        resolved=active_findings - all_kept,
+    )
+    return result
+
+
+async def _finalize_from_findings(
+    kept_findings: list[AgentResult],
+    original_review: dict,
+    review_db_id: uuid.UUID | None,
+    *,
+    total_original: int,
+    total_dismissed: int,
+    active_findings: int,
+    post_comment: bool,
+    adapter: PlatformAdapter,
+    pr: PlatformPR,
+    config: GuardianConfig,
+    base_url: str,
+    comment_mode: str,
+    original_review_id: str,
+    storage: object,
+    pipeline_log: list[dict],
+    total_input_tokens: int = 0,
+    total_output_tokens: int = 0,
+    total_cost: float = 0.0,
+    emit: Callable[..., None],
+) -> ReviewResult:
+    """Shared decide-and-post tail for run_re_review and re_decide_after_dismissal.
+
+    Computes the verdict from surviving agent findings using the shared decision
+    engine (so re-review and dismiss-re-decide can never diverge), builds a
+    ReviewResult, optionally posts results to the platform, and persists.
+    """
     # Compute decision through the shared decision engine so re-review and full
     # review can never diverge. Finding-derived inputs (score, finding reasons)
-    # are recomputed from the re-evaluated findings; structural inputs (trust
-    # tier, sticky triggers, repo risk, risk tier, target branch) are *replayed*
-    # from the original review since re-evaluation does not change them.
+    # are recomputed from the surviving findings; structural inputs (trust tier,
+    # sticky triggers, repo risk, risk tier, target branch) are *replayed* from
+    # the original review since neither re-eval nor dismiss changes them.
     all_kept = sum(len(ar.findings) for ar in kept_findings)
     has_high = any(
         f.severity in (Severity.HIGH, Severity.CRITICAL)
@@ -1449,14 +1510,207 @@ async def _run_re_review_pipeline(
             storage=storage,
             original_review_id=original_review_id,
         )
-    await _save_result(storage, review_db_id, result, _emit)
+    await _save_result(storage, review_db_id, result, emit)
+    return result
 
+
+async def re_decide_after_dismissal(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    *,
+    review: dict,
+    storage: object,
+    config: GuardianConfig | None = None,
+    base_url: str = "",
+    post_comment: bool = True,
+) -> ReviewResult:
+    """Re-score a PR immediately after a comment dismissal, without running LLM agents.
+
+    Applies the active dismissed-signature filter over the stored review's findings,
+    keeps survivors as-is (no re_evaluate), and calls the shared decide-and-post
+    tail. A human dismissal is an override — no agent re-evaluation is needed.
+
+    The live ``pr`` must be fetched from the adapter *before* calling this function
+    so that status is posted to the current head SHA, never the stored one.
+    """
+    if config is None:
+        config = (
+            await resolve_profile_snapshot_config(
+                review.get("profile_snapshot"),
+                review.get("connection_snapshot"),
+            )
+        ).config
+    else:
+        config = await apply_global_settings(config)
+
+    review_db_id: uuid.UUID | None = None
+    if storage:
+        try:
+            review_db_id = await storage.create_review_record(  # type: ignore[attr-defined]
+                pr,
+                comment_mode=review.get("comment_mode", "summary"),
+            )
+            await storage.set_review_provenance(  # type: ignore[attr-defined]
+                review_db_id,
+                profile_id=_uuid_or_none(review.get("profile_id")),
+                profile_snapshot=review.get("profile_snapshot"),
+                connection_id=_uuid_or_none(review.get("connection_id")),
+                connection_snapshot=review.get("connection_snapshot"),
+                repo_link_id=_uuid_or_none(review.get("repo_link_id")),
+                candidate_id=_uuid_or_none(review.get("candidate_id")),
+                review_source="dismiss_re_decide",
+            )
+        except Exception as e:
+            log.warning("dismiss_re_decide_db_create_failed", error=str(e))
+
+    pipeline_log: list[dict] = []
+
+    def emit(stage: str, detail: str = "", **extra: object) -> None:
+        event_bus.publish(
+            ReviewEvent(
+                review_id=str(review_db_id) if review_db_id else "",
+                pr_id=pr.pr_id,
+                repo=pr.repo,
+                stage=stage,
+                detail=detail,
+                extra=extra,
+            )
+        )
+
+    # Apply the same dismissed-signature filter as run_re_review Step 2.
+    dismissed_sigs: set[str] = set()
+    if storage:
+        try:
+            from pr_guardian.persistence.storage import finding_signature
+
+            dismissals = await storage.get_active_dismissals(  # type: ignore[attr-defined]
+                pr.pr_id,
+                pr.repo,
+                pr.platform.value,
+            )
+            for d in dismissals:
+                dismissed_sigs.add(d["signature"])
+        except Exception:
+            pass
+
+    total_original = 0
+    total_dismissed = 0
+    agent_findings: dict[str, list[dict]] = {}
+
+    for agent_result in review.get("agent_results", []):
+        agent_name = agent_result.get("agent_name", "")
+        for f in agent_result.get("findings", []):
+            total_original += 1
+            try:
+                from pr_guardian.persistence.storage import finding_signature
+
+                sig = finding_signature(
+                    f.get("file", ""),
+                    f.get("category", ""),
+                    agent_name,
+                )
+            except Exception:
+                sig = ""
+            if sig and sig in dismissed_sigs:
+                total_dismissed += 1
+                continue
+            agent_findings.setdefault(agent_name, []).append(f)
+
+    active_findings = sum(len(fs) for fs in agent_findings.values())
+    comment_mode = review.get("comment_mode", "summary")
+    original_review_id = review.get("id", "")
+
+    # All findings dismissed → AUTO_APPROVE without agent re-evaluation.
+    if active_findings == 0:
+        result = ReviewResult(
+            pr_id=pr.pr_id,
+            repo=pr.repo,
+            risk_tier=RiskTier.TRIVIAL,
+            repo_risk_class=_parse_risk_class(review.get("repo_risk_class")),
+            review_id=str(review_db_id) if review_db_id else "",
+            mechanical_results=[],
+            mechanical_passed=True,
+            decision=Decision.AUTO_APPROVE,
+            agent_results=[],
+            summary="Re-scored after dismissal: all findings dismissed.",
+            pipeline_log=pipeline_log,
+        )
+        if post_comment:
+            await _post_results(
+                adapter,
+                pr,
+                result,
+                config,
+                base_url=base_url,
+                comment_mode=comment_mode,
+                review_id=review_db_id,
+                storage=storage,
+                original_review_id=original_review_id,
+            )
+        await _save_result(storage, review_db_id, result, emit)
+        log.info(
+            "dismiss_re_decide_complete",
+            pr_id=pr.pr_id,
+            decision=Decision.AUTO_APPROVE.value,
+            kept=0,
+            dismissed=total_dismissed,
+        )
+        return result
+
+    # Survivors kept as-is (no LLM re-evaluation — this is a human override).
+    kept_findings: list[AgentResult] = []
+    for agent_name, findings in agent_findings.items():
+        built: list[Finding] = []
+        for f in findings:
+            built.append(
+                Finding(
+                    severity=Severity(f.get("severity", "low")),
+                    certainty=Certainty(f.get("certainty", "uncertain")),
+                    category=f.get("category", ""),
+                    language=f.get("language", ""),
+                    file=f.get("file", ""),
+                    line=f.get("line"),
+                    description=f.get("description", ""),
+                    suggestion=f.get("suggestion", ""),
+                    cwe=f.get("cwe"),
+                )
+            )
+        verdict = (
+            Verdict.PASS
+            if not built
+            else (
+                Verdict.FLAG_HUMAN
+                if any(f.severity in (Severity.HIGH, Severity.CRITICAL) for f in built)
+                else Verdict.WARN
+            )
+        )
+        kept_findings.append(AgentResult(agent_name=agent_name, verdict=verdict, findings=built))
+
+    result = await _finalize_from_findings(
+        kept_findings,
+        review,
+        review_db_id,
+        total_original=total_original,
+        total_dismissed=total_dismissed,
+        active_findings=active_findings,
+        post_comment=post_comment,
+        adapter=adapter,
+        pr=pr,
+        config=config,
+        base_url=base_url,
+        comment_mode=comment_mode,
+        original_review_id=original_review_id,
+        storage=storage,
+        pipeline_log=pipeline_log,
+        emit=emit,
+    )
+    all_kept = sum(len(ar.findings) for ar in result.agent_results)
     log.info(
-        "re_review_complete",
+        "dismiss_re_decide_complete",
         pr_id=pr.pr_id,
-        decision=decision.value,
+        decision=result.decision.value,
         kept=all_kept,
-        resolved=active_findings - all_kept,
+        dismissed=total_dismissed,
     )
     return result
 
