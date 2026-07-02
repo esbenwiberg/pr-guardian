@@ -1,0 +1,72 @@
+contract_version: 1
+title: "Auto-apply comment dismissals live via a no-LLM re-decide"
+depends_on: []
+scenarios:
+  - id: flip-to-approve
+    given:
+      - "a stored review whose only finding is a low-severity, non-security finding"
+      - "an active comment dismissal recorded for that finding"
+    when:
+      - "the dismiss handler runs the no-LLM re-decide"
+    then:
+      - "the recomputed and stored verdict is AUTO_APPROVE"
+  - id: partial-dismiss-lowers-score
+    given:
+      - "a stored review with two findings and a known pre-dismiss combined score"
+      - "an active comment dismissal recorded for exactly one of the two findings"
+    when:
+      - "the dismiss handler runs the no-LLM re-decide"
+    then:
+      - "the verdict still requires human review"
+      - "the recomputed combined score is strictly lower than the pre-dismiss score"
+  - id: re-decide-skips-llm
+    given:
+      - "a stored review with an active comment dismissal"
+      - "agent re_evaluate and the LLM provider are spied"
+    when:
+      - "the dismiss handler runs the no-LLM re-decide"
+    then:
+      - "no agent re_evaluate call and no LLM provider call is made"
+  - id: status-targets-live-head
+    given:
+      - "a stored review with a stale head_commit_sha"
+      - "a fake adapter whose fetch_pr returns a different, live head SHA"
+    when:
+      - "the dismiss handler runs the no-LLM re-decide and posts status"
+    then:
+      - "the guardian/review status is posted against the live head SHA, not the stored one"
+required_facts:
+  - id: fact-flip-to-approve
+    proves: [flip-to-approve]
+    kind: unit-test
+    artifact:
+      path: tests/test_dismiss_auto_reapply.py
+      change: create
+    command: python -m pytest tests/test_dismiss_auto_reapply.py -k flip_to_approve
+  - id: fact-partial-lowers-score
+    proves: [partial-dismiss-lowers-score]
+    kind: unit-test
+    artifact:
+      path: tests/test_dismiss_auto_reapply.py
+      change: create
+    command: python -m pytest tests/test_dismiss_auto_reapply.py -k partial_dismiss_lowers_score
+  - id: fact-re-decide-skips-llm
+    proves: [re-decide-skips-llm]
+    kind: unit-test
+    artifact:
+      path: tests/test_dismiss_auto_reapply.py
+      change: create
+    command: python -m pytest tests/test_dismiss_auto_reapply.py -k re_decide_skips_llm
+  - id: fact-status-live-head
+    proves: [status-targets-live-head]
+    kind: unit-test
+    artifact:
+      path: tests/test_dismiss_auto_reapply.py
+      change: create
+    command: python -m pytest tests/test_dismiss_auto_reapply.py -k status_targets_live_head
+human_review:
+  - id: live-ack-and-check-refresh
+    covers:
+      - flip-to-approve
+    criterion: "On a real GitHub PR, reply to a Guardian inline finding with `@guardian dismiss false_positive: <reason>` and confirm the guardian/review check refreshes live (no manual re-review) and the ack comment reports the new verdict."
+    reason: "Unit facts prove the verdict recompute and status target; only a live PR confirms the end-to-end webhook→fetch→post round-trip and the human-facing ack wording."
