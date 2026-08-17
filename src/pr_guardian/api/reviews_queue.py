@@ -752,9 +752,17 @@ async def override_candidate_readiness(
     candidate = await storage.get_readiness_candidate_by_id(candidate_id)
     if not candidate:
         raise HTTPException(404, "Readiness candidate not found")
-    previous_snapshot = {
+    previous_state = {
         "state": candidate.get("state"),
         "reason": candidate.get("reason"),
+    }
+    # The audit trail keeps the full prior snapshot; the candidate's own snapshot
+    # must not, because it is spread into the override snapshot below. Embedding
+    # it there would nest a copy of the snapshot inside itself and double the
+    # payload on every override — and this snapshot is persisted on the candidate
+    # and copied into each transition history row.
+    previous_snapshot = {
+        **previous_state,
         "readiness_snapshot": candidate.get("readiness_snapshot") or {},
     }
     actor = identity.email or identity.display_name
@@ -764,7 +772,7 @@ async def override_candidate_readiness(
             "actor": actor,
             "reason": reason,
             "at": _now().isoformat(),
-            "previous": previous_snapshot,
+            "previous": previous_state,
         },
     }
     adapter = await _adapter_from_candidate(candidate)

@@ -665,9 +665,21 @@ class ReadinessCandidateRow(Base):
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
 
+    # Never eager-load this. The history table is append-only and every row
+    # carries a full copy of ``readiness_snapshot``, so it grows without bound
+    # while the candidate row stays small. With ``lazy="selectin"`` every query
+    # that hydrated a candidate silently fired a second, unlimited
+    # ``WHERE candidate_id IN (...)`` against it — and threw the result away,
+    # because nothing reads this attribute. In production that turned the
+    # reconciler's ``limit=100`` scan into a ~1.45 GB fetch that inflated to
+    # ~3.9 GiB of Python objects and OOM-killed the replica against its 4Gi
+    # ceiling about a minute after every boot. Read history through
+    # ``storage.list_candidate_transitions``; ``raise_on_sql`` still permits
+    # access when a caller has explicitly eager-loaded it, and fails loudly
+    # rather than quietly reintroducing the fetch.
     transitions: Mapped[list["ReadinessCandidateTransitionRow"]] = relationship(
         back_populates="candidate",
-        lazy="selectin",
+        lazy="raise_on_sql",
         order_by="ReadinessCandidateTransitionRow.created_at",
     )
 

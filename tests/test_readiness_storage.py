@@ -20,9 +20,11 @@ from pr_guardian.persistence.storage import (
     create_scan_record,
     ensure_default_profile,
     get_readiness_candidate,
+    get_readiness_candidate_by_id,
     get_review,
     get_scan,
     get_synced_pr,
+    list_recoverable_readiness_candidates,
     list_synced_prs,
     list_candidate_transitions,
     record_candidate_transition,
@@ -622,5 +624,169 @@ async def test_list_synced_prs_surfaces_readiness_state():
             )
             items2, _ = await list_synced_prs(platform="github", repo="acme/api")
             assert items2[0]["guardian_readiness_state"] is None
+    finally:
+        await engine.dispose()
+
+
+async def _link_for_candidates():
+    profile = await create_profile("HistSvc", settings={})
+    connection = await create_connection(
+        "HistGH", platform="github", token="tok", health_status="healthy", sync_enabled=True
+    )
+    return await create_repo_link(
+        platform="github",
+        repo_owner="acme",
+        repo_name="hist",
+        repo_url="https://github.com/acme/hist",
+        profile_id=uuid.UUID(profile["id"]),
+        connection_id=uuid.UUID(connection["id"]),
+        auto_review_enabled=True,
+    )
+
+
+async def test_candidate_queries_never_read_transition_history():
+    """Candidate reads must not touch readiness_candidate_transitions.
+
+    The history table is append-only and every row carries a full readiness
+    snapshot. An eager loader on ``ReadinessCandidateRow.transitions`` turned the
+    reconciler's bounded scan into an unbounded fetch of every transition ever
+    recorded, which OOM-killed the replica. No candidate read may emit SQL
+    against that table.
+    """
+    engine, factory = await _make_session_factory()
+    history_reads: list[str] = []
+
+    def _record(conn, cursor, statement, parameters, context, executemany):
+        if "readiness_candidate_transitions" in statement.lower():
+            history_reads.append(statement)
+
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            link = await _link_for_candidates()
+            candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="11",
+                head_sha="sha11",
+            )
+            candidate_id = uuid.UUID(candidate["id"])
+            # Give the candidate history worth loading, so a regression shows up.
+            for reason in ("checks_pending", "checks_failed", "quiet_period"):
+                await record_candidate_transition(
+                    candidate_id,
+                    to_state="waiting",
+                    source="fixture",
+                    reason=reason,
+                    readiness_snapshot={"reason": reason},
+                )
+
+            sa.event.listen(engine.sync_engine, "before_cursor_execute", _record)
+            try:
+                assert await get_readiness_candidate_by_id(candidate_id) is not None
+                recoverable = await list_recoverable_readiness_candidates(limit=100)
+                assert [c["id"] for c in recoverable] == [candidate["id"]]
+                assert (
+                    await get_readiness_candidate(
+                        platform="github", repo="acme/hist", pr_id="11", head_sha="sha11"
+                    )
+                    is not None
+                )
+            finally:
+                sa.event.remove(engine.sync_engine, "before_cursor_execute", _record)
+
+            assert history_reads == []
+    finally:
+        await engine.dispose()
+
+
+async def test_repeat_evaluation_records_no_transition_but_advances_updated_at():
+    """A re-evaluation reaching the same verdict must not append history.
+
+    The reconciler re-evaluates every recoverable candidate on each tick and
+    usually reaches the same state and reason as last time. Appending a
+    snapshot-carrying row for those no-ops grew the history table by roughly a
+    gigabyte a day. ``updated_at`` must still advance: it drives reconciler
+    ordering and the stale-reviewing cutoff.
+    """
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            link = await _link_for_candidates()
+            candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="12",
+                head_sha="sha12",
+            )
+            candidate_id = uuid.UUID(candidate["id"])
+
+            first = await record_candidate_transition(
+                candidate_id,
+                to_state="waiting",
+                source="reconciler",
+                reason="checks_pending",
+                readiness_snapshot={"tick": 1},
+            )
+            assert first is not None
+
+            repeat = await record_candidate_transition(
+                candidate_id,
+                to_state="waiting",
+                source="reconciler",
+                reason="checks_pending",
+                readiness_snapshot={"tick": 2},
+            )
+            assert repeat is None
+
+            transitions = await list_candidate_transitions(candidate_id)
+            assert [t["id"] for t in transitions] == [first["id"]]
+
+            # The candidate itself still carries the newest snapshot and timestamp.
+            loaded = await get_readiness_candidate_by_id(candidate_id)
+            assert loaded is not None
+            assert loaded["readiness_snapshot"] == {"tick": 2}
+            assert loaded["updated_at"] > first["created_at"]
+
+            # A genuine change is still recorded.
+            changed = await record_candidate_transition(
+                candidate_id,
+                to_state="blocked",
+                source="reconciler",
+                reason="checks_failed",
+                readiness_snapshot={"tick": 3},
+            )
+            assert changed is not None
+            assert changed["from_state"] == "waiting"
+            assert [t["id"] for t in await list_candidate_transitions(candidate_id)] == [
+                first["id"],
+                changed["id"],
+            ]
+    finally:
+        await engine.dispose()
+
+
+async def test_list_candidate_transitions_returns_newest_within_limit():
+    """History reads are bounded, keeping the most recent rows in chronological order."""
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            link = await _link_for_candidates()
+            candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="13",
+                head_sha="sha13",
+            )
+            candidate_id = uuid.UUID(candidate["id"])
+            reasons = ["quiet_period", "draft", "checks_pending", "checks_failed", "archmap_wait"]
+            for reason in reasons:
+                await record_candidate_transition(
+                    candidate_id,
+                    to_state="waiting",
+                    source="fixture",
+                    reason=reason,
+                    readiness_snapshot={},
+                )
+
+            assert [t["reason"] for t in await list_candidate_transitions(candidate_id)] == reasons
+            bounded = await list_candidate_transitions(candidate_id, limit=2)
+            assert [t["reason"] for t in bounded] == reasons[-2:]
     finally:
         await engine.dispose()

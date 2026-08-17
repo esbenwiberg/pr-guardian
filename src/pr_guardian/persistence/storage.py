@@ -63,6 +63,8 @@ DEFAULT_REVIEWING_STALE_MINUTES = 15
 # Bounds the reconciler scan to recently-completed reviews so a stranded
 # readiness check self-heals without trawling the entire reviewed backlog.
 DEFAULT_REVIEWED_SYNC_WINDOW_MINUTES = 360
+# Cap on how much append-only candidate history a single read pulls back.
+DEFAULT_TRANSITION_HISTORY_LIMIT = 200
 
 add_excluded_repo = _exclusions.add_excluded_repo
 add_exclusion_rule = _exclusions.add_exclusion_rule
@@ -1396,28 +1398,43 @@ async def record_candidate_transition(
     actor: str = "",
     reason: str = "",
     readiness_snapshot: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
+    """Move a candidate to ``to_state``, appending history only for real changes.
+
+    Returns the recorded transition, or ``None`` when state and reason were both
+    unchanged. The reconciler re-evaluates every recoverable candidate on each
+    tick and most evaluations reach the same verdict as the last one; appending a
+    snapshot-carrying history row for those no-ops grew
+    ``readiness_candidate_transitions`` by roughly a gigabyte a day. The
+    candidate's own snapshot and ``updated_at`` are still refreshed — both are
+    load-bearing, since ``updated_at`` drives reconciler ordering and the
+    stale-reviewing cutoff.
+    """
     if to_state not in READINESS_STATES:
         raise ValueError(f"Invalid readiness candidate state: {to_state}")
     async with async_session() as session:
         candidate = await session.get(ReadinessCandidateRow, candidate_id)
         if candidate is None:
             raise LookupError(f"Readiness candidate not found: {candidate_id}")
-        row = ReadinessCandidateTransitionRow(
-            candidate_id=candidate_id,
-            from_state=candidate.state,
-            to_state=to_state,
-            source=source,
-            actor=actor,
-            reason=reason,
-            readiness_snapshot=readiness_snapshot or {},
-        )
+        row: ReadinessCandidateTransitionRow | None = None
+        if candidate.state != to_state or candidate.reason != reason:
+            row = ReadinessCandidateTransitionRow(
+                candidate_id=candidate_id,
+                from_state=candidate.state,
+                to_state=to_state,
+                source=source,
+                actor=actor,
+                reason=reason,
+                readiness_snapshot=readiness_snapshot or {},
+            )
+            session.add(row)
         candidate.state = to_state
         candidate.reason = reason
         candidate.readiness_snapshot = readiness_snapshot or candidate.readiness_snapshot or {}
         candidate.updated_at = _now()
-        session.add(row)
         await session.commit()
+        if row is None:
+            return None
         await session.refresh(row)
         return _transition_to_dict(row)
 
@@ -1581,16 +1598,25 @@ async def record_profile_audit_event(
         return row.id
 
 
-async def list_candidate_transitions(candidate_id: uuid.UUID) -> list[dict[str, Any]]:
+async def list_candidate_transitions(
+    candidate_id: uuid.UUID, *, limit: int = DEFAULT_TRANSITION_HISTORY_LIMIT
+) -> list[dict[str, Any]]:
+    """The ``limit`` most recent transitions for a candidate, oldest first.
+
+    Bounded on purpose: the table is append-only and each row carries a full
+    readiness snapshot, so a long-lived candidate can accumulate more history
+    than any caller wants to hold in memory.
+    """
     async with async_session() as session:
         rows = (
             await session.scalars(
                 select(ReadinessCandidateTransitionRow)
                 .where(ReadinessCandidateTransitionRow.candidate_id == candidate_id)
-                .order_by(ReadinessCandidateTransitionRow.created_at)
+                .order_by(ReadinessCandidateTransitionRow.created_at.desc())
+                .limit(limit)
             )
         ).all()
-        return [_transition_to_dict(r) for r in rows]
+        return [_transition_to_dict(r) for r in reversed(rows)]
 
 
 async def set_review_provenance(
