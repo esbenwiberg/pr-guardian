@@ -31,6 +31,7 @@ log = structlog.get_logger()
 # single signed bigint; these constants are fixed and unrelated to any app id.
 SYNC_LOCK_KEY = 0x7067_7561_7264_0001  # pr-sync loop
 READINESS_LOCK_KEY = 0x7067_7561_7264_0002  # readiness reconciler loop
+MIGRATION_LOCK_KEY = 0x7067_7561_7264_0003  # startup migration step (see persistence.migrate)
 
 _lock_engine = None
 
