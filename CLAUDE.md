@@ -117,6 +117,15 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
   it — see `core/review_gate.py`.
 - `GUARDIAN_LOG_LEVEL` (default INFO) sets the structlog level. Debug in prod is
   expensive: stdout writes are synchronous, so a flood stalls the event loop.
+- `GUARDIAN_STALL_WATCHDOG_SECONDS` (default 15, `0` disables) dumps every thread's
+  Python stack to stderr when the event loop fails to tick for that long. The
+  timer lives in a C thread, so it fires *during* a stall — the one window where
+  ordinary logging cannot run. See `core/stall_watchdog.py`.
+- `GUARDIAN_PR_SYNC_ENABLED` / `GUARDIAN_READINESS_RECONCILER_ENABLED` (default on)
+  switch off a background loop at the deployment. Both are recoverable pollers, so
+  disabling one costs freshness, not correctness; webhook-driven reviews keep
+  working. Use when a loop is destabilising a replica and you need service back
+  without a rebuild.
 - At least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` must be set for agent
   calls. Mechanical gates work without either.
 - **Self-validation without keys/GitHub:** set `GUARDIAN_LLM_PROVIDER=fake`

@@ -62,6 +62,16 @@ _configure_logging()
 log = structlog.get_logger()
 
 
+def _loop_enabled(var: str) -> bool:
+    """Background loops default to on; an explicit falsey value switches one off.
+
+    Default-on because the normal deployment sets nothing and must keep polling.
+    Only the listed values disable, so a typo leaves the loop running rather than
+    silently stopping the safety net that mints readiness candidates.
+    """
+    return os.environ.get(var, "1").strip().lower() not in ("0", "false", "no", "off")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown: initialise DB, clean up on exit."""
@@ -86,16 +96,33 @@ async def lifespan(app: FastAPI):
         from pr_guardian.core.event_bridge import bridge as event_bridge
 
         await event_bridge.start()
-        # Start PR sync background loop
         import asyncio
         from pr_guardian.core.pr_sync import pr_sync_loop
         from pr_guardian.core.readiness_reconciler import readiness_reconciler_loop
+        from pr_guardian.core.stall_watchdog import stall_watchdog_loop
 
-        sync_task = asyncio.create_task(pr_sync_loop())
-        readiness_task = asyncio.create_task(readiness_reconciler_loop())
+        tasks: list[asyncio.Task] = [asyncio.create_task(stall_watchdog_loop())]
+        # Each background loop can be switched off independently at the
+        # deployment. Both are pollers whose work is idempotent and recoverable,
+        # so running without one degrades freshness rather than correctness —
+        # and when a loop is driving a replica into a stall, being able to
+        # restore service with a restart instead of a rebuild is the difference
+        # between a short outage and a long one. Webhook-driven reviews are
+        # unaffected by either switch.
+        if _loop_enabled("GUARDIAN_PR_SYNC_ENABLED"):
+            tasks.append(asyncio.create_task(pr_sync_loop()))
+        else:
+            log.warning("pr_sync_loop_disabled", reason="GUARDIAN_PR_SYNC_ENABLED")
+        if _loop_enabled("GUARDIAN_READINESS_RECONCILER_ENABLED"):
+            tasks.append(asyncio.create_task(readiness_reconciler_loop()))
+        else:
+            log.warning(
+                "readiness_reconciler_loop_disabled",
+                reason="GUARDIAN_READINESS_RECONCILER_ENABLED",
+            )
         yield
         await event_bridge.stop()
-        for task in (sync_task, readiness_task):
+        for task in tasks:
             task.cancel()
             try:
                 await task
