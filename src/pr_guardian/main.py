@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import os
+import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,13 +23,41 @@ from pr_guardian.api.scans import router as scans_router
 from pr_guardian.api.webhooks import router as webhooks_router
 from pr_guardian.auth.identity import IdentityMiddleware
 
-structlog.configure(
-    processors=[
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.add_log_level,
-        structlog.dev.ConsoleRenderer(),
-    ],
-)
+
+def _configure_logging() -> None:
+    """Configure structlog for the hosted process.
+
+    Two things matter here beyond formatting, both learned from a production
+    incident where readiness probes timed out against ``/api/health`` — an
+    endpoint that returns a static dict and touches nothing. The only way that
+    times out is a blocked event loop, and unfiltered debug logging was a
+    contributor: writes to stdout are synchronous, so once the platform's log
+    collector applies backpressure every log call stalls the loop that is
+    supposed to be answering the probe.
+
+    * **Level filtering.** Without a ``wrapper_class`` structlog emits every
+      level, so per-repo ``log.debug`` calls from the PR-sync walk were being
+      rendered and written in production (tens of thousands of lines a day).
+      Default to INFO; ``GUARDIAN_LOG_LEVEL`` re-enables debug when explicitly
+      needed.
+    * **No ANSI when not a terminal.** ``ConsoleRenderer`` colourises by default,
+      which is noise in a log sink and actively breaks querying: the escape codes
+      around a token defeat Log Analytics term tokenisation, so ``Log_s has
+      'pr_sync_start'`` silently matches nothing.
+    """
+    level_name = os.environ.get("GUARDIAN_LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    structlog.configure(
+        processors=[
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.add_log_level,
+            structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty()),
+        ],
+        wrapper_class=structlog.make_filtering_bound_logger(level),
+    )
+
+
+_configure_logging()
 
 log = structlog.get_logger()
 
