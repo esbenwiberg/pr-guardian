@@ -107,9 +107,14 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
         {
           name: 'pr-guardian'
           image: '${registryLoginServer}/pr-guardian:${imageTag}'
+          // Matches what is actually deployed. 2 vCPU / 4Gi is the per-replica
+          // ceiling for a Consumption-only environment (no workload profiles), so
+          // this cannot be raised without building a new environment and migrating
+          // the app — the environment type cannot be converted in place. Steady
+          // usage is ~0.4Gi; the headroom is for transient sync spikes.
           resources: {
-            cpu: json('1.0')
-            memory: '2Gi'
+            cpu: json('2.0')
+            memory: '4Gi'
           }
           env: [
             {
@@ -133,15 +138,37 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               value: empty(guardianBaseUrl) ? 'https://${prefix}-app.${environment.properties.defaultDomain}' : guardianBaseUrl
             }
           ]
+          // Every probe sets timeoutSeconds explicitly. Container Apps defaults it
+          // to *one second* when omitted, and that default took the service down:
+          // /api/health could not answer within 1s while the app was busy, so
+          // replicas never went ready (hundreds of readiness timeouts per day),
+          // ACA reported "Persistent Failure to start container" and restarted
+          // them, and the restart re-triggered the same work. Do not remove these.
           probes: [
+            {
+              // Startup gates the other two — neither liveness nor readiness runs
+              // until this succeeds. The generous budget (30 x 10s) covers
+              // migrations and a cold first request without a slow boot ever being
+              // misread as a dead container.
+              type: 'Startup'
+              httpGet: {
+                path: '/api/health'
+                port: 8000
+              }
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              timeoutSeconds: 10
+              failureThreshold: 30
+            }
             {
               type: 'Liveness'
               httpGet: {
                 path: '/api/health'
                 port: 8000
               }
-              initialDelaySeconds: 15
+              initialDelaySeconds: 30
               periodSeconds: 30
+              timeoutSeconds: 10
               failureThreshold: 5
             }
             {
@@ -152,6 +179,7 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
               }
               initialDelaySeconds: 10
               periodSeconds: 10
+              timeoutSeconds: 10
               failureThreshold: 5
             }
           ]
@@ -159,13 +187,20 @@ resource containerApp 'Microsoft.App/containerApps@2024-03-01' = {
       ]
       scale: {
         minReplicas: 1
-        maxReplicas: 5
+        // Background loops are leader-elected, so extra replicas add no throughput
+        // for sync/reconcile work — they only multiply restart storms and API
+        // traffic. Two is enough to keep ingress served through a rolling deploy.
+        maxReplicas: 2
         rules: [
           {
             name: 'http-scaling'
             http: {
               metadata: {
-                concurrentRequests: '3'
+                // Not 3. The dashboard holds an SSE stream open per open tab
+                // (/events), so a handful of ordinary users pinned concurrency
+                // above a low threshold permanently and scaled the app out to
+                // maxReplicas, multiplying the restart storm.
+                concurrentRequests: '50'
               }
             }
           }

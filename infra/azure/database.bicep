@@ -9,9 +9,14 @@ param adminPassword string
 resource server 'Microsoft.DBforPostgreSQL/flexibleServers@2023-12-01-preview' = {
   name: '${prefix}-pg'
   location: location
+  // Matches the deployed server. Not Burstable: a B-series server runs on CPU
+  // credits, and once they are exhausted it throttles hard, which is
+  // indistinguishable from an application stall while you are debugging one.
+  // Re-applying this template with the old B1ms values would silently downgrade
+  // production.
   sku: {
-    name: 'Standard_B1ms'
-    tier: 'Burstable'
+    name: 'Standard_D2ds_v5'
+    tier: 'GeneralPurpose'
   }
   properties: {
     version: '16'
