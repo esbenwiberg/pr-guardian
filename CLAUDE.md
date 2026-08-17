@@ -110,6 +110,13 @@ Each agent gets the same `ReviewContext`, returns an `AgentResult` with
   `alembic upgrade head`, then run `python scripts/dev_seed.py` for seeded
   dashboard data.
 - `GUARDIAN_DEV_ADMIN=1` bypasses admin auth — dev only.
+- `GUARDIAN_MAX_CONCURRENT_REVIEWS` (default 2) bounds how many review pipelines
+  run at once in a process. Every trigger detaches reviews with `create_task`, so
+  without this a single readiness-reconcile tick could start ~100 pipelines and
+  exhaust a 4Gi replica. Raise it only alongside a memory ceiling that can take
+  it — see `core/review_gate.py`.
+- `GUARDIAN_LOG_LEVEL` (default INFO) sets the structlog level. Debug in prod is
+  expensive: stdout writes are synchronous, so a flood stalls the event loop.
 - At least one of `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` must be set for agent
   calls. Mechanical gates work without either.
 - **Self-validation without keys/GitHub:** set `GUARDIAN_LLM_PROVIDER=fake`

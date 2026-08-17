@@ -13,8 +13,18 @@ log = structlog.get_logger()
 
 
 async def reconcile_readiness_once(*, limit: int = 100) -> int:
-    """Re-read recoverable candidates from their live link/Profile/Connection."""
+    """Re-read recoverable candidates from their live link/Profile/Connection.
+
+    Logs the batch size even when everything succeeds. This tick is the most
+    expensive thing the process does — a candidate that evaluates as ready hands
+    off a full review — and it used to emit nothing at all on the happy path, so
+    when it drove the replica into a memory-pressure stall there was no log line
+    tying the spike to it. A count per tick is cheap and is the difference between
+    "something allocates GBs a minute after boot" and knowing what.
+    """
     candidates = await storage.list_recoverable_readiness_candidates(limit=limit)
+    if candidates:
+        log.info("readiness_reconcile_start", candidates=len(candidates), limit=limit)
     count = 0
     for candidate in candidates:
         try:
@@ -40,6 +50,8 @@ async def reconcile_readiness_once(*, limit: int = 100) -> int:
                 error=repr(exc),
                 error_type=type(exc).__name__,
             )
+    if candidates:
+        log.info("readiness_reconcile_done", candidates=len(candidates), reconciled=count)
     return count
 
 

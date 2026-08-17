@@ -25,6 +25,7 @@ from pr_guardian.config.profile_resolver import (
 )
 from pr_guardian.config.schema import GuardianConfig
 from pr_guardian.core.events import ReviewEvent, event_bus
+from pr_guardian.core.review_gate import review_slot
 from pr_guardian.decision.actions import (
     SEVERITY_ORDER,
     SUMMARY_MARKER,
@@ -188,6 +189,48 @@ async def _load_archmap_context(
 
 
 async def run_review(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    service_config: GuardianConfig | None = None,
+    *,
+    existing_review_db_id: uuid.UUID | None = None,
+    post_comment: bool = True,
+    base_url: str = "",
+    dismissals: list[dict] | None = None,
+    diff_override=None,
+    skip_platform_side_effects: bool = False,
+    comment_mode: str = "summary",
+    pat_name: str | None = None,
+    manual_comment_override: bool = False,
+    persist: bool = True,
+) -> ReviewResult:
+    """Run the review pipeline, bounded by the process-wide review gate.
+
+    The gate is here and not at the callers because all of them detach their work
+    with ``create_task`` and none of them counted the result — see
+    ``core/review_gate.py`` for the incident this prevents. Waiting happens before
+    any diff is fetched, so a queued review holds a ``PlatformPR`` and an adapter,
+    not a working set.
+    """
+    async with review_slot(label="run_review", pr_id=str(pr.pr_id), repo=pr.repo):
+        return await _run_review_inner(
+            pr,
+            adapter,
+            service_config,
+            existing_review_db_id=existing_review_db_id,
+            post_comment=post_comment,
+            base_url=base_url,
+            dismissals=dismissals,
+            diff_override=diff_override,
+            skip_platform_side_effects=skip_platform_side_effects,
+            comment_mode=comment_mode,
+            pat_name=pat_name,
+            manual_comment_override=manual_comment_override,
+            persist=persist,
+        )
+
+
+async def _run_review_inner(
     pr: PlatformPR,
     adapter: PlatformAdapter,
     service_config: GuardianConfig | None = None,
@@ -938,6 +981,32 @@ async def _run_pipeline(
 
 
 async def run_re_review(
+    pr: PlatformPR,
+    adapter: PlatformAdapter,
+    original_review: dict,
+    service_config: GuardianConfig | None = None,
+    *,
+    post_comment: bool = True,
+    base_url: str = "",
+) -> ReviewResult:
+    """Bounded entry point for the focused re-review — see ``run_review``.
+
+    Cheaper than a full pipeline but not cheap: it still fetches an incremental
+    diff and calls agents, and ChatOps detaches it per comment, so it shares the
+    same gate rather than being able to run unbounded alongside full reviews.
+    """
+    async with review_slot(label="run_re_review", pr_id=str(pr.pr_id), repo=pr.repo):
+        return await _run_re_review_inner(
+            pr,
+            adapter,
+            original_review,
+            service_config,
+            post_comment=post_comment,
+            base_url=base_url,
+        )
+
+
+async def _run_re_review_inner(
     pr: PlatformPR,
     adapter: PlatformAdapter,
     original_review: dict,
