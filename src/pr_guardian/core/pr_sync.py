@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import random
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -26,6 +27,11 @@ _MERGED_RETENTION_DAYS = 7
 # all-projects sync (GitHub API + DB pressure + the boot-sync OOM ceiling) at night.
 _WORK_HOURS_INTERVAL_SECONDS = 5 * 60
 _OFF_HOURS_INTERVAL_SECONDS = 10 * 60
+
+# Random spread applied to every sleep so replicas de-phase instead of converging
+# on the same tick. Without it, replicas that restart together stay in lockstep and
+# their passes bunch up behind the leader lock.
+_INTERVAL_JITTER_SECONDS = 60
 
 
 def _is_work_hours() -> bool:
@@ -546,10 +552,27 @@ async def pr_sync_loop() -> None:
     every replica runs this loop, but uncoordinated parallel passes multiply
     API traffic and DB connection pressure for no benefit (the work is
     idempotent). Followers skip the pass.
+
+    Sleeps *before* its first pass, never after boot. A full pass walks every
+    project on every connection, so it is the most expensive thing the process
+    does; running it the instant a replica boots turned a crash loop into a
+    self-sustaining one — OOM, restart, immediate full sync, OOM — and with
+    several replicas cycling out of phase the effective interval collapsed from
+    minutes to seconds. The leader lock cannot help there: it serialises
+    concurrent passes but does nothing about restart-driven frequency. Sleeping
+    first means an unstable replica never reaches a pass, which is the correct
+    behaviour — a replica that cannot stay alive for a full interval has no
+    business running the heaviest job in the system.
     """
     from pr_guardian.persistence.leader_lock import SYNC_LOCK_KEY, leader_lock
 
     while True:
+        interval = (
+            _WORK_HOURS_INTERVAL_SECONDS if _is_work_hours() else _OFF_HOURS_INTERVAL_SECONDS
+        )
+        delay = interval + random.uniform(0, _INTERVAL_JITTER_SECONDS)
+        log.debug("pr_sync_sleeping", seconds=round(delay, 1))
+        await asyncio.sleep(delay)
         try:
             async with leader_lock(SYNC_LOCK_KEY, label="pr_sync") as is_leader:
                 if is_leader:
@@ -558,8 +581,3 @@ async def pr_sync_loop() -> None:
                     log.debug("pr_sync_skipped_not_leader")
         except Exception as exc:
             log.error("pr_sync_loop_error", error=str(exc))
-        interval = (
-            _WORK_HOURS_INTERVAL_SECONDS if _is_work_hours() else _OFF_HOURS_INTERVAL_SECONDS
-        )
-        log.debug("pr_sync_sleeping", seconds=interval)
-        await asyncio.sleep(interval)
