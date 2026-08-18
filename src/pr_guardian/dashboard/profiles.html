@@ -1185,10 +1185,13 @@
       const platform = connection?.platform || data.get('platform');
       const payload = {
         name: data.get('name'),
-        platform,
         description: data.get('description') || '',
         sync_enabled: Boolean(data.get('sync_enabled')),
       };
+      // Platform is immutable once a Connection exists: the update endpoint reads it
+      // from the stored row and forbids unknown body fields, so echoing it back
+      // rejected every edit with 422 extra_forbidden. Send it only on create.
+      if (!connection) payload.platform = platform;
       if (platform === 'github') {
         payload.app_id = String(data.get('app_id') || '').trim();
         payload.installation_id = String(data.get('installation_id') || '').trim();

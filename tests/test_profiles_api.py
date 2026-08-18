@@ -589,3 +589,70 @@ def test_normalize_ado_org_url_rejects_bad_hosts_and_paths():
     # Non-HTTPS / SSRF-style input.
     with pytest.raises(HTTPException):
         _normalize_ado_org_url("http://169.254.169.254/latest")
+
+
+def test_connection_update_accepts_the_payload_the_dashboard_sends():
+    """Editing an existing Connection must not be rejected as extra_forbidden.
+
+    The Connections form once built one payload for both create and update, so
+    every edit echoed back an immutable ``platform`` field. ``ConnectionUpdatePayload``
+    forbids extras, so the update endpoint 422'd on all of them — no token,
+    name, or private key could be changed from the UI on any platform. This
+    pins the field set the dashboard sends on the update path.
+    """
+    engine, factory = asyncio.run(_make_session_factory())
+    try:
+
+        async def seed_manager() -> None:
+            with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+                await storage.add_profile_manager("manager@example.com")
+
+        asyncio.run(seed_manager())
+        with (
+            patch("pr_guardian.auth.identity._db_available", return_value=True),
+            patch("pr_guardian.persistence.storage.async_session", lambda: factory()),
+            patch("pr_guardian.api.profiles._probe_connection", _healthy_probe),
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
+            created = client.post(
+                "/api/profiles/connections",
+                headers=_manager_headers(),
+                json={
+                    "name": "ADO Prod",
+                    "platform": "ado",
+                    "org_url": "https://dev.azure.com/contoso",
+                    "token": "original-token",
+                    "description": "",
+                    "sync_enabled": False,
+                },
+            )
+            assert created.status_code == 201, created.text
+            connection_id = created.json()["id"]
+
+            # Exactly what the dashboard submits when editing an ADO connection:
+            # no `platform`, since it is immutable and derived server-side.
+            rotated = client.patch(
+                f"/api/profiles/connections/{connection_id}",
+                headers=_manager_headers(),
+                json={
+                    "name": "ADO Prod",
+                    "description": "",
+                    "sync_enabled": True,
+                    "org_url": "https://dev.azure.com/contoso",
+                    "token": "rotated-token",
+                },
+            )
+            assert rotated.status_code == 200, rotated.text
+            assert rotated.json()["health_status"] == "healthy"
+
+            # Sending `platform` back is still refused — the field is immutable,
+            # and silently ignoring it would hide a caller's mistaken intent.
+            echoed = client.patch(
+                f"/api/profiles/connections/{connection_id}",
+                headers=_manager_headers(),
+                json={"name": "ADO Prod", "platform": "ado"},
+            )
+            assert echoed.status_code == 422
+            assert "extra_forbidden" in echoed.text
+    finally:
+        asyncio.run(engine.dispose())
