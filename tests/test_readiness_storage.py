@@ -858,3 +858,90 @@ async def test_access_error_candidates_are_rate_limited_not_stranded():
             assert fresh["id"] in {c["id"] for c in widened}
     finally:
         await engine.dispose()
+
+
+async def test_ado_candidate_repo_identifier_never_carries_an_owner():
+    """An ADO candidate must address its repo the way the ADO REST API does.
+
+    This is the bug that cost 19.8 GB/day of logs and stranded 115 PRs.
+    ``create_readiness_candidate`` joined ``repo_owner`` and ``repo_name``
+    unconditionally — the GitHub convention. ADO reaches a repo as
+    ``{org}/{project}/_apis/git/repositories/{repo}``, so an owner in the
+    identifier yields ``.../repositories/Owner/Repo/pullRequests/1``: two path
+    segments where the route allows one. ADO 404s, the reconciler reads that as
+    a recoverable platform error, and it retries forever against credentials
+    that were never broken.
+
+    The link is deliberately seeded *with* an owner — the dashboard hides that
+    input for ADO without clearing it, so a value left over from a GitHub link
+    really does reach storage. Seeding a clean link would assert nothing.
+    """
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            profile = await create_profile("AdoSvc", settings={})
+            connection = await create_connection(
+                "AdoConn",
+                platform="ado",
+                token="fixture-value-ado-identifier",
+                org_url="https://dev.azure.com/example",
+                health_status="healthy",
+            )
+            link = await create_repo_link(
+                platform="ado",
+                org_url="https://dev.azure.com/example",
+                project="TeamPlanner - V3",
+                repo_owner="Esben",
+                repo_name="TeamPlanner",
+                repo_url="https://dev.azure.com/example/_git/TeamPlanner",
+                profile_id=uuid.UUID(profile["id"]),
+                connection_id=uuid.UUID(connection["id"]),
+                auto_review_enabled=True,
+            )
+            candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="14332",
+                head_sha="abc123",
+            )
+
+            assert candidate["repo"] == "TeamPlanner"
+            assert "/" not in candidate["repo"]
+            # The split columns still carry the raw link values; only the
+            # addressable identifier is platform-shaped.
+            assert candidate["repo_name"] == "TeamPlanner"
+            assert candidate["project"] == "TeamPlanner - V3"
+
+            # The identifier is also the candidate lookup key, so a mismatch here
+            # would silently mint duplicates on every poll.
+            found = await get_readiness_candidate(
+                platform="ado",
+                org_url="https://dev.azure.com/example",
+                project="TeamPlanner - V3",
+                repo="TeamPlanner",
+                pr_id="14332",
+                head_sha="abc123",
+            )
+            assert found is not None
+            assert found["id"] == candidate["id"]
+    finally:
+        await engine.dispose()
+
+
+async def test_github_candidate_repo_identifier_keeps_its_owner():
+    """The ADO fix must not strip the owner GitHub genuinely needs.
+
+    GitHub routes are ``/repos/{owner}/{repo}``; dropping the owner there would
+    trade one platform's 404s for the other's.
+    """
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            link = await _link_for_candidates()
+            candidate = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="7",
+                head_sha="sha7",
+            )
+            assert candidate["repo"] == "acme/hist"
+    finally:
+        await engine.dispose()

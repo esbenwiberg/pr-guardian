@@ -1226,7 +1226,16 @@
 
   function applyRepoLinkPlatform(platform) {
     const isGitHub = platform === 'github';
-    document.getElementById('repo-link-field-owner').style.display = isGitHub ? '' : 'none';
+    const ownerField = document.getElementById('repo-link-field-owner');
+    ownerField.style.display = isGitHub ? '' : 'none';
+    if (!isGitHub) {
+      // Hiding the field does not clear it, and the submit handler reads the
+      // form regardless — so an owner typed for GitHub rides along when the
+      // platform is switched to ADO. ADO repos have no owner, and one that
+      // sneaks through addresses the repo as "Owner/Repo", which ADO 404s.
+      const ownerInput = ownerField.querySelector('input[name="repo_owner"]');
+      if (ownerInput) ownerInput.value = '';
+    }
     document.getElementById('repo-link-field-org-url').style.display = isGitHub ? 'none' : '';
     document.getElementById('repo-link-field-project').style.display = isGitHub ? 'none' : '';
     document.getElementById('repo-link-review-check').style.display = isGitHub ? '' : 'none';
