@@ -1040,3 +1040,57 @@ async def test_prior_human_review_does_not_carry_forward():
             assert adapter.diff_fetches == 0  # short-circuited before the diff fetch
     finally:
         await engine.dispose()
+
+
+async def test_adapter_construction_failure_lands_under_the_access_error_cooldown():
+    """A Connection that cannot build an adapter must back off like any other access error.
+
+    ``_adapter_for_candidate`` runs before ``evaluate_readiness``, which is the
+    only thing that produces a decision. A failure there used to propagate
+    straight to the reconciler's outer ``except`` with the candidate's state,
+    reason and ``updated_at`` all untouched — so the access-error cooldown, which
+    keys on ``updated_at``, could never see it. In production one legacy-PAT
+    GitHub Connection on the App-only path re-raised on *every* tick indefinitely
+    while genuinely unreachable PRs correctly backed off.
+
+    Asserting the reason alone would not catch a regression: the load-bearing
+    claim is that the candidate stops being re-selected.
+    """
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            _, _, link = await _linked_repo()
+            candidate = await storage.create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]),
+                pr_id="42",
+                head_sha="sha1",
+            )
+            boom = ValueError(
+                "Connection 42b1e3ab is not a GitHub App connection (auth_kind=None)"
+            )
+
+            with patch("pr_guardian.core.readiness._adapter_for_candidate", side_effect=boom):
+                # Counted as reconciled, not failed: the candidate *was* handled —
+                # its state was recorded and its cooldown started. Escaping to the
+                # reconciler's outer `except` is precisely the old bug.
+                assert await reconcile_readiness_once() == 1
+
+            updated = await storage.get_readiness_candidate_by_id(uuid.UUID(candidate["id"]))
+            assert updated is not None
+            assert updated["state"] == "error"
+            assert updated["reason"] == "platform_access_error"
+            assert "adapter_error" in (updated["readiness_snapshot"] or {})
+
+            # The actual fix: it is now on the cooldown clock instead of being
+            # re-selected on every tick forever.
+            recoverable = await storage.list_recoverable_readiness_candidates(limit=100)
+            assert [c["id"] for c in recoverable] == []
+
+            # ...and it still recovers once the cooldown lapses, so a repaired
+            # Connection is picked up without operator intervention.
+            cooled = await storage.list_recoverable_readiness_candidates(
+                limit=100, access_error_retry_minutes=0
+            )
+            assert candidate["id"] in [c["id"] for c in cooled]
+    finally:
+        await engine.dispose()
