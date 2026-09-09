@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import uuid
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -656,3 +658,53 @@ def test_connection_update_accepts_the_payload_the_dashboard_sends():
             assert "extra_forbidden" in echoed.text
     finally:
         asyncio.run(engine.dispose())
+
+
+def test_ado_repo_link_payload_drops_an_owner_it_was_handed():
+    """ADO repo links must not persist a repo_owner, whatever the client sends.
+
+    The dashboard hides the owner input for non-GitHub platforms but does not
+    clear it, and the submit handler reads the whole form — so an owner typed
+    for a GitHub link rides along when the platform is switched to ADO. That is
+    how production ended up addressing a repo as ``Owner/Repo``, which ADO 404s
+    forever.
+
+    Dropped rather than rejected on purpose: the user cannot see the hidden field
+    to correct a 400.
+    """
+    from pr_guardian.api.profiles import RepoLinkPayload
+
+    payload = RepoLinkPayload(
+        platform="ado",
+        org_url="https://dev.azure.com/example",
+        project="TeamPlanner - V3",
+        repo_owner="Esben",
+        repo_name="TeamPlanner",
+        profile_id=uuid.uuid4(),
+        connection_id=uuid.uuid4(),
+    )
+    assert payload.repo_owner == ""
+    assert payload.repo_name == "TeamPlanner"
+
+
+def test_github_repo_link_payload_still_requires_an_owner():
+    """The ADO carve-out must not weaken GitHub, where the owner is part of the route."""
+    from pr_guardian.api.profiles import RepoLinkPayload
+
+    payload = RepoLinkPayload(
+        platform="github",
+        repo_owner="octo",
+        repo_name="service",
+        profile_id=uuid.uuid4(),
+        connection_id=uuid.uuid4(),
+    )
+    assert payload.repo_owner == "octo"
+
+    with pytest.raises(HTTPException) as excinfo:
+        RepoLinkPayload(
+            platform="github",
+            repo_name="service",
+            profile_id=uuid.uuid4(),
+            connection_id=uuid.uuid4(),
+        )
+    assert excinfo.value.status_code == 400

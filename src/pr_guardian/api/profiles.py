@@ -9,6 +9,7 @@ from typing import Any, Literal
 from urllib.parse import urlparse
 
 import httpx
+import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
@@ -17,6 +18,8 @@ from pr_guardian.auth.dependencies import require_human_admin, require_profile_m
 from pr_guardian.auth.identity import Identity
 from pr_guardian.persistence import storage
 from pr_guardian.platform.protocol import GateResult
+
+log = structlog.get_logger()
 
 router = APIRouter(prefix="/api/profiles", tags=["profiles"])
 
@@ -297,6 +300,20 @@ class RepoLinkPayload(BaseModel):
         self.repo_url = self.repo_url.strip()
         if self.platform == "github" and not self.repo_owner:
             raise HTTPException(400, "GitHub repo links require repo_owner")
+        if self.platform == "ado" and self.repo_owner:
+            # An ADO repo has no owner — it is addressed as
+            # {org}/{project}/_apis/git/repositories/{repo}. Dropped rather than
+            # rejected because the dashboard *hides* this input for non-GitHub
+            # platforms without clearing it, so a value left over from a GitHub
+            # link rides along on submit and the user cannot see the field to
+            # correct a 400. Keeping it produced readiness candidates addressed
+            # as "Owner/Repo", which ADO answers with a permanent 404.
+            log.warning(
+                "repo_link_owner_ignored_for_ado",
+                repo_name=self.repo_name,
+                reason="ado_repos_have_no_owner",
+            )
+            self.repo_owner = ""
         if self.platform == "ado" and not self.org_url:
             raise HTTPException(400, "ADO repo links require org_url")
         if self.platform == "ado" and self.org_url:
@@ -879,6 +896,17 @@ async def update_repo_link(
         )
         if platform == "ado" and body.org_url:
             body.org_url = _normalize_ado_org_url(body.org_url)
+        if platform == "ado" and body.repo_owner:
+            # Same reasoning as RepoLinkPayload.normalize — an ADO repo has no
+            # owner, and the edit form submits the hidden field it kept from a
+            # GitHub link. Clear it here too, or an edit re-poisons a link the
+            # create path just cleaned.
+            log.warning(
+                "repo_link_owner_ignored_for_ado",
+                repo_link_id=str(repo_link_id),
+                reason="ado_repos_have_no_owner",
+            )
+            body.repo_owner = ""
         if platform == "github" and auto_review_enabled and not paused and require_review_check:
             await _ensure_github_gate_for_repo(
                 connection_id=body.connection_id or uuid.UUID(str(current["connection_id"])),

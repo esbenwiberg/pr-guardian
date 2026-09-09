@@ -259,6 +259,28 @@ def _canonical_repo_key(
     return f"{normalized_platform}:{repo_owner.lower().strip()}/{repo_name.lower().strip()}"
 
 
+def platform_repo_identifier(platform: str, *, repo_owner: str = "", repo_name: str) -> str:
+    """The string a platform's REST API addresses a repository by.
+
+    GitHub routes are ``/repos/{owner}/{repo}``, so the owner belongs in the
+    identifier. **ADO routes are not** — a repo is reached as
+    ``{org}/{project}/_apis/git/repositories/{repo}``, where the project is
+    already carried separately on ``PlatformPR.project``. Pasting an owner in
+    anyway yields ``.../repositories/Owner/Repo/pullRequests/1``, which puts two
+    path segments in a one-segment slot: ADO has no such route and answers 404.
+
+    That 404 is indistinguishable from "PR deleted" or "credential cannot see
+    this project", which is why the real cause hid for so long — a readiness
+    candidate built this way fails forever against a perfectly healthy PAT.
+    ``_canonical_repo_key`` above already drops the owner for ADO; this keeps the
+    addressable identifier on the same convention instead of leaving one
+    platform-blind ``f"{owner}/{name}"`` to contradict it.
+    """
+    if platform.lower().strip() == "ado":
+        return repo_name
+    return f"{repo_owner}/{repo_name}" if repo_owner else repo_name
+
+
 def _profile_to_dict(row: ProfileRow) -> dict[str, Any]:
     return {
         "id": str(row.id),
@@ -1187,7 +1209,9 @@ async def create_readiness_candidate(
             project=link.project,
             repo_owner=link.repo_owner,
             repo_name=link.repo_name,
-            repo=f"{link.repo_owner}/{link.repo_name}" if link.repo_owner else link.repo_name,
+            repo=platform_repo_identifier(
+                link.platform, repo_owner=link.repo_owner, repo_name=link.repo_name
+            ),
             canonical_repo_key=link.canonical_repo_key,
             pr_id=pr_id,
             pr_url=pr_url,
