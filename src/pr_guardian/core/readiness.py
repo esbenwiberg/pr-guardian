@@ -435,8 +435,43 @@ async def evaluate_candidate(
         if link and link.get("connection_id")
         else None
     )
-    pr = pr or _candidate_pr(candidate)
-    adapter = adapter or await _adapter_for_candidate(candidate)
+    try:
+        pr = pr or _candidate_pr(candidate)
+        adapter = adapter or await _adapter_for_candidate(candidate)
+    except Exception as exc:
+        # Adapter construction runs *before* `evaluate_readiness`, which is the
+        # only thing that produces a decision — so a failure here used to escape
+        # to the reconciler's outer `except` with the candidate's state, reason
+        # and `updated_at` all untouched. That made it invisible to the
+        # access-error cooldown, which keys on `updated_at`: a single Connection
+        # that cannot build an adapter (a legacy PAT row on the GitHub App-only
+        # path, say) re-raised on *every* tick forever, while candidates that
+        # merely failed a live API call correctly backed off. Recording it as an
+        # ordinary recoverable error puts it on the same clock.
+        #
+        # No `exc_info` — see the comment on the per-candidate error paths below.
+        log.warning(
+            "readiness_adapter_unavailable",
+            candidate_id=str(candidate_id),
+            connection_id=str(candidate.get("connection_id") or ""),
+            error=repr(exc),
+            error_type=type(exc).__name__,
+        )
+        await storage.record_candidate_transition(
+            candidate_id,
+            to_state="error",
+            source=source,
+            actor=str(candidate.get("platform") or ""),
+            reason="platform_access_error",
+            readiness_snapshot={
+                **(candidate.get("readiness_snapshot") or {}),
+                "adapter_error": {"error": repr(exc), "error_type": type(exc).__name__},
+            },
+        )
+        updated = await storage.get_readiness_candidate_by_id(candidate_id)
+        if updated is None:
+            raise LookupError(f"Readiness candidate vanished mid-error: {candidate_id}") from exc
+        return updated
     assert pr is not None
     assert adapter is not None
 
