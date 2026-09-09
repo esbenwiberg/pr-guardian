@@ -44,6 +44,19 @@ def _configure_logging() -> None:
       which is noise in a log sink and actively breaks querying: the escape codes
       around a token defeat Log Analytics term tokenisation, so ``Log_s has
       'pr_sync_start'`` silently matches nothing.
+    * **Plain tracebacks.** ``ConsoleRenderer``'s default exception formatter is
+      ``RichTracebackFormatter(show_locals=True, max_frames=100)``, and the
+      ``colors`` flag above does not reach it. That renders one exception as a
+      ~380-line box quoting every frame's locals — here the full readiness
+      snapshot, profile settings and pattern lists. A recoverable platform error
+      on the reconciler's per-candidate path turned that into 19.8 GB/day of
+      Container Apps console logs (437 GB and ~kr 7.2k over a month, 97.7% of it
+      traceback boxes). Log Analytics bills ~487 bytes per *row* against a
+      ~78-byte line, so line count is the cost driver, not payload. Structured
+      ``error``/``error_type``/``status`` keys on the event carry what diagnosis
+      needs; ``plain_traceback`` keeps the frames without the locals blowup.
+      Set this here rather than trusting call sites — the failure mode is a
+      single ``exc_info=`` on a hot path, and this makes that survivable.
     """
     level_name = os.environ.get("GUARDIAN_LOG_LEVEL", "INFO").upper()
     level = getattr(logging, level_name, logging.INFO)
@@ -51,7 +64,10 @@ def _configure_logging() -> None:
         processors=[
             structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.add_log_level,
-            structlog.dev.ConsoleRenderer(colors=sys.stderr.isatty()),
+            structlog.dev.ConsoleRenderer(
+                colors=sys.stderr.isatty(),
+                exception_formatter=structlog.dev.plain_traceback,
+            ),
         ],
         wrapper_class=structlog.make_filtering_bound_logger(level),
     )

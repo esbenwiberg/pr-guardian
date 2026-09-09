@@ -65,6 +65,16 @@ DEFAULT_REVIEWING_STALE_MINUTES = 15
 DEFAULT_REVIEWED_SYNC_WINDOW_MINUTES = 360
 # Cap on how much append-only candidate history a single read pulls back.
 DEFAULT_TRANSITION_HISTORY_LIMIT = 200
+# Minimum gap between reconciler retries of a *credential-shaped* readiness
+# failure (401/403/404 from the platform, or a failed status write). These never
+# clear within a tick: the fix is always a human repairing the Connection, so
+# retrying each candidate every 30s only burns platform API calls and log lines.
+# A flat backoff rather than a terminal state, because the triggering status is
+# ambiguous — ADO answers 404 for a project the credential cannot see, so a 404
+# does not prove the PR is gone and must not strand the candidate. Slowing the
+# retry keeps recovery automatic (repair the Connection and the next sweep picks
+# it up) while cutting the retry rate ~60x.
+DEFAULT_ACCESS_ERROR_RETRY_MINUTES = 30
 
 add_excluded_repo = _exclusions.add_excluded_repo
 add_exclusion_rule = _exclusions.add_exclusion_rule
@@ -1276,7 +1286,10 @@ async def list_recoverable_readiness_candidates(
     limit: int = 100,
     reviewing_stale_minutes: int = DEFAULT_REVIEWING_STALE_MINUTES,
     reviewed_sync_window_minutes: int = DEFAULT_REVIEWED_SYNC_WINDOW_MINUTES,
+    access_error_retry_minutes: int = DEFAULT_ACCESS_ERROR_RETRY_MINUTES,
 ) -> list[dict[str, Any]]:
+    # Reasons that can plausibly clear on the next tick: a quiet period expiring,
+    # checks reporting, a transient 5xx. Retried at the loop's own cadence.
     recoverable_reasons = (
         "",
         "quiet_period",
@@ -1286,12 +1299,18 @@ async def list_recoverable_readiness_candidates(
         "checks_timeout",
         "archmap_wait",
         "platform_error",
+        "review_worker_stale",
+    )
+    # Reasons that need a human to fix a credential. Still recoverable — never
+    # terminal — but rate-limited, so one broken Connection cannot pin the whole
+    # `limit` batch every tick. See DEFAULT_ACCESS_ERROR_RETRY_MINUTES.
+    access_error_reasons = (
         "platform_access_error",
         "status_write_failed",
-        "review_worker_stale",
     )
     stale_cutoff = _now() - timedelta(minutes=reviewing_stale_minutes)
     reviewed_window_cutoff = _now() - timedelta(minutes=reviewed_sync_window_minutes)
+    access_retry_cutoff = _now() - timedelta(minutes=access_error_retry_minutes)
     async with async_session() as session:
         rows = (
             await session.scalars(
@@ -1300,6 +1319,13 @@ async def list_recoverable_readiness_candidates(
                     (
                         ReadinessCandidateRow.state.in_(("waiting", "blocked", "error"))
                         & ReadinessCandidateRow.reason.in_(recoverable_reasons)
+                    )
+                    | (
+                        # `updated_at` is bumped by every evaluation, so this is a
+                        # per-candidate cooldown since its last attempt.
+                        ReadinessCandidateRow.state.in_(("waiting", "blocked", "error"))
+                        & ReadinessCandidateRow.reason.in_(access_error_reasons)
+                        & (ReadinessCandidateRow.updated_at < access_retry_cutoff)
                     )
                     | (
                         (ReadinessCandidateRow.state == "reviewing")
