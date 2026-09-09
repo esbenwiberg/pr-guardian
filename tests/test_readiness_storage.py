@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import timedelta
 from unittest.mock import patch
 
 import uuid as _uuid
@@ -11,7 +12,9 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from pr_guardian.models.pr import Platform, PlatformPR
+from pr_guardian.persistence.models import ReadinessCandidateRow
 from pr_guardian.persistence.storage import (
+    _now as _storage_now,
     create_connection,
     create_profile,
     create_readiness_candidate,
@@ -788,5 +791,70 @@ async def test_list_candidate_transitions_returns_newest_within_limit():
             assert [t["reason"] for t in await list_candidate_transitions(candidate_id)] == reasons
             bounded = await list_candidate_transitions(candidate_id, limit=2)
             assert [t["reason"] for t in bounded] == reasons[-2:]
+    finally:
+        await engine.dispose()
+
+
+async def test_access_error_candidates_are_rate_limited_not_stranded():
+    """Credential-shaped failures back off between retries but stay recoverable.
+
+    A persistent 401/403/404 does not clear within a tick — the fix is a human
+    repairing the Connection — yet ``platform_access_error`` was retried at the
+    reconciler's own 30s cadence with no cooldown. One broken credential pinned
+    the whole ``limit`` batch on every tick, which is what turned a recoverable
+    platform error into 19.8 GB/day of log ingest.
+
+    Both halves matter: a fresh attempt must be held back, and a cold one must
+    come back. A terminal state would strand the candidate, because ADO answers
+    404 for a project the credential cannot see — the status never proves the PR
+    is gone.
+    """
+    engine, factory = await _make_session_factory()
+    try:
+        with patch("pr_guardian.persistence.storage.async_session", lambda: factory()):
+            link = await _link_for_candidates()
+            fresh = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]), pr_id="20", head_sha="sha20"
+            )
+            cold = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]), pr_id="21", head_sha="sha21"
+            )
+            transient = await create_readiness_candidate(
+                repo_link_id=uuid.UUID(link["id"]), pr_id="22", head_sha="sha22"
+            )
+            for candidate, reason in (
+                (fresh, "platform_access_error"),
+                (cold, "platform_access_error"),
+                # A transient platform blip is *not* credential-shaped and must
+                # keep retrying at full cadence.
+                (transient, "platform_error"),
+            ):
+                await record_candidate_transition(
+                    uuid.UUID(candidate["id"]),
+                    to_state="error",
+                    source="fixture",
+                    reason=reason,
+                    readiness_snapshot={"error_status": 404},
+                )
+
+            # Age only the `cold` candidate past the cooldown. Every evaluation
+            # stamps `updated_at`, so it is the per-candidate attempt clock.
+            async with factory() as session:
+                row = await session.get(ReadinessCandidateRow, uuid.UUID(cold["id"]))
+                row.updated_at = _storage_now() - timedelta(minutes=45)
+                await session.commit()
+
+            recoverable = await list_recoverable_readiness_candidates(limit=100)
+            ids = {c["id"] for c in recoverable}
+            assert cold["id"] in ids, "a cooled-off access error must retry"
+            assert transient["id"] in ids, "a transient platform error must not back off"
+            assert fresh["id"] not in ids, "a just-attempted access error must be held back"
+
+            # Nothing is terminal: widen the window and the fresh one returns,
+            # so repairing the Connection always resumes the candidate.
+            widened = await list_recoverable_readiness_candidates(
+                limit=100, access_error_retry_minutes=0
+            )
+            assert fresh["id"] in {c["id"] for c in widened}
     finally:
         await engine.dispose()

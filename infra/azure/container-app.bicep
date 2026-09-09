@@ -36,6 +36,17 @@ resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
       name: 'PerGB2018'
     }
     retentionInDays: 30
+    // Hard ceiling on ingest. Uncapped (`dailyQuotaGb: -1`, the default) a
+    // single hot log path is billed without limit: a per-candidate `exc_info`
+    // on the readiness reconciler rendered ~380-line Rich tracebacks and took
+    // this workspace from 0.16 to 19.8 GB/day, 437 GB and ~kr 7.2k in a month,
+    // with nothing to stop it. Steady state after that fix is well under
+    // 0.5 GB/day, so 2 GB is ~4x headroom and still turns a regression into a
+    // dropped-logs alert instead of an invoice. Raise it deliberately, not
+    // reflexively — hitting the cap is the signal something is looping.
+    workspaceCapping: {
+      dailyQuotaGb: 2
+    }
   }
 }
 

@@ -827,6 +827,14 @@ async def evaluate_readiness(
         # str(exc) is empty for many exception types (bare raises, some httpx
         # transport errors). Record the repr and type so the real cause is
         # recoverable from the snapshot and logs instead of an empty string.
+        #
+        # Deliberately no `exc_info` — same reasoning as the reconciler's outer
+        # `except` (see readiness_reconciler.py). This is a per-candidate path on
+        # a 30s loop, so one broken credential fires it up to `limit` times a
+        # tick; rendering a traceback with locals each time cost 19.8 GB/day of
+        # log ingest. repr + type + status is what diagnosing a 401/403/404
+        # actually needs, and `main.py` now caps traceback rendering globally so
+        # a future `exc_info=` here degrades instead of detonating.
         snapshot["error"] = repr(exc)
         snapshot["error_type"] = type(exc).__name__
         if status is not None:
@@ -841,7 +849,6 @@ async def evaluate_readiness(
             reason=reason,
             error=repr(exc),
             error_type=type(exc).__name__,
-            exc_info=exc,
         )
         return ReadinessDecision("error", reason, snapshot)
 
@@ -882,7 +889,6 @@ async def evaluate_readiness(
                     status=status,
                     error=repr(exc),
                     error_type=type(exc).__name__,
-                    exc_info=exc,
                 )
                 return ReadinessDecision("error", "platform_access_error", snapshot)
             # Transient blip (5xx/429/timeout/network): Archmap is best-effort, so
