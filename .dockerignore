@@ -9,5 +9,8 @@ __pycache__
 .ruff_cache
 .mypy_cache
 infra/
+.venv/
+node_modules/
+prototypes/
 .env
 *.egg-info
